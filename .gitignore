@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+.venv/
+venv/
+.env
+*.log
+*:Zone.Identifier
+*:sec.endpointdlp

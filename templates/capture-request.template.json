@@ -1,0 +1,31 @@
+{
+  "request_id": "",
+  "timestamp": "YYYY-MM-DDTHH:MM:SSZ",
+  "entry": "A1",
+  "entry_resolution_mode": "digest_entry|direct_identifier",
+  "request_depth": "full_360_capture_brief",
+  "status": "logged|PARTIAL_CAPTURE_RESEARCH|360_DEEP_RESEARCH_COMPLETE|FAILED",
+  "resolved": {
+    "report_entry_id": "A1",
+    "digest_date": "YYYY-MM-DD",
+    "opportunity_id": "",
+    "canonical_record_id": "",
+    "canonical_record_id_type": "notice_id|opportunity_id|forecast_id|subnet_id|other",
+    "notice_id": "",
+    "title": "",
+    "buyer": "",
+    "source_id": "",
+    "source_name": "",
+    "source_tier": 1,
+    "url": ""
+  },
+  "artifacts": {
+    "request_log_path": "procurement/capture-requests.jsonl",
+    "digest_entry_map_path": "procurement/digest-entry-map/YYYY-MM-DD.json",
+    "request_capture_brief_path": "procurement/capture-briefs/YYYY-MM-DD/A1-opportunityid-requestid.md",
+    "request_capture_evidence_path": "procurement/capture-evidence/YYYY-MM-DD/A1-opportunityid-requestid.json",
+    "latest_alias_capture_brief_path": "procurement/capture-briefs/YYYY-MM-DD/A1-opportunityid.md",
+    "latest_alias_capture_evidence_path": "procurement/capture-evidence/YYYY-MM-DD/A1-opportunityid.json"
+  },
+  "notes": []
+}

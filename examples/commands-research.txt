@@ -1,0 +1,6 @@
+/pwin-ai-opportunities research A1
+/pwin-ai-opportunities capture deep dive on W2
+/pwin-ai-opportunities research 0231571d291a47c7a80b415452d7bf24
+
+Installed script path used by the skill:
+$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/capture/run_capture_research.py

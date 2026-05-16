@@ -1,0 +1,49 @@
+{
+  "schema": "pwin-ai-opportunities.manifest/v1",
+  "name": "pwin-ai-opportunities",
+  "version": "1.5.2",
+  "description": "pWin.ai Opportunities with installed-skill script paths, live SAM scan retrieval, vendor-aware digests, and stricter stable-ID validation",
+  "requiredArtifacts": [
+    {
+      "name": "opportunities",
+      "path": "procurement/opportunities/{date}.json",
+      "required": true,
+      "description": "Normalized opportunity records with source metadata"
+    },
+    {
+      "name": "explanations",
+      "path": "procurement/explanations/{date}.json",
+      "required": true,
+      "description": "AI-generated match explanations and scoring rationale"
+    },
+    {
+      "name": "report",
+      "path": "procurement/reports/{date}.md",
+      "required": true,
+      "description": "Full daily report with all opportunities and analysis",
+      "recoverable": true,
+      "recoverFrom": ["opportunities", "explanations"]
+    },
+    {
+      "name": "digest",
+      "path": "procurement/digests/{date}.md",
+      "required": true,
+      "description": "Concise announced digest for delivery",
+      "recoverable": true,
+      "recoverFrom": ["opportunities", "explanations", "report"]
+    },
+    {
+      "name": "nearMisses",
+      "path": "procurement/near-misses/{date}.md",
+      "required": true,
+      "description": "Near-miss analysis for learning",
+      "recoverable": true,
+      "recoverFrom": ["opportunities", "explanations"]
+    }
+  ],
+  "validation": {
+    "command": "validate-artifacts",
+    "autoRecover": true,
+    "maxRecoveryAttempts": 1
+  }
+}

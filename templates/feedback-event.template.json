@@ -1,0 +1,51 @@
+{
+  "timestamp": "YYYY-MM-DDTHH:MM:SSZ",
+  "digest_date": "YYYY-MM-DD",
+  "digest_path": "procurement/digests/YYYY-MM-DD.md",
+  "resolved_from_latest_digest": true,
+  "report_entry_id": "A1",
+  "report_bucket": "action_now|worth_a_look|near_miss|suppressed",
+  "user_id": "",
+  "user_utterance": "",
+  "feedback": "like|dislike|more_like_this|less_like_this|watch|pursue|snooze|hard_exclude|expand",
+  "reward": 1,
+  "free_text": "",
+  "reason_codes": [],
+  "resolved_record": {
+    "opportunity_id": "",
+    "source_id": "",
+    "source_name": "",
+    "source_tier": 1,
+    "title": "",
+    "url": "",
+    "buyer": "",
+    "opportunity_class": "",
+    "notice_type": "",
+    "posted_date": "",
+    "due_date": "",
+    "naics": [],
+    "set_aside": "",
+    "match_score": 0,
+    "confidence_score": 0,
+    "screening_status": "",
+    "bucket": ""
+  },
+  "resolved_entities": {
+    "matched_keywords": [],
+    "matched_buyers": [],
+    "matched_naics": [],
+    "matched_opportunity_classes": [],
+    "matched_award_size_band": [],
+    "matched_location_preferences": [],
+    "matched_teaming_or_vehicle_signals": []
+  },
+  "effect": {
+    "hard_filters_added": [],
+    "hard_filters_removed": [],
+    "soft_preferences_upweighted": [],
+    "soft_preferences_downweighted": [],
+    "memory_updates": [],
+    "preference_file_updates": [],
+    "notes": []
+  }
+}

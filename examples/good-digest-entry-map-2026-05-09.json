@@ -1,0 +1,38 @@
+{
+  "digest_date": "2026-05-09",
+  "generated_at": "2026-05-09T09:00:00Z",
+  "run_status": "OK",
+  "vendor_name": "Applied Information Sciences",
+  "digest_path": "procurement/digests/2026-05-09.md",
+  "report_path": "procurement/reports/2026-05-09.md",
+  "opportunities_path": "procurement/opportunities/2026-05-09.json",
+  "explanations_path": "procurement/explanations/2026-05-09.json",
+  "entries": [
+    {
+      "entry_id": "A1",
+      "bucket": "action_now",
+      "source_id": "sam_contract_opportunities",
+      "source_name": "SAM.gov",
+      "source_tier": 1,
+      "title": "ORRISK Organizational Risk Analytics and Assessment Support",
+      "url": "https://sam.gov/opp/0231571d291a47c7a80b415452d7bf24/view",
+      "buyer": "CDC",
+      "due_date": "2026-06-14",
+      "match_score": 82,
+      "confidence_score": 68,
+      "opportunity_id": "0231571d291a47c7a80b415452d7bf24",
+      "canonical_record_id": "0231571d291a47c7a80b415452d7bf24",
+      "canonical_record_id_type": "notice_id",
+      "notice_id": "0231571d291a47c7a80b415452d7bf24",
+      "notice_type": "solicitation",
+      "opportunity_class": "contracts"
+    }
+  ],
+  "counts": {
+    "action_now": 1,
+    "worth_a_look": 1,
+    "near_miss": 1,
+    "suppressed": 0
+  }
+}
+

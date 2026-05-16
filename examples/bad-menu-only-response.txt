@@ -1,0 +1,7 @@
+I can proceed two ways:
+
+1. Retry the API.
+2. Use browser mode.
+
+Which do you want next?
+

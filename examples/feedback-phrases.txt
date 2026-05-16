@@ -1,0 +1,11 @@
+# Feedback examples
+
+like A1
+dislike W2 because too small
+more like A1
+less like A3
+hide N1
+wrong buyer for A2
+right work, wrong vehicle for W1
+never show grants
+prefer subcontract opportunities

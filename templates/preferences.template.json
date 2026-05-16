@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "last_updated": null,
+  "hard_filters": {
+    "exclude_keywords": [],
+    "exclude_buyers": [],
+    "exclude_states": [],
+    "exclude_opportunity_classes": [],
+    "exclude_set_asides": [],
+    "exclude_naics": [],
+    "exclude_contract_types": [],
+    "exclude_non_actionable_notices": true
+  },
+  "soft_preferences": {
+    "positive_keywords": [],
+    "negative_keywords": [],
+    "preferred_buyers": [],
+    "preferred_states": [],
+    "preferred_set_asides": [],
+    "preferred_opportunity_classes": [],
+    "preferred_naics": [],
+    "preferred_contract_types": []
+  },
+  "scoring_weights": {
+    "capability_fit": 35,
+    "taxonomy_fit": 20,
+    "buyer_fit": 10,
+    "geography_fit": 10,
+    "award_size_fit": 10,
+    "set_aside_fit": 5,
+    "timing_fit": 5,
+    "relationship_fit": 5
+  },
+  "confidence_thresholds": {
+    "action_now_min": 75,
+    "worth_a_look_min": 60,
+    "near_miss_min": 45,
+    "quarantine_below": 45
+  },
+  "time_horizon": {
+    "mode": "due_in_days_range",
+    "min_days_from_today": 30,
+    "max_days_from_today": 45,
+    "only_open_opportunities": true,
+    "single_value_interpretation": "0_to_n",
+    "last_override_source": null,
+    "strict_due_date_filter_before_bucketing": true,
+    "allow_missing_due_date_on_shortlist": false
+  },
+  "screening": {
+    "reject_notice_categories_from_shortlist": [
+      "award_notice",
+      "contract_award",
+      "justification_and_approval",
+      "j_and_a_posting",
+      "fair_opportunity_exception",
+      "sole_source_notice",
+      "notice_of_intent_to_sole_source",
+      "informational_update",
+      "update_only_notice",
+      "sources_sought_only",
+      "rfi_only",
+      "industry_day_only",
+      "vendor_library_notice"
+    ],
+    "allow_watchlist_for_non_actionable_notices": false
+  },
+  "delivery": {
+    "daily_digest_enabled": true,
+    "timezone": "America/New_York",
+    "schedule_local_time": "09:00",
+    "report_destination": "chat",
+    "full_report_path_pattern": "procurement/reports/YYYY-MM-DD.md",
+    "digest_path_pattern": "procurement/digests/YYYY-MM-DD.md",
+    "max_action_now": 5,
+    "max_worth_a_look": 5,
+    "max_near_misses": 3
+  },
+  "learning": {
+    "policy": "reinforcement_learning_style_explicit_feedback",
+    "soft_promotion_threshold": 3,
+    "decay_rate_monthly": 0.05,
+    "last_learning_update": null,
+    "exploration_near_miss_quota": 1,
+    "reward_values": {
+      "pursue": 2,
+      "like": 1,
+      "watch": 0,
+      "dislike": -1,
+      "hard_exclude": -3
+    },
+    "notes": []
+  },
+  "provenance": {
+    "seed_type": null,
+    "notes": []
+  }
+}

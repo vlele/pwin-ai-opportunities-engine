@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "last_updated": null,
+  "bootstrap": {
+    "method": null,
+    "inputs": {
+      "company_url": "",
+      "user_supplied_naics": [],
+      "plain_language_summary": "",
+      "other_inputs": []
+    },
+    "bootstrapped_on": null,
+    "status": null
+  },
+  "company": {
+    "name": "",
+    "website": "",
+    "entity_type": "",
+    "headquarters": "",
+    "summary": ""
+  },
+  "core_competencies": [],
+  "past_performance_highlights": [],
+  "opportunity_classes": [
+    {
+      "name": "contracts",
+      "enabled": true
+    },
+    {
+      "name": "subcontracts",
+      "enabled": true
+    },
+    {
+      "name": "grants",
+      "enabled": false
+    },
+    {
+      "name": "forecasts",
+      "enabled": true
+    }
+  ],
+  "naics": {
+    "confirmed": [],
+    "candidates": [],
+    "rejected": []
+  },
+  "other_taxonomy_tags": {
+    "nigp": [],
+    "psc": [],
+    "class_item": [],
+    "keywords": [],
+    "negative_keywords": []
+  },
+  "buyers": {
+    "preferred": [],
+    "rejected": [],
+    "notes": []
+  },
+  "geography": {
+    "preferred_states": [],
+    "excluded_states": [],
+    "place_of_performance": [],
+    "remote_ok": true
+  },
+  "commercial_constraints": {
+    "min_award_value": null,
+    "max_award_value": null,
+    "preferred_award_band": {
+      "min": null,
+      "max": null
+    },
+    "teaming_preferences": [],
+    "prime_or_sub": [],
+    "certifications": [],
+    "set_aside_programs": []
+  },
+  "contract_vehicles": [],
+  "provenance": {
+    "facts": []
+  },
+  "notes": []
+}

@@ -1,0 +1,8 @@
+Capture research for A1 is complete.
+
+Status: 360_DEEP_RESEARCH_COMPLETE
+Brief: procurement/capture-briefs/2026-05-09/A1-0231571d291a47c7a80b415452d7bf24-req-20260509a1.md
+Evidence: procurement/capture-evidence/2026-05-09/A1-0231571d291a47c7a80b415452d7bf24-req-20260509a1.json
+
+The brief now includes a full Executive Brief, Objective Matrix, Stakeholder Map, Budget/Funding analysis, Competitive Landscape, Recommended Next Research Moves, and Evidence Annex tied to current request-specific artifacts.
+
