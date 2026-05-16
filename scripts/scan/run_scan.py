@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import date, datetime
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,43 @@ from scan.render_digest import render_digest_and_report
 from scan.sam_hydrate import hydrate_sam_notice
 from scan.sam_search import search_sam_opportunities
 from scan.usaspending_enrich import post_award_search
+
+
+NON_ACTIONABLE_NOTICE_CATEGORIES = {
+    "award_notice",
+    "contract_award",
+    "justification_and_approval",
+    "j_and_a_posting",
+    "fair_opportunity_exception",
+    "sole_source_notice",
+    "notice_of_intent_to_sole_source",
+    "informational_update",
+    "update_only_notice",
+    "sources_sought_only",
+    "rfi_only",
+    "industry_day_only",
+    "vendor_library_notice",
+    "draft_solicitation",
+    "cancelled_notice",
+}
+
+NOTICE_CATEGORY_LABELS = {
+    "award_notice": "award notice",
+    "contract_award": "contract award",
+    "justification_and_approval": "justification and approval posting",
+    "j_and_a_posting": "J&A posting",
+    "fair_opportunity_exception": "fair opportunity exception",
+    "sole_source_notice": "sole-source notice",
+    "notice_of_intent_to_sole_source": "intent-to-sole-source notice",
+    "informational_update": "informational update",
+    "update_only_notice": "update-only notice",
+    "sources_sought_only": "sources sought notice",
+    "rfi_only": "request for information",
+    "industry_day_only": "industry day notice",
+    "vendor_library_notice": "vendor library notice",
+    "draft_solicitation": "draft solicitation",
+    "cancelled_notice": "cancelled notice",
+}
 
 
 def parse_horizon(raw: str) -> tuple[int, int]:
@@ -120,8 +158,152 @@ def _in_horizon(due_date: date | None, today: date, min_days: int, max_days: int
     return min_days <= delta <= max_days
 
 
+def _normalized_text(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _keyword_matches(keyword: str, normalized_text: str, token_set: set[str]) -> bool:
+    normalized_keyword = _normalized_text(keyword)
+    if not normalized_keyword:
+        return False
+    pieces = normalized_keyword.split()
+    if len(pieces) == 1:
+        return pieces[0] in token_set
+    return f" {normalized_keyword} " in f" {normalized_text} "
+
+
+def _preferred_buyer_matches(preferred_buyer: str, buyer_text: str) -> bool:
+    normalized_preference = _normalized_text(preferred_buyer)
+    if not normalized_preference:
+        return False
+
+    direct_aliases = {
+        "defense agencies": ("dept of defense", "department of defense", "army", "navy", "air force", "space force", "defense"),
+        "federal civilian agencies": ("department", "agency", "administration", "bureau"),
+        "state local it modernization buyers": ("state", "county", "city", "municipal"),
+    }
+    aliases = direct_aliases.get(normalized_preference)
+    if aliases:
+        return any(alias in buyer_text for alias in aliases)
+    return normalized_preference in buyer_text
+
+
+def _notice_categories(record: dict[str, Any], hydrated_text: str | None) -> set[str]:
+    title_text = _normalized_text(record.get("title", ""))
+    summary_text = _normalized_text(hydrated_text or record.get("summary", ""))
+    notice_type = _normalized_text(record.get("notice_type", ""))
+    combined = " ".join(part for part in (title_text, summary_text, notice_type) if part)
+    categories: set[str] = set()
+
+    if "award notice" in combined:
+        categories.add("award_notice")
+    if "contract award" in combined:
+        categories.add("contract_award")
+    if "justification and approval" in combined or " j a " in f" {combined} ":
+        categories.update({"justification_and_approval", "j_and_a_posting"})
+    if "fair opportunity exception" in combined:
+        categories.add("fair_opportunity_exception")
+    if "sole source" in combined:
+        categories.add("sole_source_notice")
+    if "intent to sole source" in combined or "notice of intent to sole source" in combined:
+        categories.add("notice_of_intent_to_sole_source")
+    if "sources sought" in combined:
+        categories.add("sources_sought_only")
+    if "request for information" in combined or re.search(r"(?<![a-z0-9])rfi(?![a-z0-9])", combined):
+        categories.add("rfi_only")
+    if "industry day" in combined:
+        categories.add("industry_day_only")
+    if "vendor library" in combined:
+        categories.add("vendor_library_notice")
+    if "draft solicitation" in combined or title_text.startswith("draft ") or " this is a draft " in f" {combined} ":
+        categories.add("draft_solicitation")
+    if "cancelled" in combined or "canceled" in combined:
+        categories.add("cancelled_notice")
+    if (
+        "update to" in combined
+        or "please continue to monitor" in combined
+        or "no definitive date" in combined
+        or "has been delayed" in combined
+    ):
+        categories.add("informational_update")
+    if "update to" in title_text or title_text.startswith("update "):
+        categories.add("update_only_notice")
+
+    return categories
+
+
+def _suppression_details(preferences: dict[str, Any], categories: set[str]) -> tuple[str | None, list[str]]:
+    screening = preferences.get("screening", {}) if isinstance(preferences.get("screening"), dict) else {}
+    hard_filters = preferences.get("hard_filters", {}) if isinstance(preferences.get("hard_filters"), dict) else {}
+    reject_categories = {
+        str(item).strip()
+        for item in screening.get("reject_notice_categories_from_shortlist", [])
+        if str(item).strip()
+    }
+    matching_rejects = sorted(categories & reject_categories)
+    suppressed_categories: list[str] = []
+    if matching_rejects:
+        suppressed_categories.extend(matching_rejects)
+    if hard_filters.get("exclude_non_actionable_notices", False):
+        for category in sorted(categories):
+            if category in NON_ACTIONABLE_NOTICE_CATEGORIES and category not in suppressed_categories:
+                suppressed_categories.append(category)
+
+    if not suppressed_categories:
+        return None, []
+
+    labels = [NOTICE_CATEGORY_LABELS.get(category, category.replace("_", " ")) for category in suppressed_categories[:3]]
+    if len(labels) == 1:
+        detail = labels[0]
+    elif len(labels) == 2:
+        detail = f"{labels[0]} and {labels[1]}"
+    else:
+        detail = f"{', '.join(labels[:-1])}, and {labels[-1]}"
+    return f"Suppressed by preferences: notice appears non-actionable ({detail}).", suppressed_categories
+
+
+def _bucket_for_score(match_score: int, preferences: dict[str, Any]) -> str:
+    thresholds = preferences.get("confidence_thresholds", {}) if isinstance(preferences.get("confidence_thresholds"), dict) else {}
+    action_now_min = int(thresholds.get("action_now_min", 75) or 75)
+    worth_a_look_min = int(thresholds.get("worth_a_look_min", 60) or 60)
+    near_miss_min = int(thresholds.get("near_miss_min", 45) or 45)
+    if match_score >= action_now_min:
+        return "action_now"
+    if match_score >= worth_a_look_min:
+        return "worth_a_look"
+    if match_score >= near_miss_min:
+        return "near_miss"
+    return "suppressed"
+
+
+def _has_hard_eligibility_gate(record: dict[str, Any], hydrated_text: str | None) -> bool:
+    combined = _normalized_text(
+        f"{record.get('title', '')} {record.get('summary', '')} {hydrated_text or ''}"
+    )
+    gate_markers = (
+        "must be registered as",
+        "must hold",
+        "holders only",
+        "only contract holders",
+        "only available to",
+        "eligibility for award",
+    )
+    vehicle_markers = (
+        "contract holder",
+        "contract vehicle",
+        "gwac",
+        "idiq",
+        "bpa",
+        "schedule holder",
+        "blanket purchase agreement",
+    )
+    return any(marker in combined for marker in gate_markers) and any(marker in combined for marker in vehicle_markers)
+
+
 def _score_record(record: dict[str, Any], keywords: list[str], profile: dict[str, Any], hydrated_text: str | None) -> tuple[int, int, list[str], str]:
-    title_text = f"{record.get('title', '')} {record.get('summary', '')} {hydrated_text or ''}".lower()
+    title_text = f"{record.get('title', '')} {record.get('summary', '')} {hydrated_text or ''}"
+    normalized_text = _normalized_text(title_text)
+    token_set = set(normalized_text.split())
     reasons: list[str] = []
     match_score = 35
     confidence = 50
@@ -130,7 +312,7 @@ def _score_record(record: dict[str, Any], keywords: list[str], profile: dict[str
         match_score += 20
         reasons.append("Confirmed/candidate NAICS match from the vendor profile.")
 
-    keyword_hits = [keyword for keyword in keywords if keyword and keyword in title_text]
+    keyword_hits = [keyword for keyword in keywords if _keyword_matches(keyword, normalized_text, token_set)]
     if keyword_hits:
         match_score += min(25, 5 * len(keyword_hits))
         reasons.append(f"Capability/keyword overlap: {', '.join(keyword_hits[:4])}.")
@@ -140,8 +322,8 @@ def _score_record(record: dict[str, Any], keywords: list[str], profile: dict[str
     for item in buyers.get("preferred", []):
         if isinstance(item, str) and item.strip():
             preferred_buyers.append(item.strip().lower())
-    buyer_text = str(record.get("buyer", "")).lower()
-    if preferred_buyers and any(item in buyer_text for item in preferred_buyers):
+    buyer_text = _normalized_text(record.get("buyer", ""))
+    if preferred_buyers and any(_preferred_buyer_matches(item, buyer_text) for item in preferred_buyers):
         match_score += 10
         reasons.append("Preferred buyer/agency alignment from the vendor profile.")
 
@@ -154,8 +336,14 @@ def _score_record(record: dict[str, Any], keywords: list[str], profile: dict[str
     else:
         confidence -= 10
 
+    if _has_hard_eligibility_gate(record, hydrated_text):
+        match_score -= 15
+        caveat = "Notice text includes a hard vehicle or holder eligibility gate; confirm you can bid before treating this as active pipeline."
+        reasons.append("Hard eligibility gate detected in notice text.")
+    else:
+        caveat = "Review full notice attachments and confirm scope fit."
+
     due_date = _parse_any_date(record.get("due_date"))
-    caveat = "Review full notice attachments and confirm scope fit."
     if due_date is None:
         confidence -= 10
         caveat = "Missing usable due date in source response."
@@ -229,6 +417,7 @@ def main() -> int:
     registry_path, registry, refreshed, refresh_reasons = refresh_runtime_registry(bundle_root, workspace)
     preferences_path = ensure_preferences(bundle_root, workspace, args.horizon)
     opportunities_path, explanations_path = ensure_today_artifacts(workspace, date_str)
+    preferences = load_json(preferences_path, default={})
     vendor_profile = load_json(workspace / "procurement" / "vendor-profile.json", default={})
     vendor_name = _vendor_name(vendor_profile)
     keywords = _vendor_keywords(vendor_profile)
@@ -272,13 +461,22 @@ def main() -> int:
                 record["raw_match_evidence"]["full_desc_loaded"] = True
 
             match_score, confidence_score, reasons, caveat = _score_record(record, keywords, vendor_profile, hydrated_text)
+            notice_categories = _notice_categories(record, hydrated_text)
+            suppression_note, suppressed_categories = _suppression_details(preferences, notice_categories)
             record["match_score"] = match_score
             record["confidence_score"] = confidence_score
-            record["bucket"] = (
-                "action_now" if match_score >= 75 else "worth_a_look" if match_score >= 60 else "near_miss" if match_score >= 45 else "suppressed"
-            )
-            record["explanation_reasons"] = reasons
-            record["main_caveat"] = caveat
+            record["bucket"] = "suppressed" if suppression_note else _bucket_for_score(match_score, preferences)
+            if notice_categories:
+                record["screening_categories"] = sorted(notice_categories)
+            if suppression_note:
+                record["screening_status"] = "suppressed"
+                record["explanation_reasons"] = [suppression_note, *reasons][:4]
+                record["main_caveat"] = suppression_note
+                if suppressed_categories:
+                    record["suppression_categories"] = suppressed_categories
+            else:
+                record["explanation_reasons"] = reasons
+                record["main_caveat"] = caveat
             candidate_records.append(record)
 
         records.extend(candidate_records)
