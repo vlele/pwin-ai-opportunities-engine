@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import html
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -17,6 +19,9 @@ from capture.fetch_public_context import fetch_url_excerpt
 from capture.render_capture_brief import render_capture_brief
 from capture.resolve_entry import resolve_entry
 from capture.usaspending_enrich import enrich_from_usaspending
+
+TAG_RE = re.compile(r"<[^>]+>")
+SPACE_RE = re.compile(r"\s+")
 
 
 def request_id_for(entry_value: str) -> str:
@@ -41,6 +46,48 @@ def build_request_paths(workspace: Path, digest_date: str, display_entry: str, c
         "latest_alias_capture_brief_path": alias_brief.as_posix(),
         "latest_alias_capture_evidence_path": alias_evidence.as_posix(),
     }
+
+
+def _clean_excerpt(value: object, max_chars: int = 4000) -> str:
+    raw = str(value or "")
+    text = SPACE_RE.sub(" ", TAG_RE.sub(" ", html.unescape(raw))).strip()
+    return text[:max_chars]
+
+
+def _has_substantive_public_excerpt(public_context: dict[str, object]) -> bool:
+    if public_context.get("status") != "ok":
+        return False
+    excerpt = _clean_excerpt(public_context.get("text_excerpt", ""))
+    if len(excerpt) < 250:
+        return False
+    normalized = excerpt.lower()
+    weak_markers = (
+        "javascript is disabled",
+        "skip to main content",
+        "sign in",
+        "an official website",
+        "@font face",
+        "font family",
+        "woff2",
+        "html line height",
+        "sam acquisition 360 html",
+    )
+    return not any(marker in normalized for marker in weak_markers)
+
+
+def _best_notice_excerpt(
+    public_context: dict[str, object],
+    opportunity: dict[str, object],
+    explanation: dict[str, object],
+) -> tuple[str, bool]:
+    public_excerpt = _clean_excerpt(public_context.get("text_excerpt", ""))
+    if _has_substantive_public_excerpt(public_context):
+        return public_excerpt, True
+    for candidate in (opportunity.get("summary", ""), explanation.get("summary", "")):
+        cleaned = _clean_excerpt(candidate)
+        if len(cleaned) >= 180:
+            return cleaned, True
+    return public_excerpt, False
 
 
 def main() -> int:
@@ -91,6 +138,10 @@ def main() -> int:
 
     explanation = local_context.get("explanation_record", {})
     opportunity = local_context.get("opportunity_record", {})
+    notice_excerpt, substantive_notice_excerpt = _best_notice_excerpt(public_context, opportunity, explanation)
+    executive_summary = _clean_excerpt(
+        explanation.get("summary") or opportunity.get("summary") or "Fresh structured capture brief generated from current request context."
+    )
     public_sources = []
     if public_context.get("status") == "ok":
         public_sources.append(
@@ -107,6 +158,7 @@ def main() -> int:
         )
 
     usaspending_status = usaspending_result.get("spending_by_award", {}).get("status", "error")
+    public_excerpt_substantive = _has_substantive_public_excerpt(public_context)
     if usaspending_status in {"ok", "http_error", "error"}:
         public_sources.append(
             {
@@ -121,7 +173,7 @@ def main() -> int:
             }
         )
 
-    status = "360_DEEP_RESEARCH_COMPLETE" if public_context.get("status") == "ok" and usaspending_status == "ok" else "PARTIAL_CAPTURE_RESEARCH"
+    status = "PARTIAL_CAPTURE_RESEARCH"
     evidence = {
         "request_id": request_id,
         "generated_at": utc_now_iso(),
@@ -147,7 +199,7 @@ def main() -> int:
             "request_capture_evidence_path": artifacts["request_capture_evidence_path"],
         },
         "executive_brief": {
-            "summary": explanation.get("summary") or opportunity.get("summary") or "Fresh structured capture brief generated from current request context.",
+            "summary": executive_summary,
             "why_now": "This opportunity is now in capture because it matched the latest workspace shortlist or direct identifier lookup.",
             "risks": [
                 "Fresh public evidence may still be incomplete if browser-safe or API-safe retrieval failed.",
@@ -180,7 +232,7 @@ def main() -> int:
                 "solution_implications": "Shape win themes around mission fit, compliance, and realism",
                 "evidence_links": resolved.get("url", "N/A"),
                 "evidence_snippets": [
-                    public_context.get("text_excerpt", "")[:300] or "No public excerpt captured in this run.",
+                    notice_excerpt[:300] or "No substantive notice excerpt captured in this run.",
                 ],
             }
         ],
@@ -234,6 +286,8 @@ def main() -> int:
             "all_required_sections_present": False,
             "contains_placeholders": False,
             "generated_from_current_request": True,
+            "public_excerpt_substantive": public_excerpt_substantive,
+            "notice_excerpt_substantive": substantive_notice_excerpt,
             "stub_stage_exited_before_response": True,
             "menu_only_fallback_used": False,
         },
@@ -242,6 +296,15 @@ def main() -> int:
     brief_text = render_capture_brief(bundle_root / "templates" / "capture-brief.template.md", evidence)
     brief_validation = validate_capture_brief_text(brief_text)
     evidence["validation"]["all_required_sections_present"] = brief_validation["all_required_sections_present"]
+    if (
+        resolved.get("status") == "resolved"
+        and substantive_notice_excerpt
+        and usaspending_status == "ok"
+        and brief_validation["all_required_sections_present"]
+    ):
+        status = "360_DEEP_RESEARCH_COMPLETE"
+    evidence["status"] = status
+    brief_text = render_capture_brief(bundle_root / "templates" / "capture-brief.template.md", evidence)
 
     write_text(Path(artifacts["request_capture_brief_path"]), brief_text)
     write_json(Path(artifacts["request_capture_evidence_path"]), evidence)
@@ -253,6 +316,7 @@ def main() -> int:
     final_log_event["notes"] = [
         "Fresh request-specific brief and evidence were generated for this request.",
         f"Public notice fetch status: {public_context.get('status', 'unknown')}",
+        f"Public notice excerpt substantive: {'yes' if public_excerpt_substantive else 'no'}",
         f"USAspending enrichment status: {usaspending_status}",
     ]
     append_jsonl(Path(artifacts["request_log_path"]), final_log_event)

@@ -45,6 +45,7 @@ ALWAYS_SUPPRESSED_NOTICE_CATEGORIES = {
     "justification_and_approval",
     "j_and_a_posting",
     "fair_opportunity_exception",
+    "notice_of_intent_notice",
     "sole_source_notice",
     "notice_of_intent_to_sole_source",
     "vendor_library_notice",
@@ -53,6 +54,7 @@ ALWAYS_SUPPRESSED_NOTICE_CATEGORIES = {
 
 WATCHLIST_ELIGIBLE_NOTICE_CATEGORIES = {
     "draft_solicitation",
+    "presolicitation_notice",
     "sources_sought_only",
     "rfi_only",
     "industry_day_only",
@@ -69,6 +71,7 @@ NOTICE_CATEGORY_LABELS = {
     "justification_and_approval": "justification and approval posting",
     "j_and_a_posting": "J&A posting",
     "fair_opportunity_exception": "fair opportunity exception",
+    "notice_of_intent_notice": "notice of intent",
     "sole_source_notice": "sole-source notice",
     "notice_of_intent_to_sole_source": "intent-to-sole-source notice",
     "informational_update": "informational update",
@@ -78,6 +81,7 @@ NOTICE_CATEGORY_LABELS = {
     "industry_day_only": "industry day notice",
     "vendor_library_notice": "vendor library notice",
     "draft_solicitation": "draft solicitation",
+    "presolicitation_notice": "presolicitation notice",
     "cancelled_notice": "cancelled notice",
 }
 
@@ -177,18 +181,24 @@ def _vendor_keywords(profile: dict[str, Any]) -> list[str]:
     return sorted(dict.fromkeys(keywords))
 
 
-def _vendor_naics(profile: dict[str, Any]) -> list[str]:
+def _vendor_naics_by_bucket(profile: dict[str, Any], bucket: str) -> list[str]:
     naics = profile.get("naics", {}) if isinstance(profile.get("naics"), dict) else {}
     values: list[str] = []
+    for item in naics.get(bucket, []):
+        if isinstance(item, dict):
+            code = item.get("code") or item.get("naics") or item.get("id")
+        else:
+            code = item
+        code_text = str(code).strip() if code is not None else ""
+        if code_text:
+            values.append(code_text)
+    return values
+
+
+def _vendor_naics(profile: dict[str, Any]) -> list[str]:
+    values: list[str] = []
     for bucket in ("confirmed", "candidates"):
-        for item in naics.get(bucket, []):
-            if isinstance(item, dict):
-                code = item.get("code") or item.get("naics") or item.get("id")
-            else:
-                code = item
-            code_text = str(code).strip() if code is not None else ""
-            if code_text:
-                values.append(code_text)
+        values.extend(_vendor_naics_by_bucket(profile, bucket))
     deduped = []
     for code in values:
         if code not in deduped:
@@ -264,20 +274,70 @@ def _keyword_matches(keyword: str, normalized_text: str, token_set: set[str]) ->
     return f" {normalized_keyword} " in f" {normalized_text} "
 
 
-def _preferred_buyer_matches(preferred_buyer: str, buyer_text: str) -> bool:
+def _preferred_buyer_match_strength(preferred_buyer: str, buyer_text: str) -> tuple[int, str] | None:
     normalized_preference = _normalized_text(preferred_buyer)
     if not normalized_preference:
-        return False
+        return None
 
     direct_aliases = {
         "defense agencies": ("dept of defense", "department of defense", "army", "navy", "air force", "space force", "defense"),
         "federal civilian agencies": ("department", "agency", "administration", "bureau"),
         "state local it modernization buyers": ("state", "county", "city", "municipal"),
     }
+    alias_points = {
+        "defense agencies": 6,
+        "federal civilian agencies": 3,
+        "state local it modernization buyers": 5,
+    }
     aliases = direct_aliases.get(normalized_preference)
     if aliases:
-        return any(alias in buyer_text for alias in aliases)
-    return normalized_preference in buyer_text
+        if any(alias in buyer_text for alias in aliases):
+            return alias_points.get(normalized_preference, 5), f"Preferred buyer segment match: {preferred_buyer}."
+        return None
+    if normalized_preference in buyer_text:
+        return 10, f"Preferred buyer alignment: {preferred_buyer}."
+    return None
+
+
+def _record_naics_codes(record: dict[str, Any]) -> set[str]:
+    values = record.get("naics", [])
+    if not isinstance(values, list):
+        return set()
+    return {str(value).strip() for value in values if str(value).strip()}
+
+
+def _naics_match_strength(record: dict[str, Any], profile: dict[str, Any]) -> tuple[int, str | None, str]:
+    record_codes = _record_naics_codes(record)
+    if not record_codes:
+        return 0, None, "none"
+    confirmed_codes = set(_vendor_naics_by_bucket(profile, "confirmed"))
+    candidate_codes = set(_vendor_naics_by_bucket(profile, "candidates"))
+    if record_codes & confirmed_codes:
+        return 20, "Confirmed NAICS match from the vendor profile.", "confirmed"
+    if record_codes & candidate_codes:
+        return 12, "Candidate NAICS match from the vendor profile.", "candidate"
+    return 8, "Related NAICS signal present, but it is not yet confirmed against the vendor profile.", "related"
+
+
+def _is_actionable_notice_type(record: dict[str, Any]) -> bool:
+    notice_type = _normalized_text(record.get("notice_type", ""))
+    if not notice_type:
+        return False
+    if any(marker in notice_type for marker in ("presolicitation", "special notice", "sources sought", "request for information", "industry day")):
+        return False
+    notice_tokens = set(notice_type.split())
+    if "solicitation" in notice_tokens:
+        return True
+    return any(phrase in notice_type for phrase in ("request for proposal", "request for quotation", "invitation for bid"))
+
+
+def _has_strong_action_now_signal(fit_context: dict[str, Any]) -> bool:
+    return bool(
+        fit_context.get("multiword_keyword_hits")
+        or int(fit_context.get("keyword_hit_count", 0) or 0) >= 2
+        or fit_context.get("naics_quality") == "confirmed"
+        or int(fit_context.get("buyer_match_points", 0) or 0) >= 10
+    )
 
 
 def _notice_categories(record: dict[str, Any], hydrated_text: str | None) -> set[str]:
@@ -289,6 +349,8 @@ def _notice_categories(record: dict[str, Any], hydrated_text: str | None) -> set
 
     if "award notice" in combined:
         categories.add("award_notice")
+    if "justification" in notice_type or "limited source justification" in combined:
+        categories.add("justification_and_approval")
     if "contract award" in combined:
         categories.add("contract_award")
     if "justification and approval" in combined or " j a " in f" {combined} ":
@@ -297,6 +359,8 @@ def _notice_categories(record: dict[str, Any], hydrated_text: str | None) -> set
         categories.add("fair_opportunity_exception")
     if "sole source" in combined:
         categories.add("sole_source_notice")
+    if "notice of intent" in combined:
+        categories.add("notice_of_intent_notice")
     if "intent to sole source" in combined or "notice of intent to sole source" in combined:
         categories.add("notice_of_intent_to_sole_source")
     if "sources sought" in combined:
@@ -307,6 +371,8 @@ def _notice_categories(record: dict[str, Any], hydrated_text: str | None) -> set
         categories.add("industry_day_only")
     if "vendor library" in combined:
         categories.add("vendor_library_notice")
+    if "presolicitation" in combined or "pre solicitation" in combined:
+        categories.add("presolicitation_notice")
     if "draft solicitation" in combined or title_text.startswith("draft ") or " this is a draft " in f" {combined} ":
         categories.add("draft_solicitation")
     if "cancelled" in combined or "canceled" in combined:
@@ -363,8 +429,15 @@ def _notice_guidance(preferences: dict[str, Any], categories: set[str], timing_b
     return None, None, []
 
 
-def _bucket_for_record(match_score: int, timing_band: str, preferences: dict[str, Any], bucket_override: str | None) -> str:
+def _bucket_for_record(
+    match_score: int,
+    timing_band: str,
+    preferences: dict[str, Any],
+    bucket_override: str | None,
+    fit_context: dict[str, Any],
+) -> str:
     thresholds = preferences.get("confidence_thresholds", {}) if isinstance(preferences.get("confidence_thresholds"), dict) else {}
+    action_now_min = int(thresholds.get("action_now_min", 75) or 75)
     worth_a_look_min = int(thresholds.get("worth_a_look_min", 60) or 60)
     watchlist_min = int(thresholds.get("watchlist_min", thresholds.get("near_miss_min", 45)) or 45)
     if bucket_override == "suppressed" or match_score < watchlist_min:
@@ -372,12 +445,42 @@ def _bucket_for_record(match_score: int, timing_band: str, preferences: dict[str
     if bucket_override == "watchlist":
         return "watchlist"
     if timing_band == "urgent":
-        return "action_now" if match_score >= worth_a_look_min else "worth_a_look"
+        if (
+            match_score >= action_now_min
+            and fit_context.get("is_actionable_notice_type")
+            and not fit_context.get("hard_eligibility_gate")
+            and _has_strong_action_now_signal(fit_context)
+        ):
+            return "action_now"
+        return "worth_a_look" if match_score >= worth_a_look_min else "watchlist"
     if timing_band == "active":
         return "worth_a_look" if match_score >= worth_a_look_min else "watchlist"
     if timing_band == "watchlist":
         return "watchlist"
     return "suppressed"
+
+
+def _urgent_bucket_hold_reason(
+    bucket: str,
+    match_score: int,
+    timing_band: str,
+    preferences: dict[str, Any],
+    bucket_override: str | None,
+    fit_context: dict[str, Any],
+) -> str:
+    if bucket != "worth_a_look" or timing_band != "urgent" or bucket_override:
+        return ""
+    thresholds = preferences.get("confidence_thresholds", {}) if isinstance(preferences.get("confidence_thresholds"), dict) else {}
+    action_now_min = int(thresholds.get("action_now_min", 75) or 75)
+    if fit_context.get("hard_eligibility_gate"):
+        return "Urgent timing, but gating language keeps this out of Action Now."
+    if not fit_context.get("is_actionable_notice_type"):
+        return "Urgent timing, but the notice type is still shaping or informational rather than a live bid."
+    if not _has_strong_action_now_signal(fit_context):
+        return "Urgent timing, but fit evidence is still broad; keep this in Worth a Look until scope alignment is clearer."
+    if match_score < action_now_min:
+        return f"Urgent timing, but the fit score is still below the Action Now bar of {action_now_min}."
+    return ""
 
 
 def _has_hard_eligibility_gate(record: dict[str, Any], hydrated_text: str | None) -> bool:
@@ -411,7 +514,7 @@ def _score_record(
     hydrated_text: str | None,
     timing_band: str,
     days_until_due: int | None,
-) -> tuple[int, int, list[str], str]:
+) -> tuple[int, int, list[str], str, dict[str, Any]]:
     title_text = f"{record.get('title', '')} {record.get('summary', '')} {hydrated_text or ''}"
     normalized_text = _normalized_text(title_text)
     token_set = set(normalized_text.split())
@@ -419,9 +522,10 @@ def _score_record(
     match_score = 35
     confidence = 50
 
-    if record.get("naics"):
-        match_score += 20
-        reasons.append("Confirmed/candidate NAICS match from the vendor profile.")
+    naics_points, naics_reason, naics_quality = _naics_match_strength(record, profile)
+    match_score += naics_points
+    if naics_reason:
+        reasons.append(naics_reason)
 
     keyword_hits = [keyword for keyword in keywords if _keyword_matches(keyword, normalized_text, token_set)]
     if keyword_hits:
@@ -434,16 +538,23 @@ def _score_record(
         if isinstance(item, str) and item.strip():
             preferred_buyers.append(item.strip().lower())
     buyer_text = _normalized_text(record.get("buyer", ""))
-    if preferred_buyers and any(_preferred_buyer_matches(item, buyer_text) for item in preferred_buyers):
-        match_score += 10
-        reasons.append("Preferred buyer/agency alignment from the vendor profile.")
+    buyer_match_points = 0
+    buyer_match_reason = ""
+    for item in preferred_buyers:
+        match = _preferred_buyer_match_strength(item, buyer_text)
+        if match and match[0] > buyer_match_points:
+            buyer_match_points, buyer_match_reason = match
+    if buyer_match_points:
+        match_score += buyer_match_points
+        reasons.append(buyer_match_reason)
 
     timing_reason = _timing_reason(timing_band, days_until_due)
     match_score += _timing_adjustment(timing_band)
     if timing_reason:
         reasons.append(timing_reason)
 
-    if _has_hard_eligibility_gate(record, hydrated_text):
+    hard_eligibility_gate = _has_hard_eligibility_gate(record, hydrated_text)
+    if hard_eligibility_gate:
         match_score -= 15
         caveat = "Notice text includes a hard vehicle or holder eligibility gate; confirm you can bid before treating this as active pipeline."
         reasons.append("Hard eligibility gate detected in notice text.")
@@ -466,7 +577,15 @@ def _score_record(
     else:
         confidence -= 10
 
-    return max(0, min(match_score, 100)), max(0, min(confidence, 100)), reasons[:4], caveat
+    fit_context = {
+        "keyword_hit_count": len(keyword_hits),
+        "multiword_keyword_hits": sum(1 for keyword in keyword_hits if " " in _normalized_text(keyword)),
+        "naics_quality": naics_quality,
+        "buyer_match_points": buyer_match_points,
+        "is_actionable_notice_type": _is_actionable_notice_type(record),
+        "hard_eligibility_gate": hard_eligibility_gate,
+    }
+    return max(0, min(match_score, 100)), max(0, min(confidence, 100)), reasons[:4], caveat, fit_context
 
 
 def _normalize_explanations(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -578,7 +697,7 @@ def main() -> int:
                 record.setdefault("raw_match_evidence", {})
                 record["raw_match_evidence"]["full_desc_loaded"] = True
 
-            match_score, confidence_score, reasons, caveat = _score_record(
+            match_score, confidence_score, reasons, caveat, fit_context = _score_record(
                 record,
                 keywords,
                 vendor_profile,
@@ -590,12 +709,20 @@ def main() -> int:
             guidance_bucket, guidance_note, guidance_categories = _notice_guidance(preferences, notice_categories, timing_band)
             record["match_score"] = match_score
             record["confidence_score"] = confidence_score
-            record["bucket"] = _bucket_for_record(match_score, timing_band, preferences, guidance_bucket)
+            record["bucket"] = _bucket_for_record(match_score, timing_band, preferences, guidance_bucket, fit_context)
             record["timing_window"] = timing_band
             if days_until_due is not None:
                 record["days_until_due"] = days_until_due
             if notice_categories:
                 record["screening_categories"] = sorted(notice_categories)
+            hold_reason = _urgent_bucket_hold_reason(
+                record["bucket"],
+                match_score,
+                timing_band,
+                preferences,
+                guidance_bucket,
+                fit_context,
+            )
             if guidance_note:
                 record["screening_status"] = guidance_bucket or record["bucket"]
                 record["explanation_reasons"] = [guidance_note, *reasons][:4]
@@ -603,8 +730,8 @@ def main() -> int:
                 if guidance_categories:
                     record["suppression_categories"] = guidance_categories
             else:
-                record["explanation_reasons"] = reasons
-                record["main_caveat"] = caveat
+                record["explanation_reasons"] = ([hold_reason, *reasons] if hold_reason else reasons)[:4]
+                record["main_caveat"] = hold_reason or caveat
             candidate_records.append(record)
 
         records.extend(candidate_records)
