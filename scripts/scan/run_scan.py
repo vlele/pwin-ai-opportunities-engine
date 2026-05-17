@@ -85,6 +85,61 @@ NOTICE_CATEGORY_LABELS = {
     "cancelled_notice": "cancelled notice",
 }
 
+FIT_NARRATIVE_POSITIVE_CUES = (
+    "prioritize",
+    "prefer",
+    "focus on",
+    "target",
+    "pursue",
+    "favor",
+    "favour",
+    "look for",
+)
+
+FIT_NARRATIVE_NEGATIVE_CUES = (
+    "avoid",
+    "deprioritize",
+    "steer away from",
+    "exclude",
+    "not fit for",
+    "do not pursue",
+    "do not target",
+)
+
+FIT_NARRATIVE_FILLER_PREFIXES = (
+    "and ",
+    "or ",
+    "where ",
+    "opportunities where ",
+    "work where ",
+)
+
+FIT_NARRATIVE_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "can",
+    "credibly",
+    "for",
+    "from",
+    "in",
+    "into",
+    "of",
+    "on",
+    "or",
+    "our",
+    "over",
+    "services",
+    "the",
+    "their",
+    "to",
+    "where",
+    "with",
+    "work",
+}
+
 
 def parse_horizon(raw: str) -> tuple[int, int]:
     cleaned = raw.lower().replace("days", "").replace("day", "").replace("to", "-").replace(" ", "")
@@ -204,6 +259,156 @@ def _vendor_naics(profile: dict[str, Any]) -> list[str]:
         if code not in deduped:
             deduped.append(code)
     return deduped[:5]
+
+
+def _vendor_fit_narrative(profile: dict[str, Any]) -> str:
+    value = profile.get("fit_narrative", "")
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+        return " ".join(parts)
+    return ""
+
+
+def _split_fit_narrative_clauses(text: str) -> list[str]:
+    return [segment.strip() for segment in re.split(r"[.!?\n;]+", text) if segment.strip()]
+
+
+def _split_fit_narrative_terms(text: str) -> list[str]:
+    parts: list[str] = []
+    for segment in re.split(r"[,\n;]+", text):
+        cleaned = segment.strip()
+        for prefix in FIT_NARRATIVE_FILLER_PREFIXES:
+            if cleaned.lower().startswith(prefix):
+                cleaned = cleaned[len(prefix) :].strip()
+        cleaned = _normalized_text(cleaned)
+        if not cleaned:
+            continue
+        parts.append(cleaned)
+    deduped: list[str] = []
+    for part in parts:
+        if part and part not in deduped:
+            deduped.append(part)
+    return deduped
+
+
+def _fit_narrative_guidance(profile: dict[str, Any]) -> dict[str, Any]:
+    narrative = _vendor_fit_narrative(profile)
+    if not narrative:
+        return {
+            "enabled": False,
+            "narrative": "",
+            "positive_terms": [],
+            "negative_terms": [],
+        }
+
+    positive_terms: list[str] = []
+    negative_terms: list[str] = []
+    for clause in _split_fit_narrative_clauses(narrative):
+        normalized_clause = _normalized_text(clause)
+        if not normalized_clause:
+            continue
+
+        contrast_match = re.search(
+            r"(?:prefer|prioritize|focus on|target|pursue|favor|favour|look for)\s+(.+?)\s+(?:over|rather than|instead of)\s+(.+)",
+            clause,
+            flags=re.IGNORECASE,
+        )
+        if contrast_match:
+            positive_terms.extend(_split_fit_narrative_terms(contrast_match.group(1)))
+            negative_terms.extend(_split_fit_narrative_terms(contrast_match.group(2)))
+            continue
+
+        for cue in FIT_NARRATIVE_NEGATIVE_CUES:
+            if cue in normalized_clause:
+                negative_terms.extend(_split_fit_narrative_terms(re.split(cue, clause, maxsplit=1, flags=re.IGNORECASE)[1]))
+                break
+
+        for cue in FIT_NARRATIVE_POSITIVE_CUES:
+            if cue in normalized_clause:
+                positive_terms.extend(_split_fit_narrative_terms(re.split(cue, clause, maxsplit=1, flags=re.IGNORECASE)[1]))
+                break
+
+    return {
+        "enabled": True,
+        "narrative": narrative,
+        "positive_terms": sorted(dict.fromkeys(term for term in positive_terms if term)),
+        "negative_terms": sorted(dict.fromkeys(term for term in negative_terms if term)),
+    }
+
+
+def _fit_term_tokens(term: str) -> list[str]:
+    tokens: list[str] = []
+    for token in _normalized_text(term).split():
+        if len(token) <= 2 or token in FIT_NARRATIVE_STOPWORDS:
+            continue
+        tokens.append(token)
+    return tokens
+
+
+def _token_forms(token: str) -> set[str]:
+    forms = {token}
+    if token.endswith("ies") and len(token) > 3:
+        forms.add(token[:-3] + "y")
+    if token.endswith("es") and len(token) > 3:
+        forms.add(token[:-2])
+    if token.endswith("s") and len(token) > 3:
+        forms.add(token[:-1])
+    return {form for form in forms if form}
+
+
+def _fit_term_matches(term: str, normalized_text: str, token_set: set[str]) -> bool:
+    normalized_term = _normalized_text(term)
+    if not normalized_term:
+        return False
+    if f" {normalized_term} " in f" {normalized_text} ":
+        return True
+
+    tokens = _fit_term_tokens(normalized_term)
+    if not tokens:
+        return False
+    if len(tokens) == 1:
+        return bool(_token_forms(tokens[0]) & token_set)
+    if len(tokens) > 5:
+        return False
+
+    matched = 0
+    for token in tokens:
+        if _token_forms(token) & token_set:
+            matched += 1
+    if len(tokens) <= 3:
+        return matched == len(tokens)
+    return matched >= len(tokens) - 1
+
+
+def _fit_narrative_alignment(
+    fit_guidance: dict[str, Any],
+    normalized_text: str,
+    token_set: set[str],
+) -> tuple[int, list[str], dict[str, Any]]:
+    if not fit_guidance.get("enabled"):
+        return 0, [], {"positive_hits": [], "negative_hits": []}
+
+    positive_terms = [str(term) for term in fit_guidance.get("positive_terms", []) if str(term).strip()]
+    negative_terms = [str(term) for term in fit_guidance.get("negative_terms", []) if str(term).strip()]
+    positive_hits = [term for term in positive_terms if _fit_term_matches(term, normalized_text, token_set)]
+    negative_hits = [term for term in negative_terms if _fit_term_matches(term, normalized_text, token_set)]
+
+    points = 0
+    reasons: list[str] = []
+    if positive_hits:
+        points += min(12, 4 * len(positive_hits))
+        reasons.append(f"Fit narrative alignment: {', '.join(positive_hits[:3])}.")
+    else:
+        points -= 10
+        reasons.append("Fit narrative did not surface a clear positive alignment.")
+
+    if negative_hits:
+        points -= min(18, 6 * len(negative_hits))
+        reasons.append(f"Fit narrative caution: {', '.join(negative_hits[:3])}.")
+
+    return points, reasons, {"positive_hits": positive_hits, "negative_hits": negative_hits}
 
 
 def _timing_settings(preferences: dict[str, Any]) -> dict[str, Any]:
@@ -337,6 +542,7 @@ def _has_strong_action_now_signal(fit_context: dict[str, Any]) -> bool:
         or int(fit_context.get("keyword_hit_count", 0) or 0) >= 2
         or fit_context.get("naics_quality") == "confirmed"
         or int(fit_context.get("buyer_match_points", 0) or 0) >= 10
+        or fit_context.get("fit_narrative_positive_hits")
     )
 
 
@@ -510,6 +716,7 @@ def _has_hard_eligibility_gate(record: dict[str, Any], hydrated_text: str | None
 def _score_record(
     record: dict[str, Any],
     keywords: list[str],
+    fit_guidance: dict[str, Any],
     profile: dict[str, Any],
     hydrated_text: str | None,
     timing_band: str,
@@ -531,6 +738,14 @@ def _score_record(
     if keyword_hits:
         match_score += min(25, 5 * len(keyword_hits))
         reasons.append(f"Capability/keyword overlap: {', '.join(keyword_hits[:4])}.")
+
+    fit_narrative_points, fit_narrative_reasons, fit_narrative_context = _fit_narrative_alignment(
+        fit_guidance,
+        normalized_text,
+        token_set,
+    )
+    match_score += fit_narrative_points
+    reasons.extend(fit_narrative_reasons)
 
     buyers = profile.get("buyers", {}) if isinstance(profile.get("buyers"), dict) else {}
     preferred_buyers = []
@@ -584,6 +799,8 @@ def _score_record(
         "buyer_match_points": buyer_match_points,
         "is_actionable_notice_type": _is_actionable_notice_type(record),
         "hard_eligibility_gate": hard_eligibility_gate,
+        "fit_narrative_positive_hits": fit_narrative_context.get("positive_hits", []),
+        "fit_narrative_negative_hits": fit_narrative_context.get("negative_hits", []),
     }
     return max(0, min(match_score, 100)), max(0, min(confidence, 100)), reasons[:4], caveat, fit_context
 
@@ -655,6 +872,7 @@ def main() -> int:
     vendor_profile = load_json(workspace / "procurement" / "vendor-profile.json", default={})
     vendor_name = _vendor_name(vendor_profile)
     keywords = _vendor_keywords(vendor_profile)
+    fit_guidance = _fit_narrative_guidance(vendor_profile)
     naics_codes = _vendor_naics(vendor_profile)
 
     source_issues: list[str] = []
@@ -700,6 +918,7 @@ def main() -> int:
             match_score, confidence_score, reasons, caveat, fit_context = _score_record(
                 record,
                 keywords,
+                fit_guidance,
                 vendor_profile,
                 hydrated_text,
                 timing_band,
@@ -794,6 +1013,7 @@ def main() -> int:
             f"Federal-only mode: {'yes' if args.federal_only else 'no'}",
             f"Vendor name: {vendor_name}",
             f"Vendor NAICS used for SAM search: {', '.join(naics_codes) if naics_codes else 'none'}",
+            f"Fit narrative active: {'yes' if fit_guidance.get('enabled') else 'no'}",
             f"Timing model: 0-14 action now, 15-45 worth a look, 46-{timing['watchlist_max']} watchlist / early shaping",
             f"Opportunities snapshot path: {opportunities_path.as_posix()}",
             f"Explanations snapshot path: {explanations_path.as_posix()}",
