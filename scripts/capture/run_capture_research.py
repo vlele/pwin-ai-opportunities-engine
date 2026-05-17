@@ -15,6 +15,7 @@ if str(SCRIPT_ROOT) not in sys.path:
 from common.jsonl import append_jsonl
 from common.paths import safe_slug, standard_procurement_paths, today_local_str, utc_now_iso, write_json, write_text
 from common.validation import validate_capture_brief_text
+from capture.fetch_notice_attachments import fetch_notice_attachments
 from capture.fetch_notice_context import load_notice_context
 from capture.fetch_public_context import fetch_url_excerpt
 from capture.render_capture_brief import render_capture_brief
@@ -187,6 +188,188 @@ def _extract_stakeholder_contacts(*texts: object) -> list[dict[str, str]]:
             }
         )
     return contacts
+
+
+def _structured_contact_name(item: dict[str, object]) -> str:
+    if not isinstance(item, dict):
+        return ""
+    for key in ("fullName", "name"):
+        value = str(item.get(key, "") or "").strip()
+        if value:
+            return value
+    first = str(item.get("firstName", "") or "").strip()
+    last = str(item.get("lastName", "") or "").strip()
+    return " ".join(part for part in (first, last) if part)
+
+
+def _structured_contact_role(item: dict[str, object]) -> str:
+    if not isinstance(item, dict):
+        return ""
+    for key in ("type", "title", "role"):
+        value = str(item.get(key, "") or "").strip()
+        if value:
+            return value
+    return "Contact"
+
+
+def _contacts_from_point_of_contact(records: list[dict[str, object]]) -> list[dict[str, str]]:
+    contacts: list[dict[str, str]] = []
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        email = str(item.get("email") or item.get("emailAddress") or "").strip().lower()
+        phone = str(item.get("phone") or item.get("phoneNumber") or "").strip()
+        contact = {
+            "name": _structured_contact_name(item),
+            "role": _structured_contact_role(item),
+            "email": email,
+        }
+        if phone:
+            contact["phone"] = phone
+        contacts.append(contact)
+    return contacts
+
+
+def _dedupe_contacts(*groups: list[dict[str, str]]) -> list[dict[str, str]]:
+    seen: set[str] = set()
+    merged: list[dict[str, str]] = []
+    for group in groups:
+        for contact in group or []:
+            if not isinstance(contact, dict):
+                continue
+            email = str(contact.get("email", "") or "").strip().lower()
+            name = str(contact.get("name", "") or "").strip().lower()
+            role = str(contact.get("role", "") or "").strip().lower()
+            key = email or f"{name}|{role}"
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            normalized = {
+                "name": str(contact.get("name", "") or "").strip(),
+                "role": str(contact.get("role", "") or "Contact").strip(),
+                "email": email,
+            }
+            phone = str(contact.get("phone", "") or "").strip()
+            if phone:
+                normalized["phone"] = phone
+            merged.append(normalized)
+    return merged
+
+
+def _attachment_manifest_lines(attachment_bundle: dict[str, object]) -> list[str]:
+    attachments = attachment_bundle.get("attachments", []) if isinstance(attachment_bundle, dict) else []
+    if not isinstance(attachments, list) or not attachments:
+        return []
+    category_counts = Counter(
+        str(item.get("category", "other"))
+        for item in attachments
+        if isinstance(item, dict)
+    )
+    summary = ", ".join(f"{count} {category.replace('_', ' ')}" for category, count in category_counts.most_common())
+    lines = [f"Attachment package parsed: {len(attachments)} files ({summary})."]
+    for item in attachments[:6]:
+        if not isinstance(item, dict):
+            continue
+        lines.append(
+            f"Attachment: {item.get('filename', 'unknown')} [{item.get('category', 'other')}] ({item.get('parser_status', 'unknown')})"
+        )
+    return lines
+
+
+def _attachment_scope_snippets(attachment_bundle: dict[str, object], max_snippets: int = 6) -> list[str]:
+    attachments = attachment_bundle.get("attachments", []) if isinstance(attachment_bundle, dict) else []
+    prioritized_categories = {"statement_of_work", "solicitation", "instructions_evaluation", "amendment"}
+    snippets: list[str] = []
+    for item in attachments:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("category", "other")) not in prioritized_categories:
+            continue
+        filename = str(item.get("filename", "attachment") or "attachment")
+        for snippet in item.get("snippets", []) or []:
+            snippets.append(f"{filename}: {_clean_excerpt(snippet, max_chars=280)}")
+    return _dedupe_strings(snippets)[:max_snippets]
+
+
+def _attachment_contract_reference_lines(attachment_bundle: dict[str, object], max_refs: int = 4) -> list[str]:
+    attachments = attachment_bundle.get("attachments", []) if isinstance(attachment_bundle, dict) else []
+    references: list[str] = []
+    pattern = re.compile(
+        r"((?:follow[- ]on|incumbent|current contractor|current provider|existing contract|predecessor contract)[^.]{0,220})",
+        re.IGNORECASE,
+    )
+    for item in attachments:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text_excerpt", "") or "")
+        filename = str(item.get("filename", "attachment") or "attachment")
+        for match in pattern.finditer(text):
+            references.append(f"{filename}: {_clean_excerpt(match.group(1), max_chars=260)}")
+    return _dedupe_strings(references)[:max_refs]
+
+
+def _attachment_incumbent_validation(
+    attachment_bundle: dict[str, object],
+    likely_incumbents: list[str],
+) -> dict[str, object]:
+    attachments = attachment_bundle.get("attachments", []) if isinstance(attachment_bundle, dict) else []
+    direct_mentions: list[str] = []
+    validated: list[str] = []
+    notes: list[str] = []
+    supporting_snippets = _attachment_contract_reference_lines(attachment_bundle)
+    searchable = [
+        (str(item.get("filename", "attachment") or "attachment"), _normalize_signal_text(item.get("text_excerpt", "")))
+        for item in attachments
+        if isinstance(item, dict)
+    ]
+    for incumbent in likely_incumbents:
+        normalized = _normalize_signal_text(incumbent)
+        if not normalized:
+            continue
+        name_hit = False
+        for filename, text in searchable:
+            if f" {normalized} " in f" {text} ":
+                direct_mentions.append(f"{filename}: mentions {incumbent}")
+                name_hit = True
+        if name_hit:
+            validated.append(incumbent)
+    if validated:
+        notes.append(
+            f"Attachment package directly names likely incumbent-related performers: {', '.join(validated)}."
+        )
+    elif supporting_snippets:
+        notes.append(
+            "Attachment package references a follow-on or incumbent context, but it does not directly name the current performer."
+        )
+    else:
+        notes.append("Attachment package did not directly name an incumbent or predecessor performer.")
+    return {
+        "validated_incumbents": _dedupe_strings(validated),
+        "direct_mentions": _dedupe_strings(direct_mentions)[:6],
+        "supporting_snippets": supporting_snippets,
+        "notes": notes,
+    }
+
+
+def _attachment_source_log(attachment_bundle: dict[str, object]) -> list[dict[str, object]]:
+    attachments = attachment_bundle.get("attachments", []) if isinstance(attachment_bundle, dict) else []
+    sources: list[dict[str, object]] = []
+    for item in attachments[:6]:
+        if not isinstance(item, dict):
+            continue
+        sources.append(
+            {
+                "title": item.get("filename", "Notice attachment"),
+                "url": item.get("url", "N/A"),
+                "publisher": "SAM.gov attachment",
+                "published_date": "N/A",
+                "accessed_date": today_local_str(),
+                "tier": 1,
+                "relevance": f"Parsed notice attachment ({item.get('category', 'other')}); parser status {item.get('parser_status', 'unknown')}",
+                "confidence": 3 if item.get("text_excerpt") else 2,
+            }
+        )
+    return sources
 
 
 def _stakeholder_lines(buyer: str, contacts: list[dict[str, str]], notice_text: str) -> list[str]:
@@ -486,9 +669,34 @@ def main() -> int:
     opportunity = local_context.get("opportunity_record", {})
     public_context = fetch_url_excerpt(resolved.get("url", ""))
     notice_excerpt, substantive_notice_excerpt = _best_notice_excerpt(public_context, opportunity, explanation)
-    notice_context_text = _clean_excerpt(f"{opportunity.get('summary', '')} {notice_excerpt}", max_chars=12000)
-    stakeholder_contacts = _extract_stakeholder_contacts(opportunity.get("summary", ""), notice_excerpt)
+    snapshot_resource_links = opportunity.get("resource_links", []) if isinstance(opportunity.get("resource_links"), list) else []
+    snapshot_point_of_contact = opportunity.get("point_of_contact", []) if isinstance(opportunity.get("point_of_contact"), list) else []
+    attachment_bundle = fetch_notice_attachments(
+        resolved.get("notice_id", "") or opportunity.get("notice_id", "") or canonical_id,
+        solicitation_number=str(opportunity.get("solicitation_number", "") or ""),
+        resource_links=snapshot_resource_links,
+        point_of_contact=snapshot_point_of_contact,
+    )
+    attachment_scope_snippets = _attachment_scope_snippets(attachment_bundle)
+    attachment_context_text = " ".join(attachment_scope_snippets)
+    notice_context_text = _clean_excerpt(
+        f"{opportunity.get('summary', '')} {notice_excerpt} {attachment_context_text}",
+        max_chars=12000,
+    )
+    stakeholder_contacts = _dedupe_contacts(
+        _contacts_from_point_of_contact(attachment_bundle.get("point_of_contact", [])),
+        _extract_stakeholder_contacts(
+            opportunity.get("summary", ""),
+            notice_excerpt,
+            " ".join(
+                str(item.get("text_excerpt", "") or "")
+                for item in (attachment_bundle.get("attachments", []) or [])[:3]
+                if isinstance(item, dict)
+            ),
+        ),
+    )
     stakeholder_map = _stakeholder_lines(resolved.get("buyer", ""), stakeholder_contacts, notice_context_text)
+    stakeholder_map.extend(_attachment_manifest_lines(attachment_bundle))
     usaspending_result = enrich_from_usaspending(
         resolved.get("title") or canonical_id,
         title=resolved.get("title", ""),
@@ -500,6 +708,10 @@ def main() -> int:
         resolved.get("title", ""),
         notice_context_text,
         resolved.get("buyer", ""),
+    )
+    attachment_validation = _attachment_incumbent_validation(
+        attachment_bundle,
+        award_signals.get("competitive_landscape", {}).get("likely_incumbents", []),
     )
     executive_summary = _clean_excerpt(
         explanation.get("summary") or opportunity.get("summary") or "Fresh structured capture brief generated from current request context."
@@ -535,10 +747,35 @@ def main() -> int:
             }
         )
     public_sources.extend(award_signals.get("source_log", []))
+    public_sources.extend(_attachment_source_log(attachment_bundle))
 
     status = "PARTIAL_CAPTURE_RESEARCH"
     objective_budget_signal = award_signals.get("objective_budget_signal") or "Use USAspending and prior awards to confirm funding reality"
-    objective_incumbents = award_signals.get("objective_incumbents") or "To be validated with award-history enrichment"
+    objective_incumbents = (
+        ", ".join(attachment_validation.get("validated_incumbents", []))
+        if attachment_validation.get("validated_incumbents")
+        else award_signals.get("objective_incumbents") or "To be validated with award-history enrichment"
+    )
+    attachment_categories = Counter(
+        str(item.get("category", "other"))
+        for item in (attachment_bundle.get("attachments", []) or [])
+        if isinstance(item, dict)
+    )
+    attachment_budget_signals: list[str] = []
+    if attachment_categories.get("pricing") or attachment_categories.get("schedule"):
+        attachment_budget_signals.append(
+            f"Attachment package includes {attachment_categories.get('pricing', 0)} pricing file(s) and {attachment_categories.get('schedule', 0)} schedule file(s) for direct CLIN and timeline validation."
+        )
+    if attachment_categories.get("amendment"):
+        attachment_budget_signals.append(
+            f"Attachment package includes {attachment_categories.get('amendment', 0)} amendment file(s), which can validate scope changes and final instructions."
+        )
+    attachment_scope_or_notice_snippets = attachment_scope_snippets or [notice_excerpt[:300] or "No substantive notice excerpt captured in this run."]
+    attachment_competitive_notes = _dedupe_strings(
+        attachment_validation.get("notes", [])
+        + attachment_validation.get("direct_mentions", [])
+        + attachment_validation.get("supporting_snippets", [])
+    )
     evidence = {
         "request_id": request_id,
         "generated_at": utc_now_iso(),
@@ -568,7 +805,7 @@ def main() -> int:
             "why_now": "This opportunity is now in capture because it matched the latest workspace shortlist or direct identifier lookup.",
             "risks": [
                 "Fresh public evidence may still be incomplete if browser-safe or API-safe retrieval failed.",
-                "Incumbent and funding signals are derived from public-source matching and should be validated against the solicitation package and agency history.",
+                "Incumbent and funding signals should still be checked against the full solicitation package, Q&A, and any archived predecessor awards.",
             ],
             "success_metrics": [
                 "Validated scope understanding",
@@ -592,29 +829,46 @@ def main() -> int:
                 "budget_signal": objective_budget_signal,
                 "stakeholders": _objective_stakeholder_text(resolved.get("buyer", ""), stakeholder_contacts),
                 "incumbents": objective_incumbents,
-                "key_risks": "Partial evidence until fresh official retrieval completes",
+                "key_risks": "Partial evidence until attachment package, amendments, and award history tell a consistent story",
                 "kpis": "Cycle-time reduction, compliance fidelity, mission delivery outcomes",
                 "solution_implications": "Shape win themes around mission fit, compliance, and realism",
                 "evidence_links": resolved.get("url", "N/A"),
-                "evidence_snippets": [
-                    notice_excerpt[:300] or "No substantive notice excerpt captured in this run.",
-                ],
+                "evidence_snippets": attachment_scope_or_notice_snippets,
             }
         ],
         "stakeholder_map": stakeholder_map,
         "stakeholder_contacts": stakeholder_contacts,
         "budget_funding_signals": [
             *award_signals.get("budget_signals", []),
+            *attachment_budget_signals,
             f"USAspending search status this run: {usaspending_status}",
         ],
-        "related_procurements": award_signals.get("related_procurements", []),
+        "related_procurements": award_signals.get("related_procurements", []) + attachment_validation.get("supporting_snippets", []),
         "vehicle_signals": [
             "Assess likely vehicle path from agency history and companion notices when available.",
         ],
-        "competitive_landscape": award_signals.get("competitive_landscape", {}),
+        "competitive_landscape": {
+            **award_signals.get("competitive_landscape", {}),
+            "likely_incumbents": (
+                attachment_validation.get("validated_incumbents", [])
+                or award_signals.get("competitive_landscape", {}).get("likely_incumbents", [])
+            ),
+            "notes": _dedupe_strings(
+                award_signals.get("competitive_landscape", {}).get("notes", [])
+                + attachment_competitive_notes
+            ),
+        },
         "award_history_signals": {
             "queries": award_signals.get("queries", []),
             "relevant_awards": award_signals.get("relevant_awards", []),
+        },
+        "attachment_signals": {
+            "status": attachment_bundle.get("status", "unknown"),
+            "resource_link_count": attachment_bundle.get("resource_link_count", 0),
+            "parsed_attachments": attachment_bundle.get("attachments", []),
+            "errors": attachment_bundle.get("errors", []),
+            "scope_snippets": attachment_scope_snippets,
+            "incumbent_validation": attachment_validation,
         },
         "public_discourse_signals": [
             "Check agency strategic plans, OIG/GAO findings, and recent testimony aligned to this requirement.",
@@ -622,7 +876,7 @@ def main() -> int:
         ],
         "recommended_next_research_moves": [
             "Pull agency strategy, policy, and oversight documents linked to the mission area.",
-            "Validate the public award-history matches against the solicitation package and any incumbent references in attachments.",
+            "Validate the final attachment set, especially SOW, instructions, Q&A, and amendments, against the award-history hypothesis.",
             "Confirm whether the extracted contracting contacts map to the true program owner and evaluation team.",
         ],
         "action_items_next_10_days": [
@@ -636,8 +890,21 @@ def main() -> int:
         ],
         "evidence_gaps": _dedupe_strings(
             [
-                "Fresh solicitation objectives may still need deeper parsing from official source documents.",
-                "Stakeholder and award-history signals are public-source derived and should be validated against attachments and direct agency artifacts.",
+                *(
+                    []
+                    if attachment_scope_snippets
+                    else ["Fresh solicitation objectives still need deeper parsing from official attachment documents."]
+                ),
+                *(
+                    []
+                    if attachment_bundle.get("attachments")
+                    else ["No attachment package was parsed in this run, so scope validation still leans on notice text."]
+                ),
+                *(
+                    []
+                    if attachment_validation.get("validated_incumbents") or attachment_validation.get("supporting_snippets")
+                    else ["Attachment package did not directly validate the incumbent story, so award-history inference still needs manual confirmation."]
+                ),
                 *award_signals.get("evidence_gaps", []),
             ]
         ),
@@ -648,6 +915,7 @@ def main() -> int:
             "generated_from_current_request": True,
             "public_excerpt_substantive": public_excerpt_substantive,
             "notice_excerpt_substantive": substantive_notice_excerpt,
+            "attachment_package_parsed": bool(attachment_bundle.get("attachments")),
             "stub_stage_exited_before_response": True,
             "menu_only_fallback_used": False,
         },
@@ -660,6 +928,7 @@ def main() -> int:
         resolved.get("status") == "resolved"
         and substantive_notice_excerpt
         and usaspending_status == "ok"
+        and (attachment_bundle.get("attachments") or not attachment_bundle.get("resource_link_count"))
         and brief_validation["all_required_sections_present"]
     ):
         status = "360_DEEP_RESEARCH_COMPLETE"
@@ -678,6 +947,7 @@ def main() -> int:
         f"Public notice fetch status: {public_context.get('status', 'unknown')}",
         f"Public notice excerpt substantive: {'yes' if public_excerpt_substantive else 'no'}",
         f"USAspending enrichment status: {usaspending_status}",
+        f"Attachment parsing status: {attachment_bundle.get('status', 'unknown')} ({len(attachment_bundle.get('attachments', []) or [])} files parsed)",
     ]
     append_jsonl(Path(artifacts["request_log_path"]), final_log_event)
 
@@ -690,6 +960,8 @@ def main() -> int:
         "browser_succeeded": False,
         "usaspending_attempted": True,
         "usaspending_succeeded": usaspending_status == "ok",
+        "attachments_attempted": bool(snapshot_resource_links or resolved.get("notice_id")),
+        "attachments_succeeded": bool(attachment_bundle.get("attachments")),
         "stable_id": resolved.get("report_entry_id", ""),
         "canonical_record_id": canonical_id,
         "recommended_next_moves": evidence["recommended_next_research_moves"],
