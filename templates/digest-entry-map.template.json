@@ -10,7 +10,7 @@
   "entries": [
     {
       "entry_id": "A1",
-      "bucket": "action_now|worth_a_look|near_miss|suppressed",
+      "bucket": "action_now|worth_a_look|watchlist|suppressed",
       "source_id": "",
       "source_name": "",
       "source_tier": 1,
@@ -31,7 +31,7 @@
   "counts": {
     "action_now": 0,
     "worth_a_look": 0,
-    "near_miss": 0,
+    "watchlist": 0,
     "suppressed": 0
   }
 }

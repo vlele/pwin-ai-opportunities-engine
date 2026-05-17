@@ -171,6 +171,6 @@ def search_sam_opportunities(
         "errors": errors,
         "notes": [
             f"Posted-date search window: {posted_from} to {posted_to}",
-            "Results are filtered locally to the requested due-date horizon.",
+            "Results are retrieved first and then classified locally into timing windows.",
         ],
     }

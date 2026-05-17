@@ -10,7 +10,7 @@ Examples:
 - `like A1`
 - `dislike W2 because too small`
 - `more like A1`
-- `hide N1`
+- `hide E1`
 - `wrong buyer for A3`
 - `right work, wrong vehicle for W1`
 - `never show grants`
@@ -21,7 +21,7 @@ Examples:
 Each digest item should carry a short ID:
 - `A#` for Action Now
 - `W#` for Worth a Look
-- `N#` for Near Miss
+- `E#` for Watchlist / Early Shaping
 - `S#` for Suppressed note when shown
 
 The learning system should resolve those IDs against the most recent digest unless the user specifies a report date.
@@ -82,6 +82,6 @@ Apply rewards only to dimensions that actually contributed to the recommendation
 
 Each delivered digest should end with a short footer like:
 
-- `Reply with: like A1 | dislike W2 because too small | more like A1 | hide N1`
+- `Reply with: like A1 | dislike W2 because too small | more like A1 | hide E1`
 
 That keeps the learning loop frictionless.

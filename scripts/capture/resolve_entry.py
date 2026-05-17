@@ -21,7 +21,7 @@ def _load_latest_digest_maps(workspace: Path) -> list[dict[str, Any]]:
 def resolve_entry(workspace: Path, entry: str) -> dict[str, Any]:
     entry = entry.strip()
     upper_entry = entry.upper()
-    if upper_entry and upper_entry[0] in {"A", "W", "N", "S"} and upper_entry[1:].isdigit():
+    if upper_entry and upper_entry[0] in {"A", "W", "E", "N", "S"} and upper_entry[1:].isdigit():
         for digest_map in _load_latest_digest_maps(workspace):
             for item in digest_map.get("entries", []):
                 if item.get("entry_id") == upper_entry:
@@ -72,4 +72,3 @@ def resolve_entry(workspace: Path, entry: str) -> dict[str, Any]:
         "digest_date": "",
         "canonical_record_id": entry,
     }
-

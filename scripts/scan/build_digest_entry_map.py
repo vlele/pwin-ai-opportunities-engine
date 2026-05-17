@@ -14,11 +14,11 @@ if str(SCRIPT_ROOT) not in sys.path:
 from common.paths import first_non_empty, load_json, standard_procurement_paths, today_local_str, utc_now_iso, write_json
 
 
-BUCKET_ORDER = ["action_now", "worth_a_look", "near_miss", "suppressed"]
+BUCKET_ORDER = ["action_now", "worth_a_look", "watchlist", "suppressed"]
 BUCKET_PREFIX = {
     "action_now": "A",
     "worth_a_look": "W",
-    "near_miss": "N",
+    "watchlist": "E",
     "suppressed": "S",
 }
 
@@ -36,6 +36,8 @@ def normalize_records(raw: Any) -> list[dict[str, Any]]:
 
 def infer_bucket(record: dict[str, Any]) -> str:
     bucket = str(record.get("bucket", "")).strip().lower()
+    if bucket == "near_miss":
+        return "watchlist"
     if bucket in BUCKET_ORDER:
         return bucket
     screening_status = str(record.get("screening_status", "")).lower()
@@ -47,7 +49,7 @@ def infer_bucket(record: dict[str, Any]) -> str:
     if match_score >= 60:
         return "worth_a_look"
     if match_score >= 45:
-        return "near_miss"
+        return "watchlist"
     return "suppressed"
 
 
@@ -101,6 +103,8 @@ def build_entries(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], 
                     "notice_id": record.get("notice_id", ""),
                     "notice_type": record.get("notice_type", ""),
                     "opportunity_class": record.get("opportunity_class", ""),
+                    "timing_window": record.get("timing_window", ""),
+                    "days_until_due": record.get("days_until_due"),
                 }
             )
     return entries, counts

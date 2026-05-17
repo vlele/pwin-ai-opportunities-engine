@@ -14,7 +14,7 @@ from common.jsonl import append_jsonl
 from common.paths import load_json, today_local_str, utc_now_iso, write_json
 
 
-ENTRY_RE = re.compile(r"\b([AWNS]\d+)\b", re.IGNORECASE)
+ENTRY_RE = re.compile(r"\b([AWESN]\d+)\b", re.IGNORECASE)
 
 
 def latest_digest_entry_map(workspace: Path) -> tuple[dict, Path | None]:
@@ -125,4 +125,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

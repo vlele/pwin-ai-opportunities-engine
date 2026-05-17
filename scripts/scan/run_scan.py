@@ -39,6 +39,30 @@ NON_ACTIONABLE_NOTICE_CATEGORIES = {
     "cancelled_notice",
 }
 
+ALWAYS_SUPPRESSED_NOTICE_CATEGORIES = {
+    "award_notice",
+    "contract_award",
+    "justification_and_approval",
+    "j_and_a_posting",
+    "fair_opportunity_exception",
+    "sole_source_notice",
+    "notice_of_intent_to_sole_source",
+    "vendor_library_notice",
+    "cancelled_notice",
+}
+
+WATCHLIST_ELIGIBLE_NOTICE_CATEGORIES = {
+    "draft_solicitation",
+    "sources_sought_only",
+    "rfi_only",
+    "industry_day_only",
+}
+
+INFORMATIONAL_NOTICE_CATEGORIES = {
+    "informational_update",
+    "update_only_notice",
+}
+
 NOTICE_CATEGORY_LABELS = {
     "award_notice": "award notice",
     "contract_award": "contract award",
@@ -73,10 +97,31 @@ def ensure_preferences(bundle_root: Path, workspace: Path, horizon: str) -> Path
     template_path = bundle_root / "templates" / "preferences.template.json"
     preferences = load_json(preferences_path, default=load_json(template_path, default={}))
     min_days, max_days = parse_horizon(horizon)
+    retrieval_max_days = max(120, max_days)
     preferences.setdefault("time_horizon", {})
-    preferences["time_horizon"]["min_days_from_today"] = min_days
-    preferences["time_horizon"]["max_days_from_today"] = max_days
+    preferences["time_horizon"]["mode"] = "timing_window_model_v2"
+    preferences["time_horizon"]["requested_min_days_from_today"] = min_days
+    preferences["time_horizon"]["requested_max_days_from_today"] = max_days
+    preferences["time_horizon"]["min_days_from_today"] = 0
+    preferences["time_horizon"]["max_days_from_today"] = retrieval_max_days
+    preferences["time_horizon"]["retrieval_min_days_from_today"] = 0
+    preferences["time_horizon"]["retrieval_max_days_from_today"] = retrieval_max_days
+    preferences["time_horizon"]["urgent_window_max_days"] = 14
+    preferences["time_horizon"]["active_window_min_days"] = 15
+    preferences["time_horizon"]["active_window_max_days"] = 45
+    preferences["time_horizon"]["watchlist_window_min_days"] = 46
+    preferences["time_horizon"]["watchlist_window_max_days"] = retrieval_max_days
     preferences["time_horizon"]["last_override_source"] = "scan command"
+    preferences["time_horizon"]["strict_due_date_filter_before_bucketing"] = False
+    preferences["time_horizon"]["allow_missing_due_date_on_shortlist"] = False
+    preferences.setdefault("screening", {})
+    preferences["screening"]["allow_watchlist_for_non_actionable_notices"] = True
+    preferences.setdefault("confidence_thresholds", {})
+    preferences["confidence_thresholds"]["watchlist_min"] = int(
+        preferences["confidence_thresholds"].get("watchlist_min", preferences["confidence_thresholds"].get("near_miss_min", 45)) or 45
+    )
+    preferences.setdefault("delivery", {})
+    preferences["delivery"]["max_watchlist"] = int(preferences["delivery"].get("max_watchlist", preferences["delivery"].get("max_near_misses", 3)) or 3)
     write_json(preferences_path, preferences)
     return preferences_path
 
@@ -151,11 +196,58 @@ def _vendor_naics(profile: dict[str, Any]) -> list[str]:
     return deduped[:5]
 
 
-def _in_horizon(due_date: date | None, today: date, min_days: int, max_days: int) -> bool:
+def _timing_settings(preferences: dict[str, Any]) -> dict[str, Any]:
+    time_horizon = preferences.get("time_horizon", {}) if isinstance(preferences.get("time_horizon"), dict) else {}
+    retrieval_max = int(time_horizon.get("retrieval_max_days_from_today", time_horizon.get("max_days_from_today", 120)) or 120)
+    urgent_max = int(time_horizon.get("urgent_window_max_days", 14) or 14)
+    active_max = int(time_horizon.get("active_window_max_days", 45) or 45)
+    watchlist_max = int(time_horizon.get("watchlist_window_max_days", retrieval_max) or retrieval_max)
+    return {
+        "retrieval_min": int(time_horizon.get("retrieval_min_days_from_today", 0) or 0),
+        "retrieval_max": max(retrieval_max, watchlist_max),
+        "urgent_max": urgent_max,
+        "active_max": max(active_max, urgent_max),
+        "watchlist_max": max(watchlist_max, active_max),
+        "allow_missing": bool(time_horizon.get("allow_missing_due_date_on_shortlist", False)),
+        "only_open": bool(time_horizon.get("only_open_opportunities", True)),
+    }
+
+
+def _timing_band(due_date: date | None, today: date, preferences: dict[str, Any]) -> tuple[str, int | None]:
     if due_date is None:
-        return False
+        return "missing", None
+
+    timing = _timing_settings(preferences)
     delta = (due_date - today).days
-    return min_days <= delta <= max_days
+    if timing["only_open"] and delta < 0:
+        return "expired", delta
+    if delta < timing["retrieval_min"] or delta > timing["retrieval_max"]:
+        return "out_of_window", delta
+    if delta <= timing["urgent_max"]:
+        return "urgent", delta
+    if delta <= timing["active_max"]:
+        return "active", delta
+    return "watchlist", delta
+
+
+def _timing_adjustment(timing_band: str) -> int:
+    return {
+        "urgent": 15,
+        "active": 10,
+        "watchlist": 5,
+    }.get(timing_band, 0)
+
+
+def _timing_reason(timing_band: str, days_until_due: int | None) -> str:
+    if days_until_due is None:
+        return ""
+    if timing_band == "urgent":
+        return f"Timing signal: due in {days_until_due} days (urgent bid window)."
+    if timing_band == "active":
+        return f"Timing signal: due in {days_until_due} days (active pursuit window)."
+    if timing_band == "watchlist":
+        return f"Timing signal: due in {days_until_due} days (watchlist / early shaping window)."
+    return ""
 
 
 def _normalized_text(value: Any) -> str:
@@ -232,47 +324,59 @@ def _notice_categories(record: dict[str, Any], hydrated_text: str | None) -> set
     return categories
 
 
-def _suppression_details(preferences: dict[str, Any], categories: set[str]) -> tuple[str | None, list[str]]:
+def _category_detail(categories: list[str]) -> str:
+    labels = [NOTICE_CATEGORY_LABELS.get(category, category.replace("_", " ")) for category in categories[:3]]
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} and {labels[1]}"
+    return f"{', '.join(labels[:-1])}, and {labels[-1]}"
+
+
+def _notice_guidance(preferences: dict[str, Any], categories: set[str], timing_band: str) -> tuple[str | None, str | None, list[str]]:
     screening = preferences.get("screening", {}) if isinstance(preferences.get("screening"), dict) else {}
-    hard_filters = preferences.get("hard_filters", {}) if isinstance(preferences.get("hard_filters"), dict) else {}
+    allow_watchlist = bool(screening.get("allow_watchlist_for_non_actionable_notices", True))
     reject_categories = {
         str(item).strip()
         for item in screening.get("reject_notice_categories_from_shortlist", [])
         if str(item).strip()
     }
-    matching_rejects = sorted(categories & reject_categories)
-    suppressed_categories: list[str] = []
-    if matching_rejects:
-        suppressed_categories.extend(matching_rejects)
-    if hard_filters.get("exclude_non_actionable_notices", False):
-        for category in sorted(categories):
-            if category in NON_ACTIONABLE_NOTICE_CATEGORIES and category not in suppressed_categories:
-                suppressed_categories.append(category)
+    hard_suppressed = sorted(categories & ALWAYS_SUPPRESSED_NOTICE_CATEGORIES)
+    if hard_suppressed:
+        return "suppressed", f"Suppressed by notice type: {_category_detail(hard_suppressed)}.", hard_suppressed
 
-    if not suppressed_categories:
-        return None, []
+    early_signal = sorted(categories & WATCHLIST_ELIGIBLE_NOTICE_CATEGORIES)
+    informational = sorted(categories & INFORMATIONAL_NOTICE_CATEGORIES)
+    if early_signal and allow_watchlist:
+        watchlist_categories = early_signal + [category for category in informational if category not in early_signal]
+        return "watchlist", f"Watchlist: early-shaping notice ({_category_detail(watchlist_categories)}).", watchlist_categories
 
-    labels = [NOTICE_CATEGORY_LABELS.get(category, category.replace("_", " ")) for category in suppressed_categories[:3]]
-    if len(labels) == 1:
-        detail = labels[0]
-    elif len(labels) == 2:
-        detail = f"{labels[0]} and {labels[1]}"
-    else:
-        detail = f"{', '.join(labels[:-1])}, and {labels[-1]}"
-    return f"Suppressed by preferences: notice appears non-actionable ({detail}).", suppressed_categories
+    explicit_rejects = sorted((categories & reject_categories) - set(early_signal))
+    if explicit_rejects:
+        return "suppressed", f"Suppressed by preferences: notice appears non-actionable ({_category_detail(explicit_rejects)}).", explicit_rejects
+
+    if informational:
+        if allow_watchlist and timing_band == "watchlist":
+            return "watchlist", f"Watchlist: informational update in shaping window ({_category_detail(informational)}).", informational
+        return "suppressed", f"Suppressed by preferences: notice appears non-actionable ({_category_detail(informational)}).", informational
+
+    return None, None, []
 
 
-def _bucket_for_score(match_score: int, preferences: dict[str, Any]) -> str:
+def _bucket_for_record(match_score: int, timing_band: str, preferences: dict[str, Any], bucket_override: str | None) -> str:
     thresholds = preferences.get("confidence_thresholds", {}) if isinstance(preferences.get("confidence_thresholds"), dict) else {}
-    action_now_min = int(thresholds.get("action_now_min", 75) or 75)
     worth_a_look_min = int(thresholds.get("worth_a_look_min", 60) or 60)
-    near_miss_min = int(thresholds.get("near_miss_min", 45) or 45)
-    if match_score >= action_now_min:
-        return "action_now"
-    if match_score >= worth_a_look_min:
-        return "worth_a_look"
-    if match_score >= near_miss_min:
-        return "near_miss"
+    watchlist_min = int(thresholds.get("watchlist_min", thresholds.get("near_miss_min", 45)) or 45)
+    if bucket_override == "suppressed" or match_score < watchlist_min:
+        return "suppressed"
+    if bucket_override == "watchlist":
+        return "watchlist"
+    if timing_band == "urgent":
+        return "action_now" if match_score >= worth_a_look_min else "worth_a_look"
+    if timing_band == "active":
+        return "worth_a_look" if match_score >= worth_a_look_min else "watchlist"
+    if timing_band == "watchlist":
+        return "watchlist"
     return "suppressed"
 
 
@@ -300,7 +404,14 @@ def _has_hard_eligibility_gate(record: dict[str, Any], hydrated_text: str | None
     return any(marker in combined for marker in gate_markers) and any(marker in combined for marker in vehicle_markers)
 
 
-def _score_record(record: dict[str, Any], keywords: list[str], profile: dict[str, Any], hydrated_text: str | None) -> tuple[int, int, list[str], str]:
+def _score_record(
+    record: dict[str, Any],
+    keywords: list[str],
+    profile: dict[str, Any],
+    hydrated_text: str | None,
+    timing_band: str,
+    days_until_due: int | None,
+) -> tuple[int, int, list[str], str]:
     title_text = f"{record.get('title', '')} {record.get('summary', '')} {hydrated_text or ''}"
     normalized_text = _normalized_text(title_text)
     token_set = set(normalized_text.split())
@@ -327,14 +438,10 @@ def _score_record(record: dict[str, Any], keywords: list[str], profile: dict[str
         match_score += 10
         reasons.append("Preferred buyer/agency alignment from the vendor profile.")
 
-    if hydrated_text:
-        confidence += 20
-        reasons.append("Full SAM notice description loaded for this result.")
-    elif record.get("summary") and record.get("summary") != "N/A":
-        confidence += 5
-        reasons.append("Partial SAM summary text available from Pass 1.")
-    else:
-        confidence -= 10
+    timing_reason = _timing_reason(timing_band, days_until_due)
+    match_score += _timing_adjustment(timing_band)
+    if timing_reason:
+        reasons.append(timing_reason)
 
     if _has_hard_eligibility_gate(record, hydrated_text):
         match_score -= 15
@@ -349,7 +456,15 @@ def _score_record(record: dict[str, Any], keywords: list[str], profile: dict[str
         caveat = "Missing usable due date in source response."
     else:
         confidence += 10
-        reasons.append("Usable due date is inside the requested horizon.")
+
+    if hydrated_text:
+        confidence += 20
+        reasons.append("Full SAM notice description loaded for this result.")
+    elif record.get("summary") and record.get("summary") != "N/A":
+        confidence += 5
+        reasons.append("Partial SAM summary text available from Pass 1.")
+    else:
+        confidence -= 10
 
     return max(0, min(match_score, 100)), max(0, min(confidence, 100)), reasons[:4], caveat
 
@@ -412,12 +527,12 @@ def main() -> int:
     workspace = Path(args.workspace)
     date_str = today_local_str()
     today = _today_date(date_str)
-    min_days, max_days = parse_horizon(args.horizon)
 
     registry_path, registry, refreshed, refresh_reasons = refresh_runtime_registry(bundle_root, workspace)
     preferences_path = ensure_preferences(bundle_root, workspace, args.horizon)
     opportunities_path, explanations_path = ensure_today_artifacts(workspace, date_str)
     preferences = load_json(preferences_path, default={})
+    timing = _timing_settings(preferences)
     vendor_profile = load_json(workspace / "procurement" / "vendor-profile.json", default={})
     vendor_name = _vendor_name(vendor_profile)
     keywords = _vendor_keywords(vendor_profile)
@@ -447,7 +562,10 @@ def main() -> int:
         candidate_records = []
         for record in sam_result.get("records", []):
             due_date = _parse_any_date(record.get("due_date"))
-            if not _in_horizon(due_date, today, min_days, max_days):
+            timing_band, days_until_due = _timing_band(due_date, today, preferences)
+            if timing_band in {"expired", "out_of_window"}:
+                continue
+            if timing_band == "missing" and not timing["allow_missing"]:
                 continue
 
             hydrated = hydrate_sam_notice(str(record.get("notice_id", "")))
@@ -460,20 +578,30 @@ def main() -> int:
                 record.setdefault("raw_match_evidence", {})
                 record["raw_match_evidence"]["full_desc_loaded"] = True
 
-            match_score, confidence_score, reasons, caveat = _score_record(record, keywords, vendor_profile, hydrated_text)
+            match_score, confidence_score, reasons, caveat = _score_record(
+                record,
+                keywords,
+                vendor_profile,
+                hydrated_text,
+                timing_band,
+                days_until_due,
+            )
             notice_categories = _notice_categories(record, hydrated_text)
-            suppression_note, suppressed_categories = _suppression_details(preferences, notice_categories)
+            guidance_bucket, guidance_note, guidance_categories = _notice_guidance(preferences, notice_categories, timing_band)
             record["match_score"] = match_score
             record["confidence_score"] = confidence_score
-            record["bucket"] = "suppressed" if suppression_note else _bucket_for_score(match_score, preferences)
+            record["bucket"] = _bucket_for_record(match_score, timing_band, preferences, guidance_bucket)
+            record["timing_window"] = timing_band
+            if days_until_due is not None:
+                record["days_until_due"] = days_until_due
             if notice_categories:
                 record["screening_categories"] = sorted(notice_categories)
-            if suppression_note:
-                record["screening_status"] = "suppressed"
-                record["explanation_reasons"] = [suppression_note, *reasons][:4]
-                record["main_caveat"] = suppression_note
-                if suppressed_categories:
-                    record["suppression_categories"] = suppressed_categories
+            if guidance_note:
+                record["screening_status"] = guidance_bucket or record["bucket"]
+                record["explanation_reasons"] = [guidance_note, *reasons][:4]
+                record["main_caveat"] = guidance_note if guidance_bucket == "suppressed" else caveat
+                if guidance_categories:
+                    record["suppression_categories"] = guidance_categories
             else:
                 record["explanation_reasons"] = reasons
                 record["main_caveat"] = caveat
@@ -523,11 +651,15 @@ def main() -> int:
     _write_scan_outputs(opportunities_path, explanations_path, records, source_statuses)
     digest_entry_map = build_digest_entry_map(workspace, date_str)
     enabled_summary = enabled_sources_summary(registry)
+    scan_period_label = (
+        f"0-{timing['retrieval_max']} days retrieved | "
+        f"0-14 action now | 15-45 worth a look | 46-{timing['watchlist_max']} watchlist / early shaping"
+    )
     render_result = render_digest_and_report(
         bundle_root,
         workspace,
         date_str,
-        args.horizon,
+        scan_period_label,
         run_notes=[
             f"Runtime source registry path: {registry_path.as_posix()}",
             f"Runtime source registry refreshed: {'yes' if refreshed else 'no'}",
@@ -535,6 +667,7 @@ def main() -> int:
             f"Federal-only mode: {'yes' if args.federal_only else 'no'}",
             f"Vendor name: {vendor_name}",
             f"Vendor NAICS used for SAM search: {', '.join(naics_codes) if naics_codes else 'none'}",
+            f"Timing model: 0-14 action now, 15-45 worth a look, 46-{timing['watchlist_max']} watchlist / early shaping",
             f"Opportunities snapshot path: {opportunities_path.as_posix()}",
             f"Explanations snapshot path: {explanations_path.as_posix()}",
             f"Refresh reasons: {', '.join(refresh_reasons) if refresh_reasons else 'none'}",

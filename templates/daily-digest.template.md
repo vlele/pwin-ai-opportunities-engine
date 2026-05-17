@@ -14,7 +14,7 @@
 |:---|:---|
 | **Action Now** | {{ACTION_COUNT}} |
 | **Worth a Look** | {{WORTH_COUNT}} |
-| **Near Misses** | {{NEAR_MISS_COUNT}} |
+| **Watchlist / Early Shaping** | {{WATCHLIST_COUNT}} |
 | **Suppressed** | {{SUPPRESSED_COUNT}} |
 
 ---
@@ -37,9 +37,9 @@
 
 ---
 
-## Near Misses
+## Watchlist / Early Shaping
 
-{{NEAR_MISS_ENTRIES_OR_NONE}}
+{{WATCHLIST_ENTRIES_OR_NONE}}
 
 ---
 
@@ -67,7 +67,7 @@ Reply with examples:
 - `like A1`
 - `dislike W2 because too small`
 - `more like A1`
-- `hide N1`
+- `hide E1`
 - `never show grants`
 - `research A1`
 - `capture deep dive on A1`

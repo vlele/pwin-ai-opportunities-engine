@@ -4,7 +4,7 @@
   "digest_path": "procurement/digests/YYYY-MM-DD.md",
   "resolved_from_latest_digest": true,
   "report_entry_id": "A1",
-  "report_bucket": "action_now|worth_a_look|near_miss|suppressed",
+  "report_bucket": "action_now|worth_a_look|watchlist|suppressed",
   "user_id": "",
   "user_utterance": "",
   "feedback": "like|dislike|more_like_this|less_like_this|watch|pursue|snooze|hard_exclude|expand",
