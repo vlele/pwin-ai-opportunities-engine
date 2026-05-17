@@ -108,6 +108,8 @@ def render_capture_brief(template_path: Path, evidence: dict[str, Any]) -> str:
             evidence.get("competitive_landscape", {}).get("notes", [])
             + [f"Likely incumbents: {', '.join(evidence.get('competitive_landscape', {}).get('likely_incumbents', [])) or 'none found'}"]
             + [f"Frequent primes: {', '.join(evidence.get('competitive_landscape', {}).get('frequent_primes', [])) or 'none found'}"]
+            + [f"Common teammates: {', '.join(evidence.get('competitive_landscape', {}).get('common_teammates', [])) or 'none found'}"]
+            + [f"Emerging challengers: {', '.join(evidence.get('competitive_landscape', {}).get('emerging_challengers', [])) or 'none found'}"]
         ),
         "{{PUBLIC_DISCOURSE_AND_MARKET_SIGNALS}}": _markdown_list(evidence.get("public_discourse_signals", [])),
         "{{RECOMMENDED_NEXT_RESEARCH_MOVES}}": _markdown_list(evidence.get("recommended_next_research_moves", [])),
@@ -121,4 +123,3 @@ def render_capture_brief(template_path: Path, evidence: dict[str, Any]) -> str:
     for key, value in replacements.items():
         rendered = rendered.replace(key, value)
     return rendered
-
