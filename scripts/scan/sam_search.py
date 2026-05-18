@@ -77,6 +77,7 @@ def _normalize_record(record: dict[str, Any], queried_naics: str) -> dict[str, A
         "buyer": _record_value(record, "fullParentPathName", "organizationType", "departmentIndAgency", "organizationName") or "N/A",
         "opportunity_class": "contracts",
         "notice_type": _record_value(record, "type", "noticeType", "notice_type"),
+        "solicitation_number": _record_value(record, "solicitationNumber", "solicitation_number"),
         "posted_date": _record_value(record, "postedDate", "posted_date"),
         "due_date": _record_value(record, "responseDeadLine", "archiveDate", "responseDeadline", "due_date") or "N/A",
         "location": _record_value(record, "placeOfPerformance", "place_of_performance", "officeAddress"),
@@ -85,6 +86,8 @@ def _normalize_record(record: dict[str, Any], queried_naics: str) -> dict[str, A
         "set_aside": _record_value(record, "typeOfSetAsideDescription", "typeOfSetAside", "setAside"),
         "estimated_value": _normalize_money(_record_value(record, "award", "estimatedValue", "estimated_value")),
         "summary": _record_value(record, "description", "additionalInfoLink", "summary") or "N/A",
+        "point_of_contact": record.get("pointOfContact", []) if isinstance(record.get("pointOfContact"), list) else [],
+        "resource_links": record.get("resourceLinks", []) if isinstance(record.get("resourceLinks"), list) else [],
         "retrieval_timestamp": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
         "raw_match_evidence": {
             "queried_naics": queried_naics,
@@ -171,6 +174,6 @@ def search_sam_opportunities(
         "errors": errors,
         "notes": [
             f"Posted-date search window: {posted_from} to {posted_to}",
-            "Results are filtered locally to the requested due-date horizon.",
+            "Results are retrieved first and then classified locally into timing windows.",
         ],
     }

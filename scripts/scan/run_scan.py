@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import date, datetime
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,126 @@ from scan.sam_search import search_sam_opportunities
 from scan.usaspending_enrich import post_award_search
 
 
+NON_ACTIONABLE_NOTICE_CATEGORIES = {
+    "award_notice",
+    "contract_award",
+    "justification_and_approval",
+    "j_and_a_posting",
+    "fair_opportunity_exception",
+    "sole_source_notice",
+    "notice_of_intent_to_sole_source",
+    "informational_update",
+    "update_only_notice",
+    "sources_sought_only",
+    "rfi_only",
+    "industry_day_only",
+    "vendor_library_notice",
+    "draft_solicitation",
+    "cancelled_notice",
+}
+
+ALWAYS_SUPPRESSED_NOTICE_CATEGORIES = {
+    "award_notice",
+    "contract_award",
+    "justification_and_approval",
+    "j_and_a_posting",
+    "fair_opportunity_exception",
+    "notice_of_intent_notice",
+    "sole_source_notice",
+    "notice_of_intent_to_sole_source",
+    "vendor_library_notice",
+    "cancelled_notice",
+}
+
+WATCHLIST_ELIGIBLE_NOTICE_CATEGORIES = {
+    "draft_solicitation",
+    "presolicitation_notice",
+    "sources_sought_only",
+    "rfi_only",
+    "industry_day_only",
+}
+
+INFORMATIONAL_NOTICE_CATEGORIES = {
+    "informational_update",
+    "update_only_notice",
+}
+
+NOTICE_CATEGORY_LABELS = {
+    "award_notice": "award notice",
+    "contract_award": "contract award",
+    "justification_and_approval": "justification and approval posting",
+    "j_and_a_posting": "J&A posting",
+    "fair_opportunity_exception": "fair opportunity exception",
+    "notice_of_intent_notice": "notice of intent",
+    "sole_source_notice": "sole-source notice",
+    "notice_of_intent_to_sole_source": "intent-to-sole-source notice",
+    "informational_update": "informational update",
+    "update_only_notice": "update-only notice",
+    "sources_sought_only": "sources sought notice",
+    "rfi_only": "request for information",
+    "industry_day_only": "industry day notice",
+    "vendor_library_notice": "vendor library notice",
+    "draft_solicitation": "draft solicitation",
+    "presolicitation_notice": "presolicitation notice",
+    "cancelled_notice": "cancelled notice",
+}
+
+FIT_NARRATIVE_POSITIVE_CUES = (
+    "prioritize",
+    "prefer",
+    "focus on",
+    "target",
+    "pursue",
+    "favor",
+    "favour",
+    "look for",
+)
+
+FIT_NARRATIVE_NEGATIVE_CUES = (
+    "avoid",
+    "deprioritize",
+    "steer away from",
+    "exclude",
+    "not fit for",
+    "do not pursue",
+    "do not target",
+)
+
+FIT_NARRATIVE_FILLER_PREFIXES = (
+    "and ",
+    "or ",
+    "where ",
+    "opportunities where ",
+    "work where ",
+)
+
+FIT_NARRATIVE_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "can",
+    "credibly",
+    "for",
+    "from",
+    "in",
+    "into",
+    "of",
+    "on",
+    "or",
+    "our",
+    "over",
+    "services",
+    "the",
+    "their",
+    "to",
+    "where",
+    "with",
+    "work",
+}
+
+
 def parse_horizon(raw: str) -> tuple[int, int]:
     cleaned = raw.lower().replace("days", "").replace("day", "").replace("to", "-").replace(" ", "")
     if "-" in cleaned:
@@ -35,10 +156,31 @@ def ensure_preferences(bundle_root: Path, workspace: Path, horizon: str) -> Path
     template_path = bundle_root / "templates" / "preferences.template.json"
     preferences = load_json(preferences_path, default=load_json(template_path, default={}))
     min_days, max_days = parse_horizon(horizon)
+    retrieval_max_days = max(120, max_days)
     preferences.setdefault("time_horizon", {})
-    preferences["time_horizon"]["min_days_from_today"] = min_days
-    preferences["time_horizon"]["max_days_from_today"] = max_days
+    preferences["time_horizon"]["mode"] = "timing_window_model_v2"
+    preferences["time_horizon"]["requested_min_days_from_today"] = min_days
+    preferences["time_horizon"]["requested_max_days_from_today"] = max_days
+    preferences["time_horizon"]["min_days_from_today"] = 0
+    preferences["time_horizon"]["max_days_from_today"] = retrieval_max_days
+    preferences["time_horizon"]["retrieval_min_days_from_today"] = 0
+    preferences["time_horizon"]["retrieval_max_days_from_today"] = retrieval_max_days
+    preferences["time_horizon"]["urgent_window_max_days"] = 14
+    preferences["time_horizon"]["active_window_min_days"] = 15
+    preferences["time_horizon"]["active_window_max_days"] = 45
+    preferences["time_horizon"]["watchlist_window_min_days"] = 46
+    preferences["time_horizon"]["watchlist_window_max_days"] = retrieval_max_days
     preferences["time_horizon"]["last_override_source"] = "scan command"
+    preferences["time_horizon"]["strict_due_date_filter_before_bucketing"] = False
+    preferences["time_horizon"]["allow_missing_due_date_on_shortlist"] = False
+    preferences.setdefault("screening", {})
+    preferences["screening"]["allow_watchlist_for_non_actionable_notices"] = True
+    preferences.setdefault("confidence_thresholds", {})
+    preferences["confidence_thresholds"]["watchlist_min"] = int(
+        preferences["confidence_thresholds"].get("watchlist_min", preferences["confidence_thresholds"].get("near_miss_min", 45)) or 45
+    )
+    preferences.setdefault("delivery", {})
+    preferences["delivery"]["max_watchlist"] = int(preferences["delivery"].get("max_watchlist", preferences["delivery"].get("max_near_misses", 3)) or 3)
     write_json(preferences_path, preferences)
     return preferences_path
 
@@ -94,18 +236,24 @@ def _vendor_keywords(profile: dict[str, Any]) -> list[str]:
     return sorted(dict.fromkeys(keywords))
 
 
-def _vendor_naics(profile: dict[str, Any]) -> list[str]:
+def _vendor_naics_by_bucket(profile: dict[str, Any], bucket: str) -> list[str]:
     naics = profile.get("naics", {}) if isinstance(profile.get("naics"), dict) else {}
     values: list[str] = []
+    for item in naics.get(bucket, []):
+        if isinstance(item, dict):
+            code = item.get("code") or item.get("naics") or item.get("id")
+        else:
+            code = item
+        code_text = str(code).strip() if code is not None else ""
+        if code_text:
+            values.append(code_text)
+    return values
+
+
+def _vendor_naics(profile: dict[str, Any]) -> list[str]:
+    values: list[str] = []
     for bucket in ("confirmed", "candidates"):
-        for item in naics.get(bucket, []):
-            if isinstance(item, dict):
-                code = item.get("code") or item.get("naics") or item.get("id")
-            else:
-                code = item
-            code_text = str(code).strip() if code is not None else ""
-            if code_text:
-                values.append(code_text)
+        values.extend(_vendor_naics_by_bucket(profile, bucket))
     deduped = []
     for code in values:
         if code not in deduped:
@@ -113,37 +261,527 @@ def _vendor_naics(profile: dict[str, Any]) -> list[str]:
     return deduped[:5]
 
 
-def _in_horizon(due_date: date | None, today: date, min_days: int, max_days: int) -> bool:
-    if due_date is None:
+def _vendor_fit_narrative(profile: dict[str, Any]) -> str:
+    value = profile.get("fit_narrative", "")
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+        return " ".join(parts)
+    return ""
+
+
+def _split_fit_narrative_clauses(text: str) -> list[str]:
+    return [segment.strip() for segment in re.split(r"[.!?\n;]+", text) if segment.strip()]
+
+
+def _split_fit_narrative_terms(text: str) -> list[str]:
+    parts: list[str] = []
+    for segment in re.split(r"[,\n;]+", text):
+        cleaned = segment.strip()
+        for prefix in FIT_NARRATIVE_FILLER_PREFIXES:
+            if cleaned.lower().startswith(prefix):
+                cleaned = cleaned[len(prefix) :].strip()
+        cleaned = _normalized_text(cleaned)
+        if not cleaned:
+            continue
+        parts.append(cleaned)
+    deduped: list[str] = []
+    for part in parts:
+        if part and part not in deduped:
+            deduped.append(part)
+    return deduped
+
+
+def _fit_narrative_guidance(profile: dict[str, Any]) -> dict[str, Any]:
+    narrative = _vendor_fit_narrative(profile)
+    if not narrative:
+        return {
+            "enabled": False,
+            "narrative": "",
+            "positive_terms": [],
+            "negative_terms": [],
+        }
+
+    positive_terms: list[str] = []
+    negative_terms: list[str] = []
+    for clause in _split_fit_narrative_clauses(narrative):
+        normalized_clause = _normalized_text(clause)
+        if not normalized_clause:
+            continue
+
+        contrast_match = re.search(
+            r"(?:prefer|prioritize|focus on|target|pursue|favor|favour|look for)\s+(.+?)\s+(?:over|rather than|instead of)\s+(.+)",
+            clause,
+            flags=re.IGNORECASE,
+        )
+        if contrast_match:
+            positive_terms.extend(_split_fit_narrative_terms(contrast_match.group(1)))
+            negative_terms.extend(_split_fit_narrative_terms(contrast_match.group(2)))
+            continue
+
+        for cue in FIT_NARRATIVE_NEGATIVE_CUES:
+            if cue in normalized_clause:
+                negative_terms.extend(_split_fit_narrative_terms(re.split(cue, clause, maxsplit=1, flags=re.IGNORECASE)[1]))
+                break
+
+        for cue in FIT_NARRATIVE_POSITIVE_CUES:
+            if cue in normalized_clause:
+                positive_terms.extend(_split_fit_narrative_terms(re.split(cue, clause, maxsplit=1, flags=re.IGNORECASE)[1]))
+                break
+
+    return {
+        "enabled": True,
+        "narrative": narrative,
+        "positive_terms": sorted(dict.fromkeys(term for term in positive_terms if term)),
+        "negative_terms": sorted(dict.fromkeys(term for term in negative_terms if term)),
+    }
+
+
+def _fit_term_tokens(term: str) -> list[str]:
+    tokens: list[str] = []
+    for token in _normalized_text(term).split():
+        if len(token) <= 2 or token in FIT_NARRATIVE_STOPWORDS:
+            continue
+        tokens.append(token)
+    return tokens
+
+
+def _token_forms(token: str) -> set[str]:
+    forms = {token}
+    if token.endswith("ies") and len(token) > 3:
+        forms.add(token[:-3] + "y")
+    if token.endswith("es") and len(token) > 3:
+        forms.add(token[:-2])
+    if token.endswith("s") and len(token) > 3:
+        forms.add(token[:-1])
+    return {form for form in forms if form}
+
+
+def _fit_term_matches(term: str, normalized_text: str, token_set: set[str]) -> bool:
+    normalized_term = _normalized_text(term)
+    if not normalized_term:
         return False
+    if f" {normalized_term} " in f" {normalized_text} ":
+        return True
+
+    tokens = _fit_term_tokens(normalized_term)
+    if not tokens:
+        return False
+    if len(tokens) == 1:
+        return bool(_token_forms(tokens[0]) & token_set)
+    if len(tokens) > 5:
+        return False
+
+    matched = 0
+    for token in tokens:
+        if _token_forms(token) & token_set:
+            matched += 1
+    if len(tokens) <= 3:
+        return matched == len(tokens)
+    return matched >= len(tokens) - 1
+
+
+def _fit_narrative_alignment(
+    fit_guidance: dict[str, Any],
+    normalized_text: str,
+    token_set: set[str],
+) -> tuple[int, list[str], dict[str, Any]]:
+    if not fit_guidance.get("enabled"):
+        return 0, [], {"positive_hits": [], "negative_hits": []}
+
+    positive_terms = [str(term) for term in fit_guidance.get("positive_terms", []) if str(term).strip()]
+    negative_terms = [str(term) for term in fit_guidance.get("negative_terms", []) if str(term).strip()]
+    positive_hits = [term for term in positive_terms if _fit_term_matches(term, normalized_text, token_set)]
+    negative_hits = [term for term in negative_terms if _fit_term_matches(term, normalized_text, token_set)]
+
+    points = 0
+    reasons: list[str] = []
+    if positive_hits:
+        points += min(12, 4 * len(positive_hits))
+        reasons.append(f"Fit narrative alignment: {', '.join(positive_hits[:3])}.")
+    else:
+        points -= 10
+        reasons.append("Fit narrative did not surface a clear positive alignment.")
+
+    if negative_hits:
+        points -= min(18, 6 * len(negative_hits))
+        reasons.append(f"Fit narrative caution: {', '.join(negative_hits[:3])}.")
+
+    return points, reasons, {"positive_hits": positive_hits, "negative_hits": negative_hits}
+
+
+def _timing_settings(preferences: dict[str, Any]) -> dict[str, Any]:
+    time_horizon = preferences.get("time_horizon", {}) if isinstance(preferences.get("time_horizon"), dict) else {}
+    retrieval_max = int(time_horizon.get("retrieval_max_days_from_today", time_horizon.get("max_days_from_today", 120)) or 120)
+    urgent_max = int(time_horizon.get("urgent_window_max_days", 14) or 14)
+    active_max = int(time_horizon.get("active_window_max_days", 45) or 45)
+    watchlist_max = int(time_horizon.get("watchlist_window_max_days", retrieval_max) or retrieval_max)
+    return {
+        "retrieval_min": int(time_horizon.get("retrieval_min_days_from_today", 0) or 0),
+        "retrieval_max": max(retrieval_max, watchlist_max),
+        "urgent_max": urgent_max,
+        "active_max": max(active_max, urgent_max),
+        "watchlist_max": max(watchlist_max, active_max),
+        "allow_missing": bool(time_horizon.get("allow_missing_due_date_on_shortlist", False)),
+        "only_open": bool(time_horizon.get("only_open_opportunities", True)),
+    }
+
+
+def _timing_band(due_date: date | None, today: date, preferences: dict[str, Any]) -> tuple[str, int | None]:
+    if due_date is None:
+        return "missing", None
+
+    timing = _timing_settings(preferences)
     delta = (due_date - today).days
-    return min_days <= delta <= max_days
+    if timing["only_open"] and delta < 0:
+        return "expired", delta
+    if delta < timing["retrieval_min"] or delta > timing["retrieval_max"]:
+        return "out_of_window", delta
+    if delta <= timing["urgent_max"]:
+        return "urgent", delta
+    if delta <= timing["active_max"]:
+        return "active", delta
+    return "watchlist", delta
 
 
-def _score_record(record: dict[str, Any], keywords: list[str], profile: dict[str, Any], hydrated_text: str | None) -> tuple[int, int, list[str], str]:
-    title_text = f"{record.get('title', '')} {record.get('summary', '')} {hydrated_text or ''}".lower()
+def _timing_adjustment(timing_band: str) -> int:
+    return {
+        "urgent": 15,
+        "active": 10,
+        "watchlist": 5,
+    }.get(timing_band, 0)
+
+
+def _timing_reason(timing_band: str, days_until_due: int | None) -> str:
+    if days_until_due is None:
+        return ""
+    if timing_band == "urgent":
+        return f"Timing signal: due in {days_until_due} days (urgent bid window)."
+    if timing_band == "active":
+        return f"Timing signal: due in {days_until_due} days (active pursuit window)."
+    if timing_band == "watchlist":
+        return f"Timing signal: due in {days_until_due} days (watchlist / early shaping window)."
+    return ""
+
+
+def _normalized_text(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _keyword_matches(keyword: str, normalized_text: str, token_set: set[str]) -> bool:
+    normalized_keyword = _normalized_text(keyword)
+    if not normalized_keyword:
+        return False
+    pieces = normalized_keyword.split()
+    if len(pieces) == 1:
+        return pieces[0] in token_set
+    return f" {normalized_keyword} " in f" {normalized_text} "
+
+
+def _preferred_buyer_match_strength(preferred_buyer: str, buyer_text: str) -> tuple[int, str] | None:
+    normalized_preference = _normalized_text(preferred_buyer)
+    if not normalized_preference:
+        return None
+
+    direct_aliases = {
+        "defense agencies": ("dept of defense", "department of defense", "army", "navy", "air force", "space force", "defense"),
+        "federal civilian agencies": ("department", "agency", "administration", "bureau"),
+        "state local it modernization buyers": ("state", "county", "city", "municipal"),
+    }
+    alias_points = {
+        "defense agencies": 6,
+        "federal civilian agencies": 3,
+        "state local it modernization buyers": 5,
+    }
+    aliases = direct_aliases.get(normalized_preference)
+    if aliases:
+        if any(alias in buyer_text for alias in aliases):
+            return alias_points.get(normalized_preference, 5), f"Preferred buyer segment match: {preferred_buyer}."
+        return None
+    if normalized_preference in buyer_text:
+        return 10, f"Preferred buyer alignment: {preferred_buyer}."
+    return None
+
+
+def _record_naics_codes(record: dict[str, Any]) -> set[str]:
+    values = record.get("naics", [])
+    if not isinstance(values, list):
+        return set()
+    return {str(value).strip() for value in values if str(value).strip()}
+
+
+def _naics_match_strength(record: dict[str, Any], profile: dict[str, Any]) -> tuple[int, str | None, str]:
+    record_codes = _record_naics_codes(record)
+    if not record_codes:
+        return 0, None, "none"
+    confirmed_codes = set(_vendor_naics_by_bucket(profile, "confirmed"))
+    candidate_codes = set(_vendor_naics_by_bucket(profile, "candidates"))
+    if record_codes & confirmed_codes:
+        return 20, "Confirmed NAICS match from the vendor profile.", "confirmed"
+    if record_codes & candidate_codes:
+        return 12, "Candidate NAICS match from the vendor profile.", "candidate"
+    return 8, "Related NAICS signal present, but it is not yet confirmed against the vendor profile.", "related"
+
+
+def _is_actionable_notice_type(record: dict[str, Any]) -> bool:
+    notice_type = _normalized_text(record.get("notice_type", ""))
+    if not notice_type:
+        return False
+    if any(marker in notice_type for marker in ("presolicitation", "special notice", "sources sought", "request for information", "industry day")):
+        return False
+    notice_tokens = set(notice_type.split())
+    if "solicitation" in notice_tokens:
+        return True
+    return any(phrase in notice_type for phrase in ("request for proposal", "request for quotation", "invitation for bid"))
+
+
+def _has_strong_action_now_signal(fit_context: dict[str, Any]) -> bool:
+    return bool(
+        fit_context.get("multiword_keyword_hits")
+        or int(fit_context.get("keyword_hit_count", 0) or 0) >= 2
+        or fit_context.get("naics_quality") == "confirmed"
+        or int(fit_context.get("buyer_match_points", 0) or 0) >= 10
+        or fit_context.get("fit_narrative_positive_hits")
+    )
+
+
+def _notice_categories(record: dict[str, Any], hydrated_text: str | None) -> set[str]:
+    title_text = _normalized_text(record.get("title", ""))
+    summary_text = _normalized_text(hydrated_text or record.get("summary", ""))
+    notice_type = _normalized_text(record.get("notice_type", ""))
+    combined = " ".join(part for part in (title_text, summary_text, notice_type) if part)
+    categories: set[str] = set()
+
+    if "award notice" in combined:
+        categories.add("award_notice")
+    if "justification" in notice_type or "limited source justification" in combined:
+        categories.add("justification_and_approval")
+    if "contract award" in combined:
+        categories.add("contract_award")
+    if "justification and approval" in combined or " j a " in f" {combined} ":
+        categories.update({"justification_and_approval", "j_and_a_posting"})
+    if "fair opportunity exception" in combined:
+        categories.add("fair_opportunity_exception")
+    if "sole source" in combined:
+        categories.add("sole_source_notice")
+    if "notice of intent" in combined:
+        categories.add("notice_of_intent_notice")
+    if "intent to sole source" in combined or "notice of intent to sole source" in combined:
+        categories.add("notice_of_intent_to_sole_source")
+    if "sources sought" in combined:
+        categories.add("sources_sought_only")
+    if "request for information" in combined or re.search(r"(?<![a-z0-9])rfi(?![a-z0-9])", combined):
+        categories.add("rfi_only")
+    if "industry day" in combined:
+        categories.add("industry_day_only")
+    if "vendor library" in combined:
+        categories.add("vendor_library_notice")
+    if "presolicitation" in combined or "pre solicitation" in combined:
+        categories.add("presolicitation_notice")
+    if "draft solicitation" in combined or title_text.startswith("draft ") or " this is a draft " in f" {combined} ":
+        categories.add("draft_solicitation")
+    if "cancelled" in combined or "canceled" in combined:
+        categories.add("cancelled_notice")
+    if (
+        "update to" in combined
+        or "please continue to monitor" in combined
+        or "no definitive date" in combined
+        or "has been delayed" in combined
+    ):
+        categories.add("informational_update")
+    if "update to" in title_text or title_text.startswith("update "):
+        categories.add("update_only_notice")
+
+    return categories
+
+
+def _category_detail(categories: list[str]) -> str:
+    labels = [NOTICE_CATEGORY_LABELS.get(category, category.replace("_", " ")) for category in categories[:3]]
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} and {labels[1]}"
+    return f"{', '.join(labels[:-1])}, and {labels[-1]}"
+
+
+def _notice_guidance(preferences: dict[str, Any], categories: set[str], timing_band: str) -> tuple[str | None, str | None, list[str]]:
+    screening = preferences.get("screening", {}) if isinstance(preferences.get("screening"), dict) else {}
+    allow_watchlist = bool(screening.get("allow_watchlist_for_non_actionable_notices", True))
+    reject_categories = {
+        str(item).strip()
+        for item in screening.get("reject_notice_categories_from_shortlist", [])
+        if str(item).strip()
+    }
+    hard_suppressed = sorted(categories & ALWAYS_SUPPRESSED_NOTICE_CATEGORIES)
+    if hard_suppressed:
+        return "suppressed", f"Suppressed by notice type: {_category_detail(hard_suppressed)}.", hard_suppressed
+
+    early_signal = sorted(categories & WATCHLIST_ELIGIBLE_NOTICE_CATEGORIES)
+    informational = sorted(categories & INFORMATIONAL_NOTICE_CATEGORIES)
+    if early_signal and allow_watchlist:
+        watchlist_categories = early_signal + [category for category in informational if category not in early_signal]
+        return "watchlist", f"Watchlist: early-shaping notice ({_category_detail(watchlist_categories)}).", watchlist_categories
+
+    explicit_rejects = sorted((categories & reject_categories) - set(early_signal))
+    if explicit_rejects:
+        return "suppressed", f"Suppressed by preferences: notice appears non-actionable ({_category_detail(explicit_rejects)}).", explicit_rejects
+
+    if informational:
+        if allow_watchlist and timing_band == "watchlist":
+            return "watchlist", f"Watchlist: informational update in shaping window ({_category_detail(informational)}).", informational
+        return "suppressed", f"Suppressed by preferences: notice appears non-actionable ({_category_detail(informational)}).", informational
+
+    return None, None, []
+
+
+def _bucket_for_record(
+    match_score: int,
+    timing_band: str,
+    preferences: dict[str, Any],
+    bucket_override: str | None,
+    fit_context: dict[str, Any],
+) -> str:
+    thresholds = preferences.get("confidence_thresholds", {}) if isinstance(preferences.get("confidence_thresholds"), dict) else {}
+    action_now_min = int(thresholds.get("action_now_min", 75) or 75)
+    worth_a_look_min = int(thresholds.get("worth_a_look_min", 60) or 60)
+    watchlist_min = int(thresholds.get("watchlist_min", thresholds.get("near_miss_min", 45)) or 45)
+    if bucket_override == "suppressed" or match_score < watchlist_min:
+        return "suppressed"
+    if bucket_override == "watchlist":
+        return "watchlist"
+    if timing_band == "urgent":
+        if (
+            match_score >= action_now_min
+            and fit_context.get("is_actionable_notice_type")
+            and not fit_context.get("hard_eligibility_gate")
+            and _has_strong_action_now_signal(fit_context)
+        ):
+            return "action_now"
+        return "worth_a_look" if match_score >= worth_a_look_min else "watchlist"
+    if timing_band == "active":
+        return "worth_a_look" if match_score >= worth_a_look_min else "watchlist"
+    if timing_band == "watchlist":
+        return "watchlist"
+    return "suppressed"
+
+
+def _urgent_bucket_hold_reason(
+    bucket: str,
+    match_score: int,
+    timing_band: str,
+    preferences: dict[str, Any],
+    bucket_override: str | None,
+    fit_context: dict[str, Any],
+) -> str:
+    if bucket != "worth_a_look" or timing_band != "urgent" or bucket_override:
+        return ""
+    thresholds = preferences.get("confidence_thresholds", {}) if isinstance(preferences.get("confidence_thresholds"), dict) else {}
+    action_now_min = int(thresholds.get("action_now_min", 75) or 75)
+    if fit_context.get("hard_eligibility_gate"):
+        return "Urgent timing, but gating language keeps this out of Action Now."
+    if not fit_context.get("is_actionable_notice_type"):
+        return "Urgent timing, but the notice type is still shaping or informational rather than a live bid."
+    if not _has_strong_action_now_signal(fit_context):
+        return "Urgent timing, but fit evidence is still broad; keep this in Worth a Look until scope alignment is clearer."
+    if match_score < action_now_min:
+        return f"Urgent timing, but the fit score is still below the Action Now bar of {action_now_min}."
+    return ""
+
+
+def _has_hard_eligibility_gate(record: dict[str, Any], hydrated_text: str | None) -> bool:
+    combined = _normalized_text(
+        f"{record.get('title', '')} {record.get('summary', '')} {hydrated_text or ''}"
+    )
+    gate_markers = (
+        "must be registered as",
+        "must hold",
+        "holders only",
+        "only contract holders",
+        "only available to",
+        "eligibility for award",
+    )
+    vehicle_markers = (
+        "contract holder",
+        "contract vehicle",
+        "gwac",
+        "idiq",
+        "bpa",
+        "schedule holder",
+        "blanket purchase agreement",
+    )
+    return any(marker in combined for marker in gate_markers) and any(marker in combined for marker in vehicle_markers)
+
+
+def _score_record(
+    record: dict[str, Any],
+    keywords: list[str],
+    fit_guidance: dict[str, Any],
+    profile: dict[str, Any],
+    hydrated_text: str | None,
+    timing_band: str,
+    days_until_due: int | None,
+) -> tuple[int, int, list[str], str, dict[str, Any]]:
+    title_text = f"{record.get('title', '')} {record.get('summary', '')} {hydrated_text or ''}"
+    normalized_text = _normalized_text(title_text)
+    token_set = set(normalized_text.split())
     reasons: list[str] = []
     match_score = 35
     confidence = 50
 
-    if record.get("naics"):
-        match_score += 20
-        reasons.append("Confirmed/candidate NAICS match from the vendor profile.")
+    naics_points, naics_reason, naics_quality = _naics_match_strength(record, profile)
+    match_score += naics_points
+    if naics_reason:
+        reasons.append(naics_reason)
 
-    keyword_hits = [keyword for keyword in keywords if keyword and keyword in title_text]
+    keyword_hits = [keyword for keyword in keywords if _keyword_matches(keyword, normalized_text, token_set)]
     if keyword_hits:
         match_score += min(25, 5 * len(keyword_hits))
         reasons.append(f"Capability/keyword overlap: {', '.join(keyword_hits[:4])}.")
+
+    fit_narrative_points, fit_narrative_reasons, fit_narrative_context = _fit_narrative_alignment(
+        fit_guidance,
+        normalized_text,
+        token_set,
+    )
+    match_score += fit_narrative_points
+    reasons.extend(fit_narrative_reasons)
 
     buyers = profile.get("buyers", {}) if isinstance(profile.get("buyers"), dict) else {}
     preferred_buyers = []
     for item in buyers.get("preferred", []):
         if isinstance(item, str) and item.strip():
             preferred_buyers.append(item.strip().lower())
-    buyer_text = str(record.get("buyer", "")).lower()
-    if preferred_buyers and any(item in buyer_text for item in preferred_buyers):
-        match_score += 10
-        reasons.append("Preferred buyer/agency alignment from the vendor profile.")
+    buyer_text = _normalized_text(record.get("buyer", ""))
+    buyer_match_points = 0
+    buyer_match_reason = ""
+    for item in preferred_buyers:
+        match = _preferred_buyer_match_strength(item, buyer_text)
+        if match and match[0] > buyer_match_points:
+            buyer_match_points, buyer_match_reason = match
+    if buyer_match_points:
+        match_score += buyer_match_points
+        reasons.append(buyer_match_reason)
+
+    timing_reason = _timing_reason(timing_band, days_until_due)
+    match_score += _timing_adjustment(timing_band)
+    if timing_reason:
+        reasons.append(timing_reason)
+
+    hard_eligibility_gate = _has_hard_eligibility_gate(record, hydrated_text)
+    if hard_eligibility_gate:
+        match_score -= 15
+        caveat = "Notice text includes a hard vehicle or holder eligibility gate; confirm you can bid before treating this as active pipeline."
+        reasons.append("Hard eligibility gate detected in notice text.")
+    else:
+        caveat = "Review full notice attachments and confirm scope fit."
+
+    due_date = _parse_any_date(record.get("due_date"))
+    if due_date is None:
+        confidence -= 10
+        caveat = "Missing usable due date in source response."
+    else:
+        confidence += 10
 
     if hydrated_text:
         confidence += 20
@@ -154,16 +792,17 @@ def _score_record(record: dict[str, Any], keywords: list[str], profile: dict[str
     else:
         confidence -= 10
 
-    due_date = _parse_any_date(record.get("due_date"))
-    caveat = "Review full notice attachments and confirm scope fit."
-    if due_date is None:
-        confidence -= 10
-        caveat = "Missing usable due date in source response."
-    else:
-        confidence += 10
-        reasons.append("Usable due date is inside the requested horizon.")
-
-    return max(0, min(match_score, 100)), max(0, min(confidence, 100)), reasons[:4], caveat
+    fit_context = {
+        "keyword_hit_count": len(keyword_hits),
+        "multiword_keyword_hits": sum(1 for keyword in keyword_hits if " " in _normalized_text(keyword)),
+        "naics_quality": naics_quality,
+        "buyer_match_points": buyer_match_points,
+        "is_actionable_notice_type": _is_actionable_notice_type(record),
+        "hard_eligibility_gate": hard_eligibility_gate,
+        "fit_narrative_positive_hits": fit_narrative_context.get("positive_hits", []),
+        "fit_narrative_negative_hits": fit_narrative_context.get("negative_hits", []),
+    }
+    return max(0, min(match_score, 100)), max(0, min(confidence, 100)), reasons[:4], caveat, fit_context
 
 
 def _normalize_explanations(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -224,14 +863,16 @@ def main() -> int:
     workspace = Path(args.workspace)
     date_str = today_local_str()
     today = _today_date(date_str)
-    min_days, max_days = parse_horizon(args.horizon)
 
     registry_path, registry, refreshed, refresh_reasons = refresh_runtime_registry(bundle_root, workspace)
     preferences_path = ensure_preferences(bundle_root, workspace, args.horizon)
     opportunities_path, explanations_path = ensure_today_artifacts(workspace, date_str)
+    preferences = load_json(preferences_path, default={})
+    timing = _timing_settings(preferences)
     vendor_profile = load_json(workspace / "procurement" / "vendor-profile.json", default={})
     vendor_name = _vendor_name(vendor_profile)
     keywords = _vendor_keywords(vendor_profile)
+    fit_guidance = _fit_narrative_guidance(vendor_profile)
     naics_codes = _vendor_naics(vendor_profile)
 
     source_issues: list[str] = []
@@ -258,7 +899,10 @@ def main() -> int:
         candidate_records = []
         for record in sam_result.get("records", []):
             due_date = _parse_any_date(record.get("due_date"))
-            if not _in_horizon(due_date, today, min_days, max_days):
+            timing_band, days_until_due = _timing_band(due_date, today, preferences)
+            if timing_band in {"expired", "out_of_window"}:
+                continue
+            if timing_band == "missing" and not timing["allow_missing"]:
                 continue
 
             hydrated = hydrate_sam_notice(str(record.get("notice_id", "")))
@@ -271,14 +915,42 @@ def main() -> int:
                 record.setdefault("raw_match_evidence", {})
                 record["raw_match_evidence"]["full_desc_loaded"] = True
 
-            match_score, confidence_score, reasons, caveat = _score_record(record, keywords, vendor_profile, hydrated_text)
+            match_score, confidence_score, reasons, caveat, fit_context = _score_record(
+                record,
+                keywords,
+                fit_guidance,
+                vendor_profile,
+                hydrated_text,
+                timing_band,
+                days_until_due,
+            )
+            notice_categories = _notice_categories(record, hydrated_text)
+            guidance_bucket, guidance_note, guidance_categories = _notice_guidance(preferences, notice_categories, timing_band)
             record["match_score"] = match_score
             record["confidence_score"] = confidence_score
-            record["bucket"] = (
-                "action_now" if match_score >= 75 else "worth_a_look" if match_score >= 60 else "near_miss" if match_score >= 45 else "suppressed"
+            record["bucket"] = _bucket_for_record(match_score, timing_band, preferences, guidance_bucket, fit_context)
+            record["timing_window"] = timing_band
+            if days_until_due is not None:
+                record["days_until_due"] = days_until_due
+            if notice_categories:
+                record["screening_categories"] = sorted(notice_categories)
+            hold_reason = _urgent_bucket_hold_reason(
+                record["bucket"],
+                match_score,
+                timing_band,
+                preferences,
+                guidance_bucket,
+                fit_context,
             )
-            record["explanation_reasons"] = reasons
-            record["main_caveat"] = caveat
+            if guidance_note:
+                record["screening_status"] = guidance_bucket or record["bucket"]
+                record["explanation_reasons"] = [guidance_note, *reasons][:4]
+                record["main_caveat"] = guidance_note if guidance_bucket == "suppressed" else caveat
+                if guidance_categories:
+                    record["suppression_categories"] = guidance_categories
+            else:
+                record["explanation_reasons"] = ([hold_reason, *reasons] if hold_reason else reasons)[:4]
+                record["main_caveat"] = hold_reason or caveat
             candidate_records.append(record)
 
         records.extend(candidate_records)
@@ -325,11 +997,15 @@ def main() -> int:
     _write_scan_outputs(opportunities_path, explanations_path, records, source_statuses)
     digest_entry_map = build_digest_entry_map(workspace, date_str)
     enabled_summary = enabled_sources_summary(registry)
+    scan_period_label = (
+        f"0-{timing['retrieval_max']} days retrieved | "
+        f"0-14 action now | 15-45 worth a look | 46-{timing['watchlist_max']} watchlist / early shaping"
+    )
     render_result = render_digest_and_report(
         bundle_root,
         workspace,
         date_str,
-        args.horizon,
+        scan_period_label,
         run_notes=[
             f"Runtime source registry path: {registry_path.as_posix()}",
             f"Runtime source registry refreshed: {'yes' if refreshed else 'no'}",
@@ -337,6 +1013,8 @@ def main() -> int:
             f"Federal-only mode: {'yes' if args.federal_only else 'no'}",
             f"Vendor name: {vendor_name}",
             f"Vendor NAICS used for SAM search: {', '.join(naics_codes) if naics_codes else 'none'}",
+            f"Fit narrative active: {'yes' if fit_guidance.get('enabled') else 'no'}",
+            f"Timing model: 0-14 action now, 15-45 worth a look, 46-{timing['watchlist_max']} watchlist / early shaping",
             f"Opportunities snapshot path: {opportunities_path.as_posix()}",
             f"Explanations snapshot path: {explanations_path.as_posix()}",
             f"Refresh reasons: {', '.join(refresh_reasons) if refresh_reasons else 'none'}",

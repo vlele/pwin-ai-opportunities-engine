@@ -117,6 +117,6 @@ Every announced digest should show users how to respond:
 - `like A1`
 - `dislike W2 because too small`
 - `more like A1`
-- `hide N1`
+- `hide E1`
 
 The easier it is to react, the faster the shortlist improves.

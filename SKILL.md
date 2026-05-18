@@ -7,7 +7,7 @@ metadata: {"openclaw":{"emoji":"🧭"}}
 Use this skill when the user wants any of the following:
 - a federal opportunity scan or daily digest
 - the latest digest or a dated digest
-- feedback such as `like A1`, `dislike W2`, `hide N1`, or `never show grants`
+- feedback such as `like A1`, `dislike W2`, `hide E1`, or `never show grants`
 - capture research such as `research A1` or `research 0231571d...`
 
 Use the slash command form:
@@ -102,7 +102,7 @@ After the script runs:
 Use when the user says things like:
 - `like A1`
 - `dislike W2 because too small`
-- `hide N1`
+- `hide E1`
 - `never show grants`
 - `prefer subcontracting over prime`
 
@@ -208,7 +208,7 @@ The workspace should maintain:
 - `procurement/capture-evidence/YYYY-MM-DD/ENTRYID-opportunityid-requestid.json`
 
 Stable ID policy:
-- use `A1`, `W2`, `N1`, `S1` for humans
+- use `A1`, `W2`, `E1`, `S1` for humans
 - use canonical IDs such as `noticeId` or `opportunity_id` for machines
 - preserve both in every capture brief and evidence object
 

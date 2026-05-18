@@ -45,6 +45,19 @@ def reasons_block(reasons: list[str], fallback: str) -> str:
     return "\n".join(f"- {item}" for item in items)
 
 
+def timing_label(entry: dict[str, Any]) -> str:
+    timing_window = str(entry.get("timing_window", "") or "").strip().lower()
+    days_until_due = entry.get("days_until_due")
+    suffix = f" ({days_until_due} days)" if isinstance(days_until_due, int) else ""
+    if timing_window == "urgent":
+        return f"Urgent bid activity{suffix}"
+    if timing_window == "active":
+        return f"Active pursuit{suffix}"
+    if timing_window == "watchlist":
+        return f"Watchlist / early shaping{suffix}"
+    return "N/A"
+
+
 def render_entry(entry: dict[str, Any], explanation: dict[str, Any]) -> str:
     title = entry.get("title", "Untitled opportunity")
     summary = explanation.get("summary") or explanation.get("opportunity_summary") or "N/A"
@@ -61,6 +74,8 @@ def render_entry(entry: dict[str, Any], explanation: dict[str, Any]) -> str:
             "|:---|:---|",
             f"| Buyer | {entry.get('buyer', 'N/A')} |",
             f"| Due | {entry.get('due_date', 'N/A')} |",
+            f"| Timing Window | {timing_label(entry)} |",
+            f"| Notice Type | {entry.get('notice_type', 'N/A')} |",
             f"| Opportunity Class | {entry.get('opportunity_class', 'N/A')} |",
             f"| Source | {source_label} |",
             f"| Match Score | {entry.get('match_score', 0)} |",
@@ -111,7 +126,7 @@ def render_digest_and_report(
     grouped = {
         "action_now": [entry for entry in entries if entry.get("bucket") == "action_now"],
         "worth_a_look": [entry for entry in entries if entry.get("bucket") == "worth_a_look"],
-        "near_miss": [entry for entry in entries if entry.get("bucket") == "near_miss"],
+        "watchlist": [entry for entry in entries if entry.get("bucket") == "watchlist"],
         "suppressed": [entry for entry in entries if entry.get("bucket") == "suppressed"],
     }
 
@@ -145,17 +160,17 @@ def render_digest_and_report(
         "{{DATE}}": date_str,
         "{{DISPLAY_DATE}}": date_str,
         "{{RUN_STATUS}}": run_status,
-        "{{SCAN_PERIOD}}": f"due in {horizon} days",
+        "{{SCAN_PERIOD}}": horizon,
         "{{SOURCE_SUMMARY}}": source_summary,
         "{{SCANNED_COUNT}}": str(len(entries)),
         "{{ACTION_COUNT}}": str(counts.get("action_now", 0)),
         "{{WORTH_COUNT}}": str(counts.get("worth_a_look", 0)),
-        "{{NEAR_MISS_COUNT}}": str(counts.get("near_miss", 0)),
+        "{{WATCHLIST_COUNT}}": str(counts.get("watchlist", 0)),
         "{{SUPPRESSED_COUNT}}": str(counts.get("suppressed", 0)),
         "{{RUN_NOTES_OR_NONE}}": notes_text,
         "{{ACTION_NOW_ENTRIES_OR_NONE}}": render_section(grouped["action_now"], lookup),
         "{{WORTH_A_LOOK_ENTRIES_OR_NONE}}": render_section(grouped["worth_a_look"], lookup),
-        "{{NEAR_MISS_ENTRIES_OR_NONE}}": render_section(grouped["near_miss"], lookup),
+        "{{WATCHLIST_ENTRIES_OR_NONE}}": render_section(grouped["watchlist"], lookup),
         "{{SUPPRESSED_ENTRIES_OR_NONE}}": render_section(grouped["suppressed"], lookup),
         "{{PREFERENCE_CHANGES_OR_NONE}}": "none found",
         "{{SOURCE_ISSUES_OR_NONE}}": "\n".join(f"- {item}" for item in (source_issues or [])) or "none found",

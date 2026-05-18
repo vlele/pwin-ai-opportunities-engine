@@ -34,17 +34,27 @@
   "confidence_thresholds": {
     "action_now_min": 75,
     "worth_a_look_min": 60,
+    "watchlist_min": 45,
     "near_miss_min": 45,
     "quarantine_below": 45
   },
   "time_horizon": {
-    "mode": "due_in_days_range",
-    "min_days_from_today": 30,
-    "max_days_from_today": 45,
+    "mode": "timing_window_model_v2",
+    "requested_min_days_from_today": 30,
+    "requested_max_days_from_today": 45,
+    "min_days_from_today": 0,
+    "max_days_from_today": 120,
+    "retrieval_min_days_from_today": 0,
+    "retrieval_max_days_from_today": 120,
+    "urgent_window_max_days": 14,
+    "active_window_min_days": 15,
+    "active_window_max_days": 45,
+    "watchlist_window_min_days": 46,
+    "watchlist_window_max_days": 120,
     "only_open_opportunities": true,
     "single_value_interpretation": "0_to_n",
     "last_override_source": null,
-    "strict_due_date_filter_before_bucketing": true,
+    "strict_due_date_filter_before_bucketing": false,
     "allow_missing_due_date_on_shortlist": false
   },
   "screening": {
@@ -63,7 +73,7 @@
       "industry_day_only",
       "vendor_library_notice"
     ],
-    "allow_watchlist_for_non_actionable_notices": false
+    "allow_watchlist_for_non_actionable_notices": true
   },
   "delivery": {
     "daily_digest_enabled": true,
@@ -74,6 +84,7 @@
     "digest_path_pattern": "procurement/digests/YYYY-MM-DD.md",
     "max_action_now": 5,
     "max_worth_a_look": 5,
+    "max_watchlist": 5,
     "max_near_misses": 3
   },
   "learning": {

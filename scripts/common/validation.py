@@ -39,7 +39,7 @@ def validate_capture_brief_text(text: str) -> dict[str, Any]:
 
 
 def validate_digest_text(text: str) -> dict[str, Any]:
-    entry_ids = re.findall(r"(?m)^###\s+([AWNS]\d+)\s+-\s+", text)
+    entry_ids = re.findall(r"(?m)^###\s+([AWESN]\d+)\s+-\s+", text)
     return {
         "contains_placeholders": contains_placeholders(text),
         "stable_id_count": len(set(entry_ids)),

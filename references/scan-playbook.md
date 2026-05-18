@@ -7,7 +7,7 @@ Use this playbook only when the `scan` mode is selected.
 - refresh the runtime source registry
 - use federal sources only by default
 - produce a digest with stable IDs
-- produce a digest-entry map that explicitly links `A1/W1/N1/S1` to canonical identifiers
+- produce a digest-entry map that explicitly links `A1/W1/E1/S1` to canonical identifiers
 
 ## High-level flow
 
@@ -28,4 +28,4 @@ Use this playbook only when the `scan` mode is selected.
 Produce a degraded digest with:
 - `Run status: DEGRADED`
 - an explanation of why there are no entries
-- no fake `A1/W1/N1` rows
+- no fake `A1/W1/E1` rows
