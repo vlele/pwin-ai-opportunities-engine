@@ -6,18 +6,24 @@ from typing import Any
 
 PLACEHOLDER_RE = re.compile(r"{{[^{}]+}}")
 CAPTURE_HEADINGS = [
-    "## Current Research Limits",
-    "## Executive Brief",
-    "## Objective Matrix",
-    "## Stakeholder and People Map",
-    "## Budget, Funding, and Spending Signals",
-    "## Related Procurements and Vehicle Signals",
-    "## Competitive Landscape",
-    "## Public Discourse and Market Signals",
-    "## Recommended Next Research Moves",
-    "## Action Items (Next 10 Days)",
-    "## Assumptions to Validate",
-    "## Evidence Annex",
+    "## 1. Executive Capture Judgment",
+    "## 2. Opportunity Snapshot",
+    "## 3. Pursuit Recommendation and Score",
+    "## 4. Evidence Ledger",
+    "## 5. Document Inventory and Missing Items",
+    "## 6. Customer and Mission Analysis",
+    "## 7. Funding and Spending Trend Analysis",
+    "## 8. Acquisition Strategy",
+    "## 9. Incumbent Analysis",
+    "## 10. Contracting Office and Stakeholder Map",
+    "## 11. Competitive Landscape",
+    "## 12. Partner and Teaming Analysis",
+    "## 13. Fit Against Our Capabilities and Past Performance",
+    "## 14. Subtle Signals and Capture Implications",
+    "## 15. Recommended Win Strategy",
+    "## 16. Questions to Ask",
+    "## 17. Action Plan",
+    "## 18. Assumptions, Unknowns, and Confidence",
 ]
 
 

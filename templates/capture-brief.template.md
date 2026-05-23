@@ -1,4 +1,4 @@
-# {{VENDOR_NAME}} Capture Research Brief
+# {{VENDOR_NAME}} Capture Research Memo
 
 **Digest Entry ID:** {{REPORT_ENTRY_ID}}  
 **Digest Date:** {{DIGEST_DATE}}  
@@ -14,104 +14,74 @@
 **Evidence Path:** {{REQUEST_CAPTURE_EVIDENCE_PATH}}  
 **Generated At:** {{GENERATED_AT}}  
 
-## Current Research Limits
+## 1. Executive Capture Judgment
 
-{{CURRENT_RESEARCH_LIMITS}}
+{{EXECUTIVE_CAPTURE_JUDGMENT}}
 
-## Executive Brief
+## 2. Opportunity Snapshot
 
-### Objective Summaries
+{{OPPORTUNITY_SNAPSHOT}}
 
-{{EXECUTIVE_OBJECTIVE_SUMMARIES}}
+## 3. Pursuit Recommendation and Score
 
-### Why It Matters Now
+{{PURSUIT_RECOMMENDATION_AND_SCORE}}
 
-{{EXECUTIVE_WHY_NOW}}
+## 4. Evidence Ledger
 
-### Risks, Constraints, and Success Metrics
+{{EVIDENCE_LEDGER}}
 
-{{EXECUTIVE_RISKS_AND_METRICS}}
+## 5. Document Inventory and Missing Items
 
-### Incumbent and Competitor Posture
+{{DOCUMENT_INVENTORY}}
 
-{{EXECUTIVE_INCUMBENT_POSTURE}}
+## 6. Customer and Mission Analysis
 
-### Recommended Win Themes and Proof Points
+{{CUSTOMER_AND_MISSION_ANALYSIS}}
 
-{{EXECUTIVE_WIN_THEMES}}
+## 7. Funding and Spending Trend Analysis
 
-## Objective Matrix
+{{FUNDING_AND_SPENDING_TREND_ANALYSIS}}
 
-| Objective | Mission Driver | Policy / Compliance Driver | Budget / Funding Signal | Stakeholders | Incumbents / Active GovCons | Key Risks | Likely KPIs | Solution Implications | Evidence Links |
-|:---|:---|:---|:---|:---|:---|:---|:---|:---|:---|
-{{OBJECTIVE_MATRIX_ROWS}}
+## 8. Acquisition Strategy
 
-## Stakeholder and People Map
+{{ACQUISITION_STRATEGY}}
 
-### Stakeholder Map
+## 9. Incumbent Analysis
 
-{{STAKEHOLDER_MAP}}
+{{INCUMBENT_ANALYSIS}}
 
-### Leadership Priorities and Public Signals
+## 10. Contracting Office and Stakeholder Map
 
-{{LEADERSHIP_PRIORITY_SIGNALS}}
+{{CONTRACTING_OFFICE_AND_STAKEHOLDER_MAP}}
 
-## Budget, Funding, and Spending Signals
-
-### Budget and Funding Signals
-
-{{BUDGET_AND_SPENDING_SIGNALS}}
-
-### Acquisition Forecast and Timing Signals
-
-{{ACQUISITION_FORECAST_SIGNALS}}
-
-## Related Procurements and Vehicle Signals
-
-{{RELATED_PROCUREMENTS_AND_VEHICLES}}
-
-## Competitive Landscape
+## 11. Competitive Landscape
 
 {{COMPETITIVE_LANDSCAPE}}
 
-## Public Discourse and Market Signals
+## 12. Partner and Teaming Analysis
 
-### Mission and Strategy Signals
+{{PARTNER_AND_TEAMING_ANALYSIS}}
 
-{{MISSION_CONTEXT_SIGNALS}}
+## 13. Fit Against Our Capabilities and Past Performance
 
-### Policy and Compliance Signals
+{{FIT_ANALYSIS}}
 
-{{POLICY_COMPLIANCE_SIGNALS}}
+## 14. Subtle Signals and Capture Implications
 
-### Oversight and Audit Signals
+{{SUBTLE_SIGNALS}}
 
-{{OVERSIGHT_SIGNALS}}
+## 15. Recommended Win Strategy
 
-### Public Discourse and Community Signals
+{{RECOMMENDED_WIN_STRATEGY}}
 
-{{PUBLIC_DISCOURSE_AND_MARKET_SIGNALS}}
+## 16. Questions to Ask
 
-## Recommended Next Research Moves
+{{QUESTIONS_TO_ASK}}
 
-{{RECOMMENDED_NEXT_RESEARCH_MOVES}}
+## 17. Action Plan
 
-## Action Items (Next 10 Days)
+{{ACTION_PLAN}}
 
-{{ACTION_ITEMS}}
+## 18. Assumptions, Unknowns, and Confidence
 
-## Assumptions to Validate
-
-{{ASSUMPTIONS_TO_VALIDATE}}
-
-## Evidence Annex
-
-### Source Log
-
-| # | Source Title | URL | Publisher | Pub Date | Accessed | Tier | Relevance | Confidence |
-|:---|:---|:---|:---|:---|:---|:---|:---|:---|
-{{SOURCE_LOG_ROWS}}
-
-### Objective Evidence
-
-{{OBJECTIVE_EVIDENCE_BLOCKS}}
+{{ASSUMPTIONS_UNKNOWNS_CONFIDENCE}}
