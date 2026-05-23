@@ -93,6 +93,50 @@
     "decay_rate_monthly": 0.05,
     "last_learning_update": null,
     "exploration_near_miss_quota": 1,
+    "signal_scores": {
+      "buyers": {},
+      "keywords": {},
+      "naics": {},
+      "opportunity_classes": {},
+      "reason_codes": {}
+    },
+    "signal_event_counts": {
+      "buyers": {},
+      "keywords": {},
+      "naics": {},
+      "opportunity_classes": {},
+      "reason_codes": {}
+    },
+    "aggregates": {
+      "buyers": [],
+      "keywords": [],
+      "naics": [],
+      "opportunity_classes": [],
+      "reason_codes": []
+    },
+    "applied_preferences": {
+      "generated_at": null,
+      "hard_filters": {
+        "exclude_keywords": [],
+        "exclude_buyers": [],
+        "exclude_states": [],
+        "exclude_opportunity_classes": [],
+        "exclude_set_asides": [],
+        "exclude_naics": [],
+        "exclude_contract_types": []
+      },
+      "soft_preferences": {
+        "positive_keywords": [],
+        "negative_keywords": [],
+        "preferred_buyers": [],
+        "preferred_states": [],
+        "preferred_set_asides": [],
+        "preferred_opportunity_classes": [],
+        "preferred_naics": [],
+        "preferred_contract_types": []
+      },
+      "notes": []
+    },
     "reward_values": {
       "pursue": 2,
       "like": 1,

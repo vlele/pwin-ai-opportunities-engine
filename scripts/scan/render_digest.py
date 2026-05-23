@@ -105,6 +105,17 @@ def replace_many(template: str, replacements: dict[str, str]) -> str:
     return result
 
 
+def preference_changes_text(preferences: dict[str, Any]) -> str:
+    learning = preferences.get("learning", {}) if isinstance(preferences.get("learning"), dict) else {}
+    applied = learning.get("applied_preferences", {})
+    if not isinstance(applied, dict):
+        return "none found"
+    notes = applied.get("notes", [])
+    if not isinstance(notes, list) or not notes:
+        return "none found"
+    return "\n".join(f"- {item}" for item in notes)
+
+
 def render_digest_and_report(
     bundle_root: Path,
     workspace: Path,
@@ -120,6 +131,7 @@ def render_digest_and_report(
         digest_entry_map = build_digest_entry_map(workspace, date_str)
 
     explanations = load_json(paths["explanations"], default=[])
+    preferences = load_json(paths["preferences"], default={})
     lookup = explanations_lookup(explanations)
     entries = digest_entry_map.get("entries", [])
     counts = digest_entry_map.get("counts", {})
@@ -172,7 +184,7 @@ def render_digest_and_report(
         "{{WORTH_A_LOOK_ENTRIES_OR_NONE}}": render_section(grouped["worth_a_look"], lookup),
         "{{WATCHLIST_ENTRIES_OR_NONE}}": render_section(grouped["watchlist"], lookup),
         "{{SUPPRESSED_ENTRIES_OR_NONE}}": render_section(grouped["suppressed"], lookup),
-        "{{PREFERENCE_CHANGES_OR_NONE}}": "none found",
+        "{{PREFERENCE_CHANGES_OR_NONE}}": preference_changes_text(preferences),
         "{{SOURCE_ISSUES_OR_NONE}}": "\n".join(f"- {item}" for item in (source_issues or [])) or "none found",
         "{{UNIQUE_COUNT}}": str(len(entries)),
         "{{QUARANTINE_COUNT}}": str(1 if run_status == "QUARANTINED_EMPTY_SNAPSHOT" else 0),

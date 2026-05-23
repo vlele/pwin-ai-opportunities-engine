@@ -72,6 +72,7 @@ def render_capture_brief(template_path: Path, evidence: dict[str, Any]) -> str:
     template = read_text(template_path)
     entry = evidence.get("entry", {})
     executive = evidence.get("executive_brief", {})
+    objective_summary_lines = executive.get("objective_summaries", []) or [executive.get("summary", "N/A")]
     replacements = {
         "{{VENDOR_NAME}}": evidence.get("vendor_name", "Vendor"),
         "{{REPORT_ENTRY_ID}}": entry.get("report_entry_id", "N/A") or "N/A",
@@ -88,19 +89,25 @@ def render_capture_brief(template_path: Path, evidence: dict[str, Any]) -> str:
         "{{REQUEST_CAPTURE_EVIDENCE_PATH}}": evidence.get("artifacts", {}).get("request_capture_evidence_path", "N/A"),
         "{{GENERATED_AT}}": evidence.get("generated_at", "N/A"),
         "{{CURRENT_RESEARCH_LIMITS}}": _markdown_list(evidence.get("evidence_gaps", [])),
-        "{{EXECUTIVE_BRIEF}}": "\n".join(
-            [
-                f"- Summary: {executive.get('summary', 'N/A')}",
-                f"- Why now: {executive.get('why_now', 'N/A')}",
-                f"- Risks and constraints: {', '.join(executive.get('risks', [])) or 'N/A'}",
-                f"- Success metrics: {', '.join(executive.get('success_metrics', [])) or 'N/A'}",
-                f"- Win themes: {', '.join(executive.get('win_themes', [])) or 'N/A'}",
-                f"- Proof points: {', '.join(executive.get('proof_points', [])) or 'N/A'}",
-            ]
+        "{{EXECUTIVE_OBJECTIVE_SUMMARIES}}": _markdown_list(objective_summary_lines),
+        "{{EXECUTIVE_WHY_NOW}}": _markdown_list(
+            [f"Summary: {executive.get('summary', 'N/A')}", f"Capture trigger: {executive.get('why_now', 'N/A')}"]
+            + list(executive.get("why_now_signals", []) or [])
+        ),
+        "{{EXECUTIVE_RISKS_AND_METRICS}}": _markdown_list(
+            [f"Risks and constraints: {', '.join(executive.get('risks', [])) or 'N/A'}"]
+            + [f"Success metrics: {', '.join(executive.get('success_metrics', [])) or 'N/A'}"]
+        ),
+        "{{EXECUTIVE_INCUMBENT_POSTURE}}": _markdown_list(executive.get("incumbent_posture", [])),
+        "{{EXECUTIVE_WIN_THEMES}}": _markdown_list(
+            [f"Win themes: {', '.join(executive.get('win_themes', [])) or 'N/A'}"]
+            + [f"Proof points: {', '.join(executive.get('proof_points', [])) or 'N/A'}"]
         ),
         "{{OBJECTIVE_MATRIX_ROWS}}": _objective_matrix_rows(evidence.get("objectives", [])),
         "{{STAKEHOLDER_MAP}}": _markdown_list(evidence.get("stakeholder_map", [])),
+        "{{LEADERSHIP_PRIORITY_SIGNALS}}": _markdown_list(evidence.get("leadership_priority_signals", []), empty="currently unavailable"),
         "{{BUDGET_AND_SPENDING_SIGNALS}}": _markdown_list(evidence.get("budget_funding_signals", [])),
+        "{{ACQUISITION_FORECAST_SIGNALS}}": _markdown_list(evidence.get("acquisition_forecast_signals", []), empty="currently unavailable"),
         "{{RELATED_PROCUREMENTS_AND_VEHICLES}}": _markdown_list(
             evidence.get("related_procurements", []) + evidence.get("vehicle_signals", [])
         ),
@@ -111,6 +118,9 @@ def render_capture_brief(template_path: Path, evidence: dict[str, Any]) -> str:
             + [f"Common teammates: {', '.join(evidence.get('competitive_landscape', {}).get('common_teammates', [])) or 'none found'}"]
             + [f"Emerging challengers: {', '.join(evidence.get('competitive_landscape', {}).get('emerging_challengers', [])) or 'none found'}"]
         ),
+        "{{MISSION_CONTEXT_SIGNALS}}": _markdown_list(evidence.get("mission_context_signals", []), empty="currently unavailable"),
+        "{{POLICY_COMPLIANCE_SIGNALS}}": _markdown_list(evidence.get("policy_compliance_signals", []), empty="currently unavailable"),
+        "{{OVERSIGHT_SIGNALS}}": _markdown_list(evidence.get("oversight_signals", []), empty="currently unavailable"),
         "{{PUBLIC_DISCOURSE_AND_MARKET_SIGNALS}}": _markdown_list(evidence.get("public_discourse_signals", [])),
         "{{RECOMMENDED_NEXT_RESEARCH_MOVES}}": _markdown_list(evidence.get("recommended_next_research_moves", [])),
         "{{ACTION_ITEMS}}": _markdown_list(evidence.get("action_items_next_10_days", [])),

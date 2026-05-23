@@ -1,0 +1,138 @@
+{
+  "today": "2026-05-23",
+  "profile": {
+    "company": {
+      "name": "DevTech Gold Fixture"
+    },
+    "naics": {
+      "confirmed": ["541511", "541512"],
+      "candidates": ["541519"]
+    },
+    "core_competencies": [
+      "application modernization",
+      "cloud engineering",
+      "data platform"
+    ],
+    "buyers": {
+      "preferred": [
+        "Department of Education",
+        "Internal Revenue Service"
+      ]
+    },
+    "fit_narrative": "Prioritize application modernization, cloud engineering, data platform, and support. Avoid hardware procurement, facilities work, and janitorial services.",
+    "other_taxonomy_tags": {
+      "negative_keywords": [
+        "hardware procurement",
+        "facilities work",
+        "janitorial"
+      ]
+    }
+  },
+  "preferences": {
+    "time_horizon": {
+      "retrieval_min_days_from_today": 0,
+      "retrieval_max_days_from_today": 120,
+      "urgent_window_max_days": 14,
+      "active_window_max_days": 45,
+      "watchlist_window_max_days": 120,
+      "allow_missing_due_date_on_shortlist": false,
+      "only_open_opportunities": true
+    },
+    "screening": {
+      "allow_watchlist_for_non_actionable_notices": true
+    },
+    "confidence_thresholds": {
+      "action_now_min": 75,
+      "worth_a_look_min": 60,
+      "watchlist_min": 45
+    },
+    "soft_preferences": {
+      "preferred_naics": ["541511"],
+      "preferred_buyers": ["Department of Education", "Internal Revenue Service"],
+      "positive_keywords": [],
+      "negative_keywords": []
+    }
+  },
+  "cases": [
+    {
+      "id": "action_now_urgent_modernization",
+      "expected_bucket": "action_now",
+      "expected_timing_band": "urgent",
+      "expected_guidance_bucket": null,
+      "expected_low_signal_only": false,
+      "record": {
+        "title": "Solicitation for enterprise application modernization and cloud engineering support",
+        "summary": "The Department of Education seeks a contractor to modernize a grants case management platform, improve data platform integration, and deliver cloud engineering services.",
+        "buyer": "Department of Education",
+        "notice_type": "Solicitation",
+        "due_date": "2026-05-30",
+        "naics": ["541511"],
+        "opportunity_class": "Software Development"
+      }
+    },
+    {
+      "id": "worth_a_look_active_platform",
+      "expected_bucket": "worth_a_look",
+      "expected_timing_band": "active",
+      "expected_guidance_bucket": null,
+      "expected_low_signal_only": false,
+      "record": {
+        "title": "Solicitation for data platform modernization services",
+        "summary": "The agency requires data platform engineering, integration support, and application modernization planning for a mission analytics environment.",
+        "buyer": "Internal Revenue Service",
+        "notice_type": "Solicitation",
+        "due_date": "2026-06-20",
+        "naics": ["541511"],
+        "opportunity_class": "Software Engineering"
+      }
+    },
+    {
+      "id": "watchlist_generic_support_only",
+      "expected_bucket": "watchlist",
+      "expected_timing_band": "active",
+      "expected_guidance_bucket": null,
+      "expected_low_signal_only": true,
+      "record": {
+        "title": "Solicitation for IT support services",
+        "summary": "Provide general support services for administrative users and routine help desk coordination.",
+        "buyer": "Department of Agriculture",
+        "notice_type": "Solicitation",
+        "due_date": "2026-06-20",
+        "naics": [],
+        "opportunity_class": "IT Services"
+      }
+    },
+    {
+      "id": "watchlist_presolicitation_signal",
+      "expected_bucket": "watchlist",
+      "expected_timing_band": "watchlist",
+      "expected_guidance_bucket": "watchlist",
+      "expected_low_signal_only": false,
+      "record": {
+        "title": "Presolicitation notice for cloud engineering and application modernization support",
+        "summary": "This presolicitation notice previews a future modernization requirement for a cloud-hosted data platform.",
+        "buyer": "Department of Education",
+        "notice_type": "Presolicitation",
+        "due_date": "2026-07-25",
+        "naics": ["541511"],
+        "opportunity_class": "Software Modernization"
+      }
+    },
+    {
+      "id": "suppressed_award_notice",
+      "expected_bucket": "suppressed",
+      "expected_timing_band": "active",
+      "expected_guidance_bucket": "suppressed",
+      "expected_low_signal_only": false,
+      "record": {
+        "title": "Contract award notice for application modernization support",
+        "summary": "Award notice for continued cloud engineering and data platform support.",
+        "buyer": "Department of Education",
+        "notice_type": "Contract Award Notice",
+        "due_date": "2026-06-18",
+        "naics": ["541511"],
+        "opportunity_class": "Software Development"
+      }
+    }
+  ]
+}

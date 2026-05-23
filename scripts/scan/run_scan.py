@@ -140,6 +140,16 @@ FIT_NARRATIVE_STOPWORDS = {
     "work",
 }
 
+GENERIC_LOW_SIGNAL_FIT_TERMS = {
+    "support",
+    "services",
+    "service",
+    "solution",
+    "solutions",
+    "system",
+    "systems",
+}
+
 
 def parse_horizon(raw: str) -> tuple[int, int]:
     cleaned = raw.lower().replace("days", "").replace("day", "").replace("to", "-").replace(" ", "")
@@ -220,7 +230,50 @@ def _vendor_name(profile: dict[str, Any]) -> str:
     return profile.get("vendor_name") or profile.get("name") or company.get("name") or "Vendor"
 
 
-def _vendor_keywords(profile: dict[str, Any]) -> list[str]:
+def _unique_strings(values: list[Any]) -> list[str]:
+    deduped: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in deduped:
+            deduped.append(text)
+    return deduped
+
+
+def _applied_preferences(preferences: dict[str, Any]) -> dict[str, Any]:
+    learning = preferences.get("learning", {}) if isinstance(preferences.get("learning"), dict) else {}
+    applied = learning.get("applied_preferences", {})
+    return applied if isinstance(applied, dict) else {}
+
+
+def _merged_preference_values(preferences: dict[str, Any], section: str, key: str) -> list[str]:
+    values: list[Any] = []
+    base_section = preferences.get(section, {}) if isinstance(preferences.get(section), dict) else {}
+    if isinstance(base_section.get(key), list):
+        values.extend(base_section.get(key, []))
+    applied_section = _applied_preferences(preferences).get(section, {})
+    if isinstance(applied_section, dict) and isinstance(applied_section.get(key), list):
+        values.extend(applied_section.get(key, []))
+    return _unique_strings(values)
+
+
+def _learning_signal_scores(preferences: dict[str, Any], dimension: str) -> dict[str, float]:
+    learning = preferences.get("learning", {}) if isinstance(preferences.get("learning"), dict) else {}
+    signal_scores = learning.get("signal_scores", {})
+    if not isinstance(signal_scores, dict):
+        return {}
+    values = signal_scores.get(dimension, {})
+    if not isinstance(values, dict):
+        return {}
+    result: dict[str, float] = {}
+    for key, value in values.items():
+        try:
+            result[str(key)] = float(value)
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def _vendor_keywords(profile: dict[str, Any], preferences: dict[str, Any] | None = None) -> list[str]:
     keywords: list[str] = []
     for item in profile.get("core_competencies", []):
         if isinstance(item, dict):
@@ -232,6 +285,21 @@ def _vendor_keywords(profile: dict[str, Any]) -> list[str]:
     other_tags = profile.get("other_taxonomy_tags", {}) if isinstance(profile.get("other_taxonomy_tags"), dict) else {}
     for item in other_tags.get("keywords", []):
         if isinstance(item, str) and item.strip():
+            keywords.append(item.strip().lower())
+    if preferences:
+        for item in _merged_preference_values(preferences, "soft_preferences", "positive_keywords"):
+            keywords.append(item.strip().lower())
+    return sorted(dict.fromkeys(keywords))
+
+
+def _vendor_negative_keywords(profile: dict[str, Any], preferences: dict[str, Any] | None = None) -> list[str]:
+    keywords: list[str] = []
+    other_tags = profile.get("other_taxonomy_tags", {}) if isinstance(profile.get("other_taxonomy_tags"), dict) else {}
+    for item in other_tags.get("negative_keywords", []):
+        if isinstance(item, str) and item.strip():
+            keywords.append(item.strip().lower())
+    if preferences:
+        for item in _merged_preference_values(preferences, "soft_preferences", "negative_keywords"):
             keywords.append(item.strip().lower())
     return sorted(dict.fromkeys(keywords))
 
@@ -250,15 +318,18 @@ def _vendor_naics_by_bucket(profile: dict[str, Any], bucket: str) -> list[str]:
     return values
 
 
-def _vendor_naics(profile: dict[str, Any]) -> list[str]:
+def _vendor_naics(profile: dict[str, Any], preferences: dict[str, Any] | None = None) -> list[str]:
     values: list[str] = []
     for bucket in ("confirmed", "candidates"):
         values.extend(_vendor_naics_by_bucket(profile, bucket))
+    if preferences:
+        values.extend(_merged_preference_values(preferences, "soft_preferences", "preferred_naics"))
     deduped = []
     for code in values:
         if code not in deduped:
             deduped.append(code)
-    return deduped[:5]
+    excluded = set(_merged_preference_values(preferences or {}, "hard_filters", "exclude_naics"))
+    return [code for code in deduped if code not in excluded][:5]
 
 
 def _vendor_fit_narrative(profile: dict[str, Any]) -> str:
@@ -347,6 +418,11 @@ def _fit_term_tokens(term: str) -> list[str]:
     return tokens
 
 
+def _is_low_signal_fit_term(term: str) -> bool:
+    tokens = _fit_term_tokens(term)
+    return len(tokens) == 1 and tokens[0] in GENERIC_LOW_SIGNAL_FIT_TERMS
+
+
 def _token_forms(token: str) -> set[str]:
     forms = {token}
     if token.endswith("ies") and len(token) > 3:
@@ -394,12 +470,19 @@ def _fit_narrative_alignment(
     negative_terms = [str(term) for term in fit_guidance.get("negative_terms", []) if str(term).strip()]
     positive_hits = [term for term in positive_terms if _fit_term_matches(term, normalized_text, token_set)]
     negative_hits = [term for term in negative_terms if _fit_term_matches(term, normalized_text, token_set)]
+    strong_positive_hits = [term for term in positive_hits if not _is_low_signal_fit_term(term)]
+    low_signal_positive_hits = [term for term in positive_hits if _is_low_signal_fit_term(term)]
 
     points = 0
     reasons: list[str] = []
-    if positive_hits:
-        points += min(12, 4 * len(positive_hits))
-        reasons.append(f"Fit narrative alignment: {', '.join(positive_hits[:3])}.")
+    if strong_positive_hits:
+        weighted_points = 0
+        for term in strong_positive_hits:
+            weighted_points += 4 if len(_fit_term_tokens(term)) > 1 else 2
+        points += min(12, weighted_points)
+        reasons.append(f"Fit narrative alignment: {', '.join(strong_positive_hits[:3])}.")
+    elif low_signal_positive_hits:
+        reasons.append(f"Low-signal fit alignment only: {', '.join(low_signal_positive_hits[:3])}.")
     else:
         points -= 10
         reasons.append("Fit narrative did not surface a clear positive alignment.")
@@ -408,7 +491,11 @@ def _fit_narrative_alignment(
         points -= min(18, 6 * len(negative_hits))
         reasons.append(f"Fit narrative caution: {', '.join(negative_hits[:3])}.")
 
-    return points, reasons, {"positive_hits": positive_hits, "negative_hits": negative_hits}
+    return points, reasons, {
+        "positive_hits": strong_positive_hits,
+        "low_signal_positive_hits": low_signal_positive_hits,
+        "negative_hits": negative_hits,
+    }
 
 
 def _timing_settings(preferences: dict[str, Any]) -> dict[str, Any]:
@@ -479,6 +566,136 @@ def _keyword_matches(keyword: str, normalized_text: str, token_set: set[str]) ->
     return f" {normalized_keyword} " in f" {normalized_text} "
 
 
+def _buyer_signal_score(record: dict[str, Any], preferences: dict[str, Any]) -> tuple[float, list[str]]:
+    buyer_text = _normalized_text(record.get("buyer", ""))
+    scores = _learning_signal_scores(preferences, "buyers")
+    hits: list[str] = []
+    total = 0.0
+    for buyer, score in scores.items():
+        normalized_buyer = _normalized_text(buyer)
+        if normalized_buyer and normalized_buyer in buyer_text:
+            hits.append(buyer)
+            total += score
+    return total, hits
+
+
+def _keyword_signal_hits(normalized_text: str, token_set: set[str], preferences: dict[str, Any]) -> tuple[list[str], list[str]]:
+    scores = _learning_signal_scores(preferences, "keywords")
+    positive_hits: list[str] = []
+    negative_hits: list[str] = []
+    for keyword, score in scores.items():
+        if not _keyword_matches(keyword, normalized_text, token_set):
+            continue
+        if score > 0 and keyword not in positive_hits:
+            positive_hits.append(keyword)
+        if score < 0 and keyword not in negative_hits:
+            negative_hits.append(keyword)
+    return positive_hits, negative_hits
+
+
+def _naics_signal_score(record: dict[str, Any], preferences: dict[str, Any]) -> tuple[float, list[str]]:
+    record_codes = _record_naics_codes(record)
+    scores = _learning_signal_scores(preferences, "naics")
+    hits: list[str] = []
+    total = 0.0
+    for code in record_codes:
+        if code in scores:
+            hits.append(code)
+            total += scores[code]
+    return total, hits
+
+
+def _opportunity_class_signal_score(record: dict[str, Any], preferences: dict[str, Any]) -> tuple[float, list[str]]:
+    opportunity_class = str(record.get("opportunity_class", "") or "").strip()
+    if not opportunity_class:
+        return 0.0, []
+    scores = _learning_signal_scores(preferences, "opportunity_classes")
+    total = 0.0
+    hits: list[str] = []
+    normalized_class = _normalized_text(opportunity_class)
+    for value, score in scores.items():
+        if _normalized_text(value) == normalized_class:
+            hits.append(value)
+            total += score
+    return total, hits
+
+
+def _feedback_signal_adjustment(
+    record: dict[str, Any],
+    normalized_text: str,
+    token_set: set[str],
+    preferences: dict[str, Any],
+) -> tuple[int, list[str]]:
+    points = 0
+    reasons: list[str] = []
+
+    buyer_score, buyer_hits = _buyer_signal_score(record, preferences)
+    if buyer_score > 0:
+        points += min(6, int(round(buyer_score * 2)))
+        reasons.append(f"Learned buyer preference from feedback: {', '.join(buyer_hits[:2])}.")
+    elif buyer_score < 0:
+        points -= min(6, int(round(abs(buyer_score) * 2)))
+        reasons.append(f"Learned buyer caution from feedback: {', '.join(buyer_hits[:2])}.")
+
+    positive_keyword_hits, negative_keyword_hits = _keyword_signal_hits(normalized_text, token_set, preferences)
+    positive_keyword_score = sum(_learning_signal_scores(preferences, "keywords").get(keyword, 0.0) for keyword in positive_keyword_hits)
+    negative_keyword_score = sum(abs(_learning_signal_scores(preferences, "keywords").get(keyword, 0.0)) for keyword in negative_keyword_hits)
+    if positive_keyword_score > 0:
+        points += min(6, int(round(positive_keyword_score * 2)))
+        reasons.append(f"Learned keyword preference from feedback: {', '.join(positive_keyword_hits[:3])}.")
+    if negative_keyword_score > 0:
+        points -= min(6, int(round(negative_keyword_score * 2)))
+        reasons.append(f"Learned keyword caution from feedback: {', '.join(negative_keyword_hits[:3])}.")
+
+    naics_score, naics_hits = _naics_signal_score(record, preferences)
+    if naics_score > 0:
+        points += min(4, int(round(naics_score * 2)))
+        reasons.append(f"Learned NAICS preference from feedback: {', '.join(naics_hits[:3])}.")
+    elif naics_score < 0:
+        points -= min(4, int(round(abs(naics_score) * 2)))
+        reasons.append(f"Learned NAICS caution from feedback: {', '.join(naics_hits[:3])}.")
+
+    opportunity_class_score, opportunity_class_hits = _opportunity_class_signal_score(record, preferences)
+    if opportunity_class_score > 0:
+        points += min(4, int(round(opportunity_class_score * 2)))
+        reasons.append(f"Learned opportunity-class preference from feedback: {', '.join(opportunity_class_hits[:2])}.")
+    elif opportunity_class_score < 0:
+        points -= min(4, int(round(abs(opportunity_class_score) * 2)))
+        reasons.append(f"Learned opportunity-class caution from feedback: {', '.join(opportunity_class_hits[:2])}.")
+
+    return points, reasons
+
+
+def _preference_filter_guidance(
+    record: dict[str, Any],
+    normalized_text: str,
+    token_set: set[str],
+    preferences: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    buyer_text = _normalized_text(record.get("buyer", ""))
+    for buyer in _merged_preference_values(preferences, "hard_filters", "exclude_buyers"):
+        normalized_buyer = _normalized_text(buyer)
+        if normalized_buyer and normalized_buyer in buyer_text:
+            return "suppressed", f"Suppressed by learned buyer filter: {buyer}."
+
+    excluded_naics = set(_merged_preference_values(preferences, "hard_filters", "exclude_naics"))
+    matching_naics = sorted(_record_naics_codes(record) & excluded_naics)
+    if matching_naics:
+        return "suppressed", f"Suppressed by learned NAICS filter: {', '.join(matching_naics[:3])}."
+
+    opportunity_class = str(record.get("opportunity_class", "") or "").strip()
+    normalized_opportunity_class = _normalized_text(opportunity_class)
+    for excluded_class in _merged_preference_values(preferences, "hard_filters", "exclude_opportunity_classes"):
+        if _normalized_text(excluded_class) == normalized_opportunity_class and normalized_opportunity_class:
+            return "suppressed", f"Suppressed by learned opportunity-class filter: {excluded_class}."
+
+    for keyword in _merged_preference_values(preferences, "hard_filters", "exclude_keywords"):
+        if _keyword_matches(keyword, normalized_text, token_set):
+            return "suppressed", f"Suppressed by learned keyword filter: {keyword}."
+
+    return None, None
+
+
 def _preferred_buyer_match_strength(preferred_buyer: str, buyer_text: str) -> tuple[int, str] | None:
     normalized_preference = _normalized_text(preferred_buyer)
     if not normalized_preference:
@@ -543,6 +760,7 @@ def _has_strong_action_now_signal(fit_context: dict[str, Any]) -> bool:
         or fit_context.get("naics_quality") == "confirmed"
         or int(fit_context.get("buyer_match_points", 0) or 0) >= 10
         or fit_context.get("fit_narrative_positive_hits")
+        or fit_context.get("learned_feedback_positive")
     )
 
 
@@ -716,8 +934,10 @@ def _has_hard_eligibility_gate(record: dict[str, Any], hydrated_text: str | None
 def _score_record(
     record: dict[str, Any],
     keywords: list[str],
+    negative_keywords: list[str],
     fit_guidance: dict[str, Any],
     profile: dict[str, Any],
+    preferences: dict[str, Any],
     hydrated_text: str | None,
     timing_band: str,
     days_until_due: int | None,
@@ -733,11 +953,21 @@ def _score_record(
     match_score += naics_points
     if naics_reason:
         reasons.append(naics_reason)
+    preferred_naics = set(_merged_preference_values(preferences, "soft_preferences", "preferred_naics"))
+    preferred_naics_hits = sorted(_record_naics_codes(record) & preferred_naics)
+    if preferred_naics_hits:
+        match_score += min(8, 4 * len(preferred_naics_hits))
+        reasons.append(f"Learned preferred NAICS overlap: {', '.join(preferred_naics_hits[:3])}.")
 
     keyword_hits = [keyword for keyword in keywords if _keyword_matches(keyword, normalized_text, token_set)]
     if keyword_hits:
         match_score += min(25, 5 * len(keyword_hits))
         reasons.append(f"Capability/keyword overlap: {', '.join(keyword_hits[:4])}.")
+
+    negative_keyword_hits = [keyword for keyword in negative_keywords if _keyword_matches(keyword, normalized_text, token_set)]
+    if negative_keyword_hits:
+        match_score -= min(15, 5 * len(negative_keyword_hits))
+        reasons.append(f"Negative keyword overlap: {', '.join(negative_keyword_hits[:4])}.")
 
     fit_narrative_points, fit_narrative_reasons, fit_narrative_context = _fit_narrative_alignment(
         fit_guidance,
@@ -752,6 +982,9 @@ def _score_record(
     for item in buyers.get("preferred", []):
         if isinstance(item, str) and item.strip():
             preferred_buyers.append(item.strip().lower())
+    for item in _merged_preference_values(preferences, "soft_preferences", "preferred_buyers"):
+        preferred_buyers.append(item.strip().lower())
+    preferred_buyers = sorted(dict.fromkeys(preferred_buyers))
     buyer_text = _normalized_text(record.get("buyer", ""))
     buyer_match_points = 0
     buyer_match_reason = ""
@@ -763,10 +996,23 @@ def _score_record(
         match_score += buyer_match_points
         reasons.append(buyer_match_reason)
 
+    preferred_opportunity_classes = {
+        _normalized_text(item)
+        for item in _merged_preference_values(preferences, "soft_preferences", "preferred_opportunity_classes")
+    }
+    normalized_opportunity_class = _normalized_text(record.get("opportunity_class", ""))
+    if normalized_opportunity_class and normalized_opportunity_class in preferred_opportunity_classes:
+        match_score += 6
+        reasons.append(f"Learned preferred opportunity class: {record.get('opportunity_class', 'N/A')}.")
+
     timing_reason = _timing_reason(timing_band, days_until_due)
     match_score += _timing_adjustment(timing_band)
     if timing_reason:
         reasons.append(timing_reason)
+
+    feedback_points, feedback_reasons = _feedback_signal_adjustment(record, normalized_text, token_set, preferences)
+    match_score += feedback_points
+    reasons.extend(feedback_reasons)
 
     hard_eligibility_gate = _has_hard_eligibility_gate(record, hydrated_text)
     if hard_eligibility_gate:
@@ -801,6 +1047,7 @@ def _score_record(
         "hard_eligibility_gate": hard_eligibility_gate,
         "fit_narrative_positive_hits": fit_narrative_context.get("positive_hits", []),
         "fit_narrative_negative_hits": fit_narrative_context.get("negative_hits", []),
+        "learned_feedback_positive": feedback_points > 0,
     }
     return max(0, min(match_score, 100)), max(0, min(confidence, 100)), reasons[:4], caveat, fit_context
 
@@ -871,9 +1118,10 @@ def main() -> int:
     timing = _timing_settings(preferences)
     vendor_profile = load_json(workspace / "procurement" / "vendor-profile.json", default={})
     vendor_name = _vendor_name(vendor_profile)
-    keywords = _vendor_keywords(vendor_profile)
+    keywords = _vendor_keywords(vendor_profile, preferences)
+    negative_keywords = _vendor_negative_keywords(vendor_profile, preferences)
     fit_guidance = _fit_narrative_guidance(vendor_profile)
-    naics_codes = _vendor_naics(vendor_profile)
+    naics_codes = _vendor_naics(vendor_profile, preferences)
 
     source_issues: list[str] = []
     source_statuses: list[dict[str, Any]] = []
@@ -915,17 +1163,25 @@ def main() -> int:
                 record.setdefault("raw_match_evidence", {})
                 record["raw_match_evidence"]["full_desc_loaded"] = True
 
+            normalized_scan_text = _normalized_text(f"{record.get('title', '')} {record.get('summary', '')} {hydrated_text or ''}")
+            scan_token_set = set(normalized_scan_text.split())
+            preference_bucket, preference_note = _preference_filter_guidance(record, normalized_scan_text, scan_token_set, preferences)
             match_score, confidence_score, reasons, caveat, fit_context = _score_record(
                 record,
                 keywords,
+                negative_keywords,
                 fit_guidance,
                 vendor_profile,
+                preferences,
                 hydrated_text,
                 timing_band,
                 days_until_due,
             )
             notice_categories = _notice_categories(record, hydrated_text)
             guidance_bucket, guidance_note, guidance_categories = _notice_guidance(preferences, notice_categories, timing_band)
+            if preference_bucket == "suppressed":
+                guidance_bucket = "suppressed"
+                guidance_note = preference_note
             record["match_score"] = match_score
             record["confidence_score"] = confidence_score
             record["bucket"] = _bucket_for_record(match_score, timing_band, preferences, guidance_bucket, fit_context)

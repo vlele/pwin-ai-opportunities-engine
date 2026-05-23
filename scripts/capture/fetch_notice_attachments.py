@@ -278,20 +278,23 @@ def fetch_notice_attachments(
     *,
     max_attachments: int = 20,
 ) -> dict[str, Any]:
-    download_targets = [
+    seeded_resource_links = bool(download_targets := [
         {"url": link.strip(), "filename": "", "content_type": ""}
         for link in (resource_links or [])
         if isinstance(link, str) and link.strip()
-    ]
+    ])
     contacts = [item for item in (point_of_contact or []) if isinstance(item, dict)]
     record: dict[str, Any] = {}
     status = "ok"
     errors: list[str] = []
+    record_lookup_status = "skipped"
+    resource_listing_status = "skipped"
 
     if not download_targets:
         public_record_result = _fetch_public_notice_record(notice_id, solicitation_number)
         record = public_record_result.get("record", {})
         status = public_record_result.get("status", "error")
+        record_lookup_status = status
         if status == "ok" and isinstance(record, dict):
             contacts = record.get("pointOfContact", []) if isinstance(record.get("pointOfContact"), list) else contacts
             download_targets = [
@@ -305,10 +308,12 @@ def fetch_notice_attachments(
     if not download_targets:
         public_resources_result = _fetch_public_resource_links(notice_id)
         status = public_resources_result.get("status", status)
+        resource_listing_status = status
         download_targets = public_resources_result.get("resources", []) if isinstance(public_resources_result.get("resources"), list) else []
         if not download_targets and public_resources_result.get("detail"):
             errors.append(public_resources_result.get("detail"))
 
+    attachments_expected = bool(download_targets)
     attachments: list[dict[str, Any]] = []
     for target in download_targets[:max_attachments]:
         if not isinstance(target, dict):
@@ -330,6 +335,10 @@ def fetch_notice_attachments(
         "record": record,
         "point_of_contact": contacts,
         "attachments": attachments,
+        "attachments_expected": attachments_expected,
+        "record_lookup_status": record_lookup_status,
+        "resource_listing_status": resource_listing_status,
+        "seeded_resource_links": seeded_resource_links,
         "resource_link_count": len(download_targets),
         "errors": errors,
     }

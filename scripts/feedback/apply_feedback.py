@@ -11,10 +11,28 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from common.jsonl import append_jsonl
-from common.paths import load_json, today_local_str, utc_now_iso, write_json
+from common.paths import load_json, standard_procurement_paths, today_local_str, utc_now_iso, write_json
+from capture.resolve_entry import resolve_entry
+from feedback.learning import recompute_learning_preferences
+from scan.run_scan import _fit_narrative_guidance, _keyword_matches, _normalized_text, _vendor_keywords
 
 
 ENTRY_RE = re.compile(r"\b([AWESN]\d+)\b", re.IGNORECASE)
+REASON_CODE_PATTERNS = (
+    ("right_buyer", ("right buyer", "good buyer")),
+    ("wrong_buyer", ("wrong buyer", "bad buyer")),
+    ("right_work", ("right work", "good fit")),
+    ("wrong_work", ("wrong work", "poor fit", "not our lane")),
+    ("too_small", ("too small",)),
+    ("too_large", ("too large",)),
+    ("wrong_location", ("wrong location",)),
+    ("wrong_vehicle", ("wrong vehicle",)),
+    ("wrong_timing", ("wrong timing",)),
+    ("teaming_only", ("teaming only",)),
+    ("subcontract_only", ("subcontract only", "sub only")),
+    ("bad_eligibility", ("bad eligibility", "wrong eligibility")),
+    ("unclear_evidence", ("unclear evidence",)),
+)
 
 
 def latest_digest_entry_map(workspace: Path) -> tuple[dict, Path | None]:
@@ -45,6 +63,89 @@ def detect_feedback_kind(text: str) -> tuple[str, int]:
     return "like", 1
 
 
+def extract_reason_codes(text: str) -> list[str]:
+    lower = text.lower()
+    codes: list[str] = []
+    for code, patterns in REASON_CODE_PATTERNS:
+        if any(pattern in lower for pattern in patterns) and code not in codes:
+            codes.append(code)
+    return codes
+
+
+def _normalize_record_list(raw: object) -> list[dict]:
+    if isinstance(raw, list):
+        return [item for item in raw if isinstance(item, dict)]
+    if isinstance(raw, dict):
+        for key in ("records", "opportunities", "items"):
+            value = raw.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _load_full_record(workspace: Path, resolved: dict) -> dict:
+    digest_date = str(resolved.get("digest_date") or "").strip()
+    if not digest_date:
+        return {}
+    opportunities_path = standard_procurement_paths(workspace, digest_date)["opportunities"]
+    records = _normalize_record_list(load_json(opportunities_path, default=[]))
+    for record in records:
+        candidates = {
+            str(record.get("canonical_record_id", "")),
+            str(record.get("notice_id", "")),
+            str(record.get("opportunity_id", "")),
+            str(record.get("title", "")),
+            str(record.get("url", "")),
+        }
+        resolved_candidates = {
+            str(resolved.get("canonical_record_id", "")),
+            str(resolved.get("notice_id", "")),
+            str(resolved.get("opportunity_id", "")),
+            str(resolved.get("title", "")),
+            str(resolved.get("url", "")),
+        }
+        if candidates & resolved_candidates:
+            return record
+    return {}
+
+
+def _matched_keywords(record: dict, vendor_profile: dict) -> list[str]:
+    text = _normalized_text(f"{record.get('title', '')} {record.get('summary', '')}")
+    token_set = set(text.split())
+    fit_guidance = _fit_narrative_guidance(vendor_profile)
+    candidate_keywords = _vendor_keywords(vendor_profile)
+    candidate_keywords.extend(str(item) for item in fit_guidance.get("positive_terms", []))
+    candidate_keywords.extend(str(item) for item in fit_guidance.get("negative_terms", []))
+    matched = []
+    for keyword in candidate_keywords:
+        if keyword and _keyword_matches(keyword, text, token_set) and keyword not in matched:
+            matched.append(keyword)
+    return matched
+
+
+def _resolved_record_payload(full_record: dict, resolved: dict) -> dict:
+    source = full_record or resolved
+    return {
+        "opportunity_id": source.get("opportunity_id", ""),
+        "source_id": source.get("source_id", ""),
+        "source_name": source.get("source_name", ""),
+        "source_tier": source.get("source_tier", 1),
+        "title": source.get("title", ""),
+        "url": source.get("url", ""),
+        "buyer": source.get("buyer", ""),
+        "opportunity_class": source.get("opportunity_class", ""),
+        "notice_type": source.get("notice_type", ""),
+        "posted_date": source.get("posted_date", ""),
+        "due_date": source.get("due_date", ""),
+        "naics": source.get("naics", []) if isinstance(source.get("naics"), list) else [],
+        "set_aside": source.get("set_aside", ""),
+        "match_score": int(source.get("match_score") or 0),
+        "confidence_score": int(source.get("confidence_score") or 0),
+        "screening_status": source.get("screening_status", source.get("bucket", "")),
+        "bucket": source.get("bucket", ""),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", required=True)
@@ -56,36 +157,39 @@ def main() -> int:
     entry_match = ENTRY_RE.search(user_text)
     entry_id = entry_match.group(1).upper() if entry_match else ""
     feedback_kind, reward = detect_feedback_kind(user_text)
+    reason_codes = extract_reason_codes(user_text)
     digest_map, digest_map_path = latest_digest_entry_map(workspace)
-    resolved_record = {}
-    report_bucket = ""
-
-    for entry in digest_map.get("entries", []):
-        if entry.get("entry_id") == entry_id:
-            resolved_record = entry
-            report_bucket = entry.get("bucket", "")
-            break
-
-    digest_date = digest_map.get("digest_date", today_local_str())
+    resolved = resolve_entry(workspace, entry_id or user_text)
+    full_record = _load_full_record(workspace, resolved)
+    resolved_record = _resolved_record_payload(full_record, resolved)
+    is_resolved = resolved.get("status") == "resolved"
+    report_bucket = str(resolved.get("bucket", "") or "")
+    digest_date = resolved.get("digest_date") or digest_map.get("digest_date", today_local_str())
+    vendor_profile = load_json(workspace / "procurement" / "vendor-profile.json", default={})
+    matched_naics = []
+    if isinstance(resolved_record.get("naics"), list):
+        matched_naics = [str(item).strip() for item in resolved_record.get("naics", []) if str(item).strip()]
+    opportunity_class = str(resolved_record.get("opportunity_class", "") or "").strip()
+    matched_keywords = _matched_keywords(full_record, vendor_profile) if full_record else []
     event = {
         "timestamp": utc_now_iso(),
         "digest_date": digest_date,
         "digest_path": digest_map.get("digest_path", ""),
-        "resolved_from_latest_digest": bool(resolved_record),
-        "report_entry_id": entry_id,
+        "resolved_from_latest_digest": is_resolved,
+        "report_entry_id": entry_id or resolved.get("report_entry_id", ""),
         "report_bucket": report_bucket,
         "user_id": "",
         "user_utterance": user_text,
         "feedback": feedback_kind,
         "reward": reward,
         "free_text": user_text,
-        "reason_codes": [],
+        "reason_codes": reason_codes,
         "resolved_record": resolved_record,
         "resolved_entities": {
-            "matched_keywords": [],
+            "matched_keywords": matched_keywords,
             "matched_buyers": [resolved_record.get("buyer")] if resolved_record.get("buyer") else [],
-            "matched_naics": [],
-            "matched_opportunity_classes": [resolved_record.get("opportunity_class")] if resolved_record.get("opportunity_class") else [],
+            "matched_naics": matched_naics,
+            "matched_opportunity_classes": [opportunity_class] if opportunity_class else [],
             "matched_award_size_band": [],
             "matched_location_preferences": [],
             "matched_teaming_or_vehicle_signals": [],
@@ -97,12 +201,16 @@ def main() -> int:
             "soft_preferences_downweighted": [resolved_record.get("buyer")] if reward < 0 and resolved_record.get("buyer") else [],
             "memory_updates": [],
             "preference_file_updates": [],
-            "notes": [f"Resolved using {digest_map_path.as_posix()}" if digest_map_path else "No digest-entry-map found"],
+            "notes": [
+                f"Resolved using {digest_map_path.as_posix()}" if digest_map_path else "No digest-entry-map found",
+                f"Entry resolution mode: {resolved.get('entry_resolution_mode', 'unknown')}",
+            ],
         },
     }
 
     feedback_path = workspace / "procurement" / "feedback-events.jsonl"
     append_jsonl(feedback_path, event)
+    learning_summary = recompute_learning_preferences(workspace)
 
     preferences_path = workspace / "procurement" / "preferences.json"
     preferences = load_json(preferences_path, default={})
@@ -116,8 +224,10 @@ def main() -> int:
         "feedback_path": feedback_path.as_posix(),
         "preferences_path": preferences_path.as_posix(),
         "feedback": feedback_kind,
-        "report_entry_id": entry_id,
-        "resolved": bool(resolved_record),
+        "report_entry_id": entry_id or resolved.get("report_entry_id", ""),
+        "resolved": is_resolved,
+        "reason_codes": reason_codes,
+        "learning_summary": learning_summary,
     }
     print(json.dumps(result, ensure_ascii=True))
     return 0
