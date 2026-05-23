@@ -20,7 +20,25 @@
 
 ## Executive Brief
 
-{{EXECUTIVE_BRIEF}}
+### Objective Summaries
+
+{{EXECUTIVE_OBJECTIVE_SUMMARIES}}
+
+### Why It Matters Now
+
+{{EXECUTIVE_WHY_NOW}}
+
+### Risks, Constraints, and Success Metrics
+
+{{EXECUTIVE_RISKS_AND_METRICS}}
+
+### Incumbent and Competitor Posture
+
+{{EXECUTIVE_INCUMBENT_POSTURE}}
+
+### Recommended Win Themes and Proof Points
+
+{{EXECUTIVE_WIN_THEMES}}
 
 ## Objective Matrix
 
@@ -30,11 +48,23 @@
 
 ## Stakeholder and People Map
 
+### Stakeholder Map
+
 {{STAKEHOLDER_MAP}}
+
+### Leadership Priorities and Public Signals
+
+{{LEADERSHIP_PRIORITY_SIGNALS}}
 
 ## Budget, Funding, and Spending Signals
 
+### Budget and Funding Signals
+
 {{BUDGET_AND_SPENDING_SIGNALS}}
+
+### Acquisition Forecast and Timing Signals
+
+{{ACQUISITION_FORECAST_SIGNALS}}
 
 ## Related Procurements and Vehicle Signals
 
@@ -45,6 +75,20 @@
 {{COMPETITIVE_LANDSCAPE}}
 
 ## Public Discourse and Market Signals
+
+### Mission and Strategy Signals
+
+{{MISSION_CONTEXT_SIGNALS}}
+
+### Policy and Compliance Signals
+
+{{POLICY_COMPLIANCE_SIGNALS}}
+
+### Oversight and Audit Signals
+
+{{OVERSIGHT_SIGNALS}}
+
+### Public Discourse and Community Signals
 
 {{PUBLIC_DISCOURSE_AND_MARKET_SIGNALS}}
 

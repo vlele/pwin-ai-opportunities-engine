@@ -17,7 +17,7 @@ from common.paths import safe_slug, standard_procurement_paths, today_local_str,
 from common.validation import validate_capture_brief_text
 from capture.fetch_notice_attachments import fetch_notice_attachments
 from capture.fetch_notice_context import load_notice_context
-from capture.fetch_public_context import fetch_url_excerpt
+from capture.fetch_public_context import fetch_public_research, fetch_url_excerpt
 from capture.render_capture_brief import render_capture_brief
 from capture.resolve_entry import resolve_entry
 from capture.usaspending_enrich import enrich_from_usaspending
@@ -64,6 +64,27 @@ SIGNAL_STOPWORDS = {
     "space",
     "based",
 }
+OBJECTIVE_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+OBJECTIVE_KEYWORDS = (
+    "shall",
+    "must",
+    "support",
+    "provide",
+    "deliver",
+    "maintain",
+    "ensure",
+    "comply",
+    "transition",
+    "report",
+    "staff",
+    "license",
+    "security",
+    "privacy",
+    "integration",
+    "training",
+    "availability",
+    "quality",
+)
 
 
 def request_id_for(entry_value: str) -> str:
@@ -396,6 +417,200 @@ def _objective_stakeholder_text(buyer: str, contacts: list[dict[str, str]]) -> s
     return "; ".join(values) if values else buyer or "N/A"
 
 
+def _attachment_text_pool(attachment_bundle: dict[str, object], max_items: int = 5) -> list[str]:
+    attachments = attachment_bundle.get("attachments", []) if isinstance(attachment_bundle, dict) else []
+    priority = {
+        "statement_of_work": 0,
+        "solicitation": 1,
+        "instructions_evaluation": 2,
+        "questions_answers": 3,
+        "amendment": 4,
+        "other": 5,
+    }
+    ordered = sorted(
+        [item for item in attachments if isinstance(item, dict)],
+        key=lambda item: priority.get(str(item.get("category", "other")), 9),
+    )
+    texts: list[str] = []
+    for item in ordered[:max_items]:
+        text_excerpt = _clean_excerpt(item.get("text_excerpt", ""), max_chars=5000)
+        if text_excerpt:
+            texts.append(text_excerpt)
+        for snippet in item.get("snippets", []) or []:
+            cleaned = _clean_excerpt(snippet, max_chars=320)
+            if cleaned:
+                texts.append(cleaned)
+    return _dedupe_strings(texts)
+
+
+def _signal_overlap_score(reference_tokens: set[str], text: str) -> int:
+    return len(reference_tokens & _signal_tokens(text))
+
+
+def _matching_lines(reference_text: str, lines: list[str], max_items: int = 3) -> list[str]:
+    reference_tokens = _signal_tokens(reference_text)
+    ranked = sorted(
+        (
+            (_signal_overlap_score(reference_tokens, line), line)
+            for line in lines
+            if str(line or "").strip()
+        ),
+        key=lambda item: (-item[0], item[1]),
+    )
+    selected = [line for score, line in ranked if score > 0][:max_items]
+    return selected or _dedupe_strings(lines)[:max_items]
+
+
+def _decompose_objectives(
+    title: str,
+    summary: str,
+    explanation_summary: str,
+    attachment_bundle: dict[str, object],
+) -> list[str]:
+    candidates: list[str] = []
+    seed_values = [title, summary, explanation_summary, *_attachment_text_pool(attachment_bundle)]
+    for value in seed_values:
+        for part in OBJECTIVE_SENTENCE_RE.split(_clean_excerpt(value, max_chars=8000)):
+            sentence = SPACE_RE.sub(" ", part).strip(" -")
+            lower = sentence.lower()
+            if len(sentence) < 60 or len(sentence) > 320:
+                continue
+            if sentence.endswith("?"):
+                continue
+            if re.match(r"^\d{1,2}/\d{1,2}/\d{4}", sentence):
+                continue
+            if any(
+                marker in lower
+                for marker in (
+                    "vendor question",
+                    "question answer",
+                    "questions and answers",
+                    "offers must acknowledge receipt of this amendment",
+                    "standard form 30",
+                )
+            ):
+                continue
+            if not any(keyword in lower for keyword in OBJECTIVE_KEYWORDS):
+                continue
+            candidates.append(sentence)
+    if title:
+        candidates.insert(0, _clean_excerpt(title, max_chars=240))
+    deduped = _dedupe_strings(candidates)
+    filtered: list[str] = []
+    normalized_filtered: list[str] = []
+    for sentence in deduped:
+        normalized = re.sub(r"[^a-z0-9]+", " ", sentence.lower()).strip()
+        if not normalized:
+            continue
+        replaced = False
+        for index, existing_normalized in enumerate(normalized_filtered):
+            shorter, longer = sorted((normalized, existing_normalized), key=len)
+            if shorter and shorter in longer:
+                if len(sentence) > len(filtered[index]):
+                    filtered[index] = sentence
+                    normalized_filtered[index] = normalized
+                replaced = True
+                break
+        if not replaced:
+            filtered.append(sentence)
+            normalized_filtered.append(normalized)
+    return filtered[:4] if filtered else [_clean_excerpt(title or summary or "Objective decomposition pending", max_chars=240)]
+
+
+def _objective_kpis(objective_text: str) -> str:
+    lower = objective_text.lower()
+    kpis: list[str] = []
+    if any(term in lower for term in ("security", "privacy", "fisma", "nist", "compliance")):
+        kpis.append("compliance defect rate, time-to-remediate, audit readiness")
+    if any(term in lower for term in ("support", "helpdesk", "training", "staff")):
+        kpis.append("response time, staffing continuity, user satisfaction")
+    if any(term in lower for term in ("software", "portal", "availability", "performance", "system")):
+        kpis.append("availability, cycle-time reduction, defect escape rate")
+    if any(term in lower for term in ("data", "transmission", "migration", "report")):
+        kpis.append("data quality score, transmission success rate, reporting timeliness")
+    return "; ".join(_dedupe_strings(kpis)) or "cycle-time reduction, compliance fidelity, mission delivery outcomes"
+
+
+def _objective_solution_implications(objective_text: str) -> str:
+    lower = objective_text.lower()
+    implications: list[str] = []
+    if "cots" in lower or "commercial off" in lower:
+        implications.append("Lead with mature COTS fit, proven release cadence, and low-customization deployment.")
+    if any(term in lower for term in ("security", "privacy", "nist", "fisma", "publication 4812")):
+        implications.append("Show inherited control coverage, rapid compliance startup, and IRS/NIST traceability.")
+    if any(term in lower for term in ("integration", "migration", "carry forward", "transmission")):
+        implications.append("Reduce transition risk with clean data carry-forward, migration controls, and minimal integration dependencies.")
+    if any(term in lower for term in ("staff", "workforce", "personnel", "training")):
+        implications.append("Present mobilization realism, cleared staffing continuity, and measurable service management.")
+    if any(term in lower for term in ("firm fixed price", "ffp", "license", "option")):
+        implications.append("Anchor pricing around predictable FFP delivery and annual renewal economics.")
+    return " ".join(_dedupe_strings(implications)) or "Shape win themes around mission fit, compliance, and operational realism."
+
+
+def _objective_key_risks(objective_text: str, evidence_gaps: list[str]) -> str:
+    lower = objective_text.lower()
+    risks: list[str] = []
+    if any(term in lower for term in ("security", "privacy", "nist", "fisma")):
+        risks.append("Compressed compliance timelines could expose gaps in inherited controls or documentation.")
+    if any(term in lower for term in ("migration", "carry forward", "transmission", "data")):
+        risks.append("Data carry-forward and transmission assumptions may hide implementation and quality risks.")
+    if any(term in lower for term in ("staff", "workforce", "personnel", "background")):
+        risks.append("Key-personnel screening and workforce reporting requirements could slow mobilization.")
+    if evidence_gaps:
+        risks.append(evidence_gaps[0])
+    return " ".join(_dedupe_strings(risks)) or "Partial evidence until attachments, policy context, and award history tell a consistent story."
+
+
+def _objective_driver(reference_text: str, signals: list[str], fallback: str) -> str:
+    matches = _matching_lines(reference_text, signals, max_items=1)
+    return matches[0] if matches else fallback
+
+
+def _objective_evidence_snippets(
+    objective_text: str,
+    attachment_snippets: list[str],
+    public_research: dict[str, object],
+    related_procurements: list[str],
+    max_items: int = 6,
+) -> list[str]:
+    lines: list[str] = []
+    lines.extend(attachment_snippets)
+    for key in (
+        "mission_context_signals",
+        "policy_compliance_signals",
+        "budget_document_signals",
+        "acquisition_forecast_signals",
+        "oversight_signals",
+        "leadership_priority_signals",
+        "public_discourse_signals",
+    ):
+        lines.extend(public_research.get(key, []) or [])
+    lines.extend(related_procurements[:3])
+    return _matching_lines(objective_text, _dedupe_strings(lines), max_items=max_items)
+
+
+def _objective_evidence_links(primary_url: str, source_log: list[dict[str, object]], objective_text: str) -> str:
+    lines = [primary_url] if primary_url else []
+    reference_tokens = _signal_tokens(objective_text)
+    ranked = sorted(
+        (
+            (_signal_overlap_score(reference_tokens, f"{item.get('title', '')} {item.get('relevance', '')} {item.get('url', '')}"), str(item.get("url", "") or ""))
+            for item in source_log
+            if isinstance(item, dict) and str(item.get("url", "") or "")
+        ),
+        key=lambda item: (-item[0], item[1]),
+    )
+    for score, url in ranked:
+        if score <= 0:
+            continue
+        if url in lines:
+            continue
+        lines.append(url)
+        if len(lines) >= 4:
+            break
+    return " | ".join(lines) if lines else "N/A"
+
+
 def _award_row_text(row: dict[str, object]) -> str:
     return " ".join(
         [
@@ -482,14 +697,22 @@ def _award_history_signals(
     all_amounts = [amount for amount in (_safe_float(row.get("Award Amount")) for row in amount_rows) if amount is not None]
     likely_rows = agency_rows or relevant_rows
     likely_incumbents = _dedupe_strings([str(row.get("Recipient Name", "") or "") for row in likely_rows])[:4]
-    frequent_primes = [name for name, _ in Counter(str(row.get("Recipient Name", "") or "") for row in relevant_rows if row.get("Recipient Name")).most_common(5)]
-    emerging_challengers = _dedupe_strings(
-        [
-            str(row.get("Recipient Name", "") or "")
-            for row in relevant_rows
-            if not row.get("_agency_match") and str(row.get("Recipient Name", "") or "")
-        ]
-    )[:4]
+    competitive_rows = agency_rows or relevant_rows
+    frequent_primes = [
+        name
+        for name, _ in Counter(str(row.get("Recipient Name", "") or "") for row in competitive_rows if row.get("Recipient Name")).most_common(5)
+    ]
+    emerging_challengers = (
+        []
+        if agency_rows
+        else _dedupe_strings(
+            [
+                str(row.get("Recipient Name", "") or "")
+                for row in relevant_rows
+                if not row.get("_agency_match") and str(row.get("Recipient Name", "") or "")
+            ]
+        )[:4]
+    )
 
     budget_signals: list[str] = []
     related_procurements: list[str] = []
@@ -532,7 +755,7 @@ def _award_history_signals(
             notes.append(
                 "Additional cross-agency matches indicate adjacent market performers, but they are not direct proof of incumbency on this solicitation."
             )
-        for row in relevant_rows[:4]:
+        for row in (agency_rows or relevant_rows)[:4]:
             related_procurements.append(
                 f"Award {row.get('Award ID', 'N/A')}: {row.get('Recipient Name', 'Unknown')} | {_currency(row.get('Award Amount'))} | {row.get('Awarding Sub Agency', row.get('Awarding Agency', 'Unknown'))} | {_clean_excerpt(row.get('Description', ''), max_chars=180)}"
             )
@@ -583,6 +806,34 @@ def _award_history_signals(
         "objective_incumbents": ", ".join(likely_incumbents) if likely_incumbents else "No clearly relevant prior award recipients surfaced from USAspending.",
         "evidence_gaps": evidence_gaps,
         "source_log": source_log,
+    }
+
+
+def _funding_assessment(
+    award_signals: dict[str, object],
+    public_research: dict[str, object],
+    attachment_budget_signals: list[str],
+) -> dict[str, object]:
+    useful_award_history = bool(award_signals.get("relevant_awards"))
+    useful_budget_documents = bool(public_research.get("budget_document_signals", []))
+    useful_attachment_budget = bool(attachment_budget_signals)
+    useful_evidence_found = useful_award_history or useful_budget_documents or useful_attachment_budget
+    notes: list[str] = []
+    if useful_award_history:
+        notes.append("USAspending surfaced relevant award-history rows.")
+    if useful_budget_documents:
+        notes.append("Official budget or appropriation documents were discovered.")
+    if useful_attachment_budget:
+        notes.append("SAM attachments exposed pricing, schedule, or amendment budget clues.")
+    if not useful_evidence_found:
+        notes.append("Funding was checked, but no substantive funding evidence was found beyond query status.")
+    return {
+        "checked": True,
+        "useful_evidence_found": useful_evidence_found,
+        "useful_award_history": useful_award_history,
+        "useful_budget_documents": useful_budget_documents,
+        "useful_attachment_budget": useful_attachment_budget,
+        "notes": notes,
     }
 
 
@@ -678,10 +929,11 @@ def main() -> int:
         point_of_contact=snapshot_point_of_contact,
     )
     attachment_scope_snippets = _attachment_scope_snippets(attachment_bundle)
+    attachment_text_pool = _attachment_text_pool(attachment_bundle, max_items=6)
     attachment_context_text = " ".join(attachment_scope_snippets)
     notice_context_text = _clean_excerpt(
-        f"{opportunity.get('summary', '')} {notice_excerpt} {attachment_context_text}",
-        max_chars=12000,
+        f"{opportunity.get('summary', '')} {notice_excerpt} {attachment_context_text} {' '.join(attachment_text_pool)}",
+        max_chars=16000,
     )
     stakeholder_contacts = _dedupe_contacts(
         _contacts_from_point_of_contact(attachment_bundle.get("point_of_contact", [])),
@@ -697,6 +949,15 @@ def main() -> int:
     )
     stakeholder_map = _stakeholder_lines(resolved.get("buyer", ""), stakeholder_contacts, notice_context_text)
     stakeholder_map.extend(_attachment_manifest_lines(attachment_bundle))
+    public_research = fetch_public_research(
+        {
+            "buyer": resolved.get("buyer", ""),
+            "title": resolved.get("title", ""),
+            "url": resolved.get("url", ""),
+        },
+        notice_context_text,
+        stakeholder_contacts,
+    )
     usaspending_result = enrich_from_usaspending(
         resolved.get("title") or canonical_id,
         title=resolved.get("title", ""),
@@ -715,6 +976,12 @@ def main() -> int:
     )
     executive_summary = _clean_excerpt(
         explanation.get("summary") or opportunity.get("summary") or "Fresh structured capture brief generated from current request context."
+    )
+    decomposed_objectives = _decompose_objectives(
+        resolved.get("title", ""),
+        opportunity.get("summary", ""),
+        explanation.get("summary", ""),
+        attachment_bundle,
     )
     public_sources = []
     if public_context.get("status") == "ok":
@@ -748,14 +1015,9 @@ def main() -> int:
         )
     public_sources.extend(award_signals.get("source_log", []))
     public_sources.extend(_attachment_source_log(attachment_bundle))
+    public_sources.extend(public_research.get("source_log", []))
 
     status = "PARTIAL_CAPTURE_RESEARCH"
-    objective_budget_signal = award_signals.get("objective_budget_signal") or "Use USAspending and prior awards to confirm funding reality"
-    objective_incumbents = (
-        ", ".join(attachment_validation.get("validated_incumbents", []))
-        if attachment_validation.get("validated_incumbents")
-        else award_signals.get("objective_incumbents") or "To be validated with award-history enrichment"
-    )
     attachment_categories = Counter(
         str(item.get("category", "other"))
         for item in (attachment_bundle.get("attachments", []) or [])
@@ -771,11 +1033,137 @@ def main() -> int:
             f"Attachment package includes {attachment_categories.get('amendment', 0)} amendment file(s), which can validate scope changes and final instructions."
         )
     attachment_scope_or_notice_snippets = attachment_scope_snippets or [notice_excerpt[:300] or "No substantive notice excerpt captured in this run."]
+    attachment_text_blob = " ".join(attachment_text_pool).lower()
+    vehicle_signals = []
+    if "gsa" in attachment_text_blob or "multiple award schedule" in attachment_text_blob:
+        vehicle_signals.append("Attachment text references a GSA or schedule-style acquisition path that should be validated against the solicitation package.")
+    if "idiq" in attachment_text_blob or "task order" in attachment_text_blob or "delivery order" in attachment_text_blob:
+        vehicle_signals.append("Attachment text references order-based execution language, so vehicle structure and ordering assumptions should be verified.")
+    if not vehicle_signals:
+        vehicle_signals.append("Likely vehicle path remains unconfirmed from the current public package; validate open-market versus existing-vehicle assumptions.")
     attachment_competitive_notes = _dedupe_strings(
         attachment_validation.get("notes", [])
         + attachment_validation.get("direct_mentions", [])
         + attachment_validation.get("supporting_snippets", [])
     )
+    funding_assessment = _funding_assessment(
+        award_signals,
+        public_research,
+        attachment_budget_signals,
+    )
+    budget_funding_signals = [
+        *award_signals.get("budget_signals", []),
+        *public_research.get("budget_document_signals", []),
+        *attachment_budget_signals,
+        f"USAspending search status this run: {usaspending_status}",
+    ]
+    related_procurements = award_signals.get("related_procurements", []) + attachment_validation.get("supporting_snippets", [])
+    evidence_gaps = _dedupe_strings(
+        [
+            *(
+                []
+                if attachment_scope_snippets
+                else ["Fresh solicitation objectives still need deeper parsing from official attachment documents."]
+            ),
+            *(
+                []
+                if attachment_bundle.get("attachments")
+                else ["No attachment package was parsed in this run, so scope validation still leans on notice text."]
+            ),
+            *(
+                []
+                if attachment_validation.get("validated_incumbents") or attachment_validation.get("supporting_snippets")
+                else ["Attachment package did not directly validate the incumbent story, so award-history inference still needs manual confirmation."]
+            ),
+            *award_signals.get("evidence_gaps", []),
+            *public_research.get("evidence_gaps", []),
+        ]
+    )
+    executive_risks = _dedupe_strings(
+        [
+            "Fresh public evidence may still be incomplete if key agency strategy or oversight sources were not discoverable this run.",
+            "Incumbent and funding signals should still be checked against the full solicitation package, Q&A, and any archived predecessor awards.",
+            *evidence_gaps[:2],
+        ]
+    )
+    executive_success_metrics = _dedupe_strings(
+        [
+            "Validated scope understanding",
+            "Incumbent posture clarity",
+            "Actionable next capture moves",
+            *(_matching_lines("success metrics", public_research.get("mission_context_signals", []), max_items=1) if public_research.get("mission_context_signals") else []),
+        ]
+    )
+    incumbent_list = (
+        attachment_validation.get("validated_incumbents", [])
+        or award_signals.get("competitive_landscape", {}).get("likely_incumbents", [])
+    )
+    executive_win_themes = _dedupe_strings(
+        [
+            "Evidence-backed federal mission fit",
+            "Clear compliance and delivery readiness",
+            *(
+                ["Proven COTS capability with rapid IRS/NIST control alignment."]
+                if "cots" in attachment_text_blob or "commercial off" in attachment_text_blob
+                else []
+            ),
+            *(
+                ["Predictable fixed-price delivery with disciplined staffing and reporting controls."]
+                if "firm fixed price" in attachment_text_blob or "ffp" in attachment_text_blob
+                else []
+            ),
+        ]
+    )
+    executive_proof_points = _dedupe_strings(
+        [
+            "Recent relevant delivery examples",
+            "Federal program alignment",
+            *(
+                ["Documented security/privacy readiness tied to Publication 4812 and NIST requirements."]
+                if public_research.get("policy_compliance_signals")
+                else []
+            ),
+            *(
+                ["Demonstrated staffing continuity and post-award mobilization discipline."]
+                if "staff" in attachment_text_blob or "workforce" in attachment_text_blob
+                else []
+            ),
+        ]
+    )
+    objective_rows: list[dict[str, object]] = []
+    for objective_text in decomposed_objectives:
+        objective_rows.append(
+            {
+                "objective": objective_text,
+                "mission_driver": _objective_driver(
+                    objective_text,
+                    public_research.get("mission_context_signals", []),
+                    opportunity.get("buyer", resolved.get("buyer", "N/A")),
+                ),
+                "policy_driver": _objective_driver(
+                    objective_text,
+                    public_research.get("policy_compliance_signals", []),
+                    "Validate against agency policy and solicitation text",
+                ),
+                "budget_signal": _objective_driver(
+                    objective_text,
+                    budget_funding_signals,
+                    award_signals.get("objective_budget_signal") or "Use USAspending and budget documents to confirm funding reality.",
+                ),
+                "stakeholders": _objective_stakeholder_text(resolved.get("buyer", ""), stakeholder_contacts),
+                "incumbents": ", ".join(incumbent_list) if incumbent_list else "To be validated with award-history enrichment",
+                "key_risks": _objective_key_risks(objective_text, evidence_gaps),
+                "kpis": _objective_kpis(objective_text),
+                "solution_implications": _objective_solution_implications(objective_text),
+                "evidence_links": _objective_evidence_links(resolved.get("url", ""), public_sources, objective_text),
+                "evidence_snippets": _objective_evidence_snippets(
+                    objective_text,
+                    attachment_scope_or_notice_snippets,
+                    public_research,
+                    related_procurements,
+                ),
+            }
+        )
     evidence = {
         "request_id": request_id,
         "generated_at": utc_now_iso(),
@@ -802,55 +1190,40 @@ def main() -> int:
         },
         "executive_brief": {
             "summary": executive_summary,
+            "objective_summaries": decomposed_objectives,
             "why_now": "This opportunity is now in capture because it matched the latest workspace shortlist or direct identifier lookup.",
-            "risks": [
-                "Fresh public evidence may still be incomplete if browser-safe or API-safe retrieval failed.",
-                "Incumbent and funding signals should still be checked against the full solicitation package, Q&A, and any archived predecessor awards.",
-            ],
-            "success_metrics": [
-                "Validated scope understanding",
-                "Incumbent posture clarity",
-                "Actionable next capture moves",
-            ],
-            "win_themes": [
-                "Evidence-backed federal mission fit",
-                "Clear compliance and delivery readiness",
-            ],
-            "proof_points": [
-                "Recent relevant delivery examples",
-                "Federal program alignment",
-            ],
+            "why_now_signals": _dedupe_strings(
+                public_research.get("mission_context_signals", [])[:2]
+                + public_research.get("budget_document_signals", [])[:1]
+                + public_research.get("policy_compliance_signals", [])[:1]
+            ),
+            "risks": executive_risks,
+            "success_metrics": executive_success_metrics,
+            "incumbent_posture": _dedupe_strings(
+                [
+                    f"Likely incumbents or related performers: {', '.join(incumbent_list)}" if incumbent_list else "No confirmed incumbent named in current request artifacts.",
+                    *award_signals.get("competitive_landscape", {}).get("notes", [])[:2],
+                ]
+            ),
+            "win_themes": executive_win_themes,
+            "proof_points": executive_proof_points,
         },
-        "objectives": [
-            {
-                "objective": resolved.get("title", "Opportunity objective decomposition pending"),
-                "mission_driver": opportunity.get("buyer", resolved.get("buyer", "N/A")),
-                "policy_driver": "Validate against agency policy and solicitation text",
-                "budget_signal": objective_budget_signal,
-                "stakeholders": _objective_stakeholder_text(resolved.get("buyer", ""), stakeholder_contacts),
-                "incumbents": objective_incumbents,
-                "key_risks": "Partial evidence until attachment package, amendments, and award history tell a consistent story",
-                "kpis": "Cycle-time reduction, compliance fidelity, mission delivery outcomes",
-                "solution_implications": "Shape win themes around mission fit, compliance, and realism",
-                "evidence_links": resolved.get("url", "N/A"),
-                "evidence_snippets": attachment_scope_or_notice_snippets,
-            }
-        ],
+        "objectives": objective_rows,
         "stakeholder_map": stakeholder_map,
         "stakeholder_contacts": stakeholder_contacts,
-        "budget_funding_signals": [
-            *award_signals.get("budget_signals", []),
-            *attachment_budget_signals,
-            f"USAspending search status this run: {usaspending_status}",
-        ],
-        "related_procurements": award_signals.get("related_procurements", []) + attachment_validation.get("supporting_snippets", []),
-        "vehicle_signals": [
-            "Assess likely vehicle path from agency history and companion notices when available.",
-        ],
+        "leadership_priority_signals": public_research.get("leadership_priority_signals", []),
+        "mission_context_signals": public_research.get("mission_context_signals", []),
+        "policy_compliance_signals": public_research.get("policy_compliance_signals", []),
+        "oversight_signals": public_research.get("oversight_signals", []),
+        "acquisition_forecast_signals": public_research.get("acquisition_forecast_signals", []),
+        "budget_funding_signals": budget_funding_signals,
+        "funding_assessment": funding_assessment,
+        "related_procurements": related_procurements,
+        "vehicle_signals": vehicle_signals,
         "competitive_landscape": {
             **award_signals.get("competitive_landscape", {}),
             "likely_incumbents": (
-                attachment_validation.get("validated_incumbents", [])
+                incumbent_list
                 or award_signals.get("competitive_landscape", {}).get("likely_incumbents", [])
             ),
             "notes": _dedupe_strings(
@@ -864,50 +1237,63 @@ def main() -> int:
         },
         "attachment_signals": {
             "status": attachment_bundle.get("status", "unknown"),
+            "attachments_expected": bool(attachment_bundle.get("attachments_expected")),
+            "record_lookup_status": attachment_bundle.get("record_lookup_status", "unknown"),
+            "resource_listing_status": attachment_bundle.get("resource_listing_status", "unknown"),
+            "seeded_resource_links": bool(attachment_bundle.get("seeded_resource_links")),
             "resource_link_count": attachment_bundle.get("resource_link_count", 0),
             "parsed_attachments": attachment_bundle.get("attachments", []),
             "errors": attachment_bundle.get("errors", []),
             "scope_snippets": attachment_scope_snippets,
             "incumbent_validation": attachment_validation,
         },
-        "public_discourse_signals": [
-            "Check agency strategic plans, OIG/GAO findings, and recent testimony aligned to this requirement.",
-            "Review public statements, blogs, and procurement forecasts tied to this buyer and mission area.",
-        ],
-        "recommended_next_research_moves": [
-            "Pull agency strategy, policy, and oversight documents linked to the mission area.",
-            "Validate the final attachment set, especially SOW, instructions, Q&A, and amendments, against the award-history hypothesis.",
-            "Confirm whether the extracted contracting contacts map to the true program owner and evaluation team.",
-        ],
-        "action_items_next_10_days": [
-            "Confirm mission driver and program owner from official sources.",
-            "Pressure-test the incumbent hypothesis against attachments, amendments, and archived awards.",
-            "Translate findings into win themes and proof points for capture planning.",
-        ],
+        "public_discourse_signals": public_research.get("public_discourse_signals", []),
+        "recommended_next_research_moves": _dedupe_strings(
+            [
+                *(
+                    ["Pull agency strategy, policy, and oversight documents linked to the mission area."]
+                    if not public_research.get("mission_context_signals") or not public_research.get("oversight_signals")
+                    else []
+                ),
+                *(
+                    ["Validate the final attachment set, especially SOW, instructions, Q&A, and amendments, against the award-history hypothesis."]
+                    if attachment_bundle.get("attachments")
+                    else ["Recover or re-fetch the attachment package to validate scope, evaluation, and amendment details."]
+                ),
+                *(
+                    ["Confirm whether the extracted contracting contacts map to the true program owner and evaluation team."]
+                    if not public_research.get("leadership_priority_signals")
+                    else ["Align capture messaging to the leadership priorities and named officials surfaced in public sources."]
+                ),
+                *(
+                    ["Pull budget justification and acquisition forecast materials to tighten funding and timing assumptions."]
+                    if not public_research.get("budget_document_signals") or not public_research.get("acquisition_forecast_signals")
+                    else []
+                ),
+            ]
+        ),
+        "action_items_next_10_days": _dedupe_strings(
+            [
+                "Confirm mission driver and program owner from official sources.",
+                "Pressure-test the incumbent hypothesis against attachments, amendments, and archived awards.",
+                "Translate findings into win themes and proof points for capture planning.",
+                *(
+                    ["Map proposal themes directly to the named policy/compliance artifacts surfaced in this run."]
+                    if public_research.get("policy_compliance_signals")
+                    else []
+                ),
+            ]
+        ),
         "assumptions_to_validate": [
             "The visible buyer signal correctly identifies the mission owner.",
             "The public award-history matches are materially related to this requirement rather than adjacent market activity.",
+            *(
+                []
+                if public_research.get("budget_document_signals")
+                else ["No official budget document was captured in this run, so budget reality is still inferred rather than fully corroborated."]
+            ),
         ],
-        "evidence_gaps": _dedupe_strings(
-            [
-                *(
-                    []
-                    if attachment_scope_snippets
-                    else ["Fresh solicitation objectives still need deeper parsing from official attachment documents."]
-                ),
-                *(
-                    []
-                    if attachment_bundle.get("attachments")
-                    else ["No attachment package was parsed in this run, so scope validation still leans on notice text."]
-                ),
-                *(
-                    []
-                    if attachment_validation.get("validated_incumbents") or attachment_validation.get("supporting_snippets")
-                    else ["Attachment package did not directly validate the incumbent story, so award-history inference still needs manual confirmation."]
-                ),
-                *award_signals.get("evidence_gaps", []),
-            ]
-        ),
+        "evidence_gaps": evidence_gaps,
         "source_log": public_sources,
         "validation": {
             "all_required_sections_present": False,
@@ -916,6 +1302,7 @@ def main() -> int:
             "public_excerpt_substantive": public_excerpt_substantive,
             "notice_excerpt_substantive": substantive_notice_excerpt,
             "attachment_package_parsed": bool(attachment_bundle.get("attachments")),
+            "attachments_expected": bool(attachment_bundle.get("attachments_expected")),
             "stub_stage_exited_before_response": True,
             "menu_only_fallback_used": False,
         },
@@ -924,12 +1311,29 @@ def main() -> int:
     brief_text = render_capture_brief(bundle_root / "templates" / "capture-brief.template.md", evidence)
     brief_validation = validate_capture_brief_text(brief_text)
     evidence["validation"]["all_required_sections_present"] = brief_validation["all_required_sections_present"]
+    coverage_categories = int(public_research.get("qualified_category_count", 0) or 0)
+    public_research_quality_score = int(public_research.get("quality_score", 0) or 0)
+    strong_public_sources = sum(
+        1 for item in (public_research.get("source_log", []) or []) if int(item.get("quality_score", 0) or 0) >= 12
+    )
+    attachment_lookup_clean = (
+        attachment_bundle.get("status") in {"ok", "empty"}
+        and not (attachment_bundle.get("errors", []) or [])
+    )
+    attachment_completion_ready = bool(attachment_bundle.get("attachments")) or (
+        not attachment_bundle.get("attachments_expected")
+        and attachment_lookup_clean
+    )
     if (
         resolved.get("status") == "resolved"
         and substantive_notice_excerpt
         and usaspending_status == "ok"
-        and (attachment_bundle.get("attachments") or not attachment_bundle.get("resource_link_count"))
+        and attachment_completion_ready
         and brief_validation["all_required_sections_present"]
+        and len(public_sources) >= 8
+        and coverage_categories >= 4
+        and strong_public_sources >= 5
+        and public_research_quality_score >= 90
     ):
         status = "360_DEEP_RESEARCH_COMPLETE"
     evidence["status"] = status
@@ -946,6 +1350,7 @@ def main() -> int:
         "Fresh request-specific brief and evidence were generated for this request.",
         f"Public notice fetch status: {public_context.get('status', 'unknown')}",
         f"Public notice excerpt substantive: {'yes' if public_excerpt_substantive else 'no'}",
+        f"Expanded public research status: {public_research.get('status', 'unknown')} ({len(public_research.get('source_log', []) or [])} sources)",
         f"USAspending enrichment status: {usaspending_status}",
         f"Attachment parsing status: {attachment_bundle.get('status', 'unknown')} ({len(attachment_bundle.get('attachments', []) or [])} files parsed)",
     ]
@@ -961,7 +1366,10 @@ def main() -> int:
         "usaspending_attempted": True,
         "usaspending_succeeded": usaspending_status == "ok",
         "attachments_attempted": bool(snapshot_resource_links or resolved.get("notice_id")),
+        "attachments_expected": bool(attachment_bundle.get("attachments_expected")),
         "attachments_succeeded": bool(attachment_bundle.get("attachments")),
+        "expanded_public_research_attempted": True,
+        "expanded_public_research_succeeded": bool(public_research.get("source_log")),
         "stable_id": resolved.get("report_entry_id", ""),
         "canonical_record_id": canonical_id,
         "recommended_next_moves": evidence["recommended_next_research_moves"],

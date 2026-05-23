@@ -34,6 +34,7 @@ TITLE_PREFIX_RE = re.compile(
     r"^(?:rfp|rfq|rfi|sources sought|special notice|presolicitation|combined synopsis/solicitation)\s*[-:]\s*",
     re.IGNORECASE,
 )
+MAX_QUERY_LENGTH = 96
 
 
 def recipient_autocomplete_payload(search_text: str) -> dict[str, Any]:
@@ -102,21 +103,36 @@ def _dedupe_terms(values: list[str]) -> list[str]:
     return deduped
 
 
+def _compact_query(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(value or "").strip(" -:"))
+    return cleaned if 0 < len(cleaned) <= MAX_QUERY_LENGTH else ""
+
+
 def build_search_terms(search_text: str, title: str = "", summary: str = "", buyer: str = "") -> list[str]:
     title_text = title or search_text
     combined = f"{title_text}\n{summary or ''}"
     terms: list[str] = []
 
-    terms.extend(match.group(1).strip() for match in SOLICITATION_ID_RE.finditer(combined))
+    for match in SOLICITATION_ID_RE.finditer(combined):
+        candidate = match.group(1).strip()
+        if not re.search(r"\d", candidate):
+            continue
+        compact = _compact_query(candidate)
+        if compact:
+            terms.append(compact)
 
     for match in PHRASE_WITH_ACRONYM_RE.finditer(title_text):
         phrase = TITLE_PREFIX_RE.sub("", re.sub(r"\s+", " ", match.group(1)).strip(" -:"))
         acronym = match.group(2).strip()
         if phrase and 2 <= len(phrase.split()) <= 8:
-            terms.append(phrase)
+            compact_phrase = _compact_query(phrase)
+            if compact_phrase:
+                terms.append(compact_phrase)
             phrase_parts = phrase.split()
             if len(phrase_parts) >= 3:
-                terms.append(" ".join(phrase_parts[-3:]))
+                compact_tail = _compact_query(" ".join(phrase_parts[-3:]))
+                if compact_tail:
+                    terms.append(compact_tail)
         if acronym.lower() not in GENERIC_TERMS:
             terms.append(acronym)
 
@@ -126,7 +142,9 @@ def build_search_terms(search_text: str, title: str = "", summary: str = "", buy
 
     cleaned_title = TITLE_PREFIX_RE.sub("", title_text).strip(" -:")
     if cleaned_title and cleaned_title.lower() != title_text.lower():
-        terms.append(cleaned_title)
+        compact_title = _compact_query(cleaned_title)
+        if compact_title:
+            terms.append(compact_title)
 
     for match in re.findall(r"\b[A-Za-z][A-Za-z0-9-]{3,}\b", title_text):
         token = match.strip()
@@ -142,7 +160,9 @@ def build_search_terms(search_text: str, title: str = "", summary: str = "", buy
     if "NOAA" in buyer_text and any(term.lower() == "protech" for term in terms):
         terms.append("ProTech")
 
-    terms.append(search_text)
+    compact_search_text = _compact_query(search_text)
+    if compact_search_text:
+        terms.append(compact_search_text)
     return _dedupe_terms(terms)[:6]
 
 

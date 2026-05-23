@@ -140,6 +140,16 @@ FIT_NARRATIVE_STOPWORDS = {
     "work",
 }
 
+GENERIC_LOW_SIGNAL_FIT_TERMS = {
+    "support",
+    "services",
+    "service",
+    "solution",
+    "solutions",
+    "system",
+    "systems",
+}
+
 
 def parse_horizon(raw: str) -> tuple[int, int]:
     cleaned = raw.lower().replace("days", "").replace("day", "").replace("to", "-").replace(" ", "")
@@ -408,6 +418,11 @@ def _fit_term_tokens(term: str) -> list[str]:
     return tokens
 
 
+def _is_low_signal_fit_term(term: str) -> bool:
+    tokens = _fit_term_tokens(term)
+    return len(tokens) == 1 and tokens[0] in GENERIC_LOW_SIGNAL_FIT_TERMS
+
+
 def _token_forms(token: str) -> set[str]:
     forms = {token}
     if token.endswith("ies") and len(token) > 3:
@@ -455,12 +470,19 @@ def _fit_narrative_alignment(
     negative_terms = [str(term) for term in fit_guidance.get("negative_terms", []) if str(term).strip()]
     positive_hits = [term for term in positive_terms if _fit_term_matches(term, normalized_text, token_set)]
     negative_hits = [term for term in negative_terms if _fit_term_matches(term, normalized_text, token_set)]
+    strong_positive_hits = [term for term in positive_hits if not _is_low_signal_fit_term(term)]
+    low_signal_positive_hits = [term for term in positive_hits if _is_low_signal_fit_term(term)]
 
     points = 0
     reasons: list[str] = []
-    if positive_hits:
-        points += min(12, 4 * len(positive_hits))
-        reasons.append(f"Fit narrative alignment: {', '.join(positive_hits[:3])}.")
+    if strong_positive_hits:
+        weighted_points = 0
+        for term in strong_positive_hits:
+            weighted_points += 4 if len(_fit_term_tokens(term)) > 1 else 2
+        points += min(12, weighted_points)
+        reasons.append(f"Fit narrative alignment: {', '.join(strong_positive_hits[:3])}.")
+    elif low_signal_positive_hits:
+        reasons.append(f"Low-signal fit alignment only: {', '.join(low_signal_positive_hits[:3])}.")
     else:
         points -= 10
         reasons.append("Fit narrative did not surface a clear positive alignment.")
@@ -469,7 +491,11 @@ def _fit_narrative_alignment(
         points -= min(18, 6 * len(negative_hits))
         reasons.append(f"Fit narrative caution: {', '.join(negative_hits[:3])}.")
 
-    return points, reasons, {"positive_hits": positive_hits, "negative_hits": negative_hits}
+    return points, reasons, {
+        "positive_hits": strong_positive_hits,
+        "low_signal_positive_hits": low_signal_positive_hits,
+        "negative_hits": negative_hits,
+    }
 
 
 def _timing_settings(preferences: dict[str, Any]) -> dict[str, Any]:
