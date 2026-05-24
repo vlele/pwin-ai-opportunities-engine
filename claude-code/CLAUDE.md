@@ -1,51 +1,39 @@
 # pWin AI Opportunities for Claude Code
 
-This folder is the Claude Code adapter for the shared `pwin-ai-opportunities` runtime bundle.
+This folder is a Claude Code adapter for the shared `pwin-ai-opportunities` bundle.
 
-## Mental Model
+## Mental model
 
-- the repo root is the shared runtime bundle
-- `claude-code/` is the Claude-specific adapter layer
-- the supported Claude command surface is limited to `scan`, `show digest`, `feedback`, and `research`
-- the shipped runtime is federal-only and currently implemented for `SAM.gov` plus `USAspending.gov`
+- The repo root is the shared script and template bundle.
+- `claude-code/` is the Claude-specific adapter layer.
+- Claude should treat this as a command pack plus project memory, not as a drop-in skill folder.
 
-Do not treat this as a drop-in skill folder, and do not assume separate onboarding flows or extra data adapters exist.
-
-## Recommended Install Model
+## Recommended install model
 
 1. Keep the repo cloned somewhere stable.
-2. Set `PWIN_AI_OPPS_ROOT` to the repo root that contains `SKILL.md`, `scripts/`, `templates/`, and `references/`.
+2. Set `PWIN_AI_OPPS_ROOT` to the repo root that contains `SKILL.md`, `scripts/`, `templates/`, `references/`, and `examples/`.
 3. Copy `claude-code/.claude/commands/*.md` into either:
-   - `~/.claude/commands/pwin-ai-opportunities/`
+   - `~/.claude/commands/pwin-ai-opportunities/`, or
    - a project-local `.claude/commands/` folder
-4. Keep this `CLAUDE.md` alongside those commands, or merge its guidance into an existing project `CLAUDE.md`.
+4. Keep this `CLAUDE.md` alongside those commands or merge its guidance into an existing project `CLAUDE.md`.
 
-## Command Mapping
+## Claude-specific rules
 
+- Prefer the shared Python scripts under `PWIN_AI_OPPS_ROOT/scripts/`.
+- Do not rebuild scan or capture logic in prompt text when a script already exists.
+- Read the JSON stdout from the orchestrator, then read the artifact path it returns.
+- If `PWIN_AI_OPPS_ROOT` is not set, resolve it before running commands. If it cannot be resolved, ask for the path instead of guessing.
+
+## Shared command surface
+
+- `bootstrap` -> `scripts/bootstrap/bootstrap_workspace.py`
 - `scan` -> `scripts/scan/run_scan.py`
 - `show digest` -> `scripts/show/show_digest.py`
 - `feedback` -> `scripts/feedback/apply_feedback.py`
 - `research` -> `scripts/capture/run_capture_research.py`
 
-The command prompts are wrappers over the shared scripts. Prefer the scripts over recreating workflow logic in prompt text.
-
-## Runtime Boundaries
-
-- scan uses `SAM.gov` search and hydration plus `scripts/scan/usaspending_enrich.py`
-- capture uses entry resolution, notice context, attachments, public context, and `scripts/capture/usaspending_enrich.py`
-- `fetch_public_context.py` and related capture helpers are internal runtime support, not a separate user-facing mode
-
-The two USAspending helpers remain separate because scan and capture use different depth and query strategies.
-
-## Operating Rules
-
-- Resolve `PWIN_AI_OPPS_ROOT` before running commands. If it cannot be resolved, ask for it instead of guessing.
-- Read the JSON stdout from the orchestrator first, then read the artifact path it returns.
-- Answer from the returned digest or capture brief, not from improvised summary text.
-- Do not promise onboarding artifacts, `MEMORY.md`, `near-misses`, or `validate-artifacts` behavior unless the shared runtime starts shipping them.
-
-## What Claude Can Ignore
+## What Claude can ignore
 
 - `manifest.json`
 - `agents/openai.yaml`
-- host metadata that exists only for OpenClaw or Codex discovery
+- host-specific metadata that exists only to improve OpenClaw or Codex discovery

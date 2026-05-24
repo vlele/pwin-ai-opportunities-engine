@@ -1,0 +1,6 @@
+/pwin-ai-opportunities bootstrap https://example.com
+/pwin-ai-opportunities bootstrap https://example.com with NAICS 541511 and 541512
+/pwin-ai-opportunities seed this workspace from https://example.com and treat 541512 as tentative
+
+Installed script path used by the skill:
+$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/bootstrap/bootstrap_workspace.py

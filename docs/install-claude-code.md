@@ -24,13 +24,14 @@ Claude does not need `manifest.json` or `agents/openai.yaml`.
 
 Current shipped scope:
 
+- `bootstrap / onboarding`
 - federal-only opportunity work
 - `scan`
 - `show digest`
 - `feedback`
 - `capture research`
 
-Do not assume onboarding commands, bootstrap promises, extra data-source adapters, or `MEMORY.md` are part of the Claude adapter contract.
+Do not assume extra data-source adapters are part of the Claude adapter contract.
 
 ## Recommended Install
 
@@ -48,6 +49,7 @@ export PWIN_AI_OPPS_ROOT="$HOME/src/pwin-ai-opportunities"
 
 ## Shared Command Pack
 
+- `pwin-bootstrap.md` -> `scripts/bootstrap/bootstrap_workspace.py`
 - `pwin-scan.md` -> `scripts/scan/run_scan.py`
 - `pwin-show-digest.md` -> `scripts/show/show_digest.py`
 - `pwin-feedback.md` -> `scripts/feedback/apply_feedback.py`
@@ -62,6 +64,12 @@ These commands are wrappers over the shared runtime. They should not recreate sc
 - capture also depends on internal helpers such as `fetch_notice_context.py`, `fetch_notice_attachments.py`, and `fetch_public_context.py`
 
 ## Direct Script Examples
+
+Bootstrap a workspace from a company site:
+
+```bash
+python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" --workspace "$PWD" --company-url "https://example.com" --naics "541511,541512"
+```
 
 Run a scan:
 

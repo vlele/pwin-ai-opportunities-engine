@@ -11,6 +11,10 @@ from zoneinfo import ZoneInfo
 LOCAL_TIMEZONE = ZoneInfo("America/New_York")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+
+def bundle_root_from_script(script_file: str) -> Path:
+    return Path(script_file).resolve().parents[2]
+
 def local_now() -> datetime:
     return datetime.now(LOCAL_TIMEZONE)
 

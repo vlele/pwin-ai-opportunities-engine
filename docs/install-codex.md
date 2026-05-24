@@ -20,15 +20,18 @@ Everything else is shared runtime content used by all hosts.
 
 This bundle currently ships a federal-only workflow:
 
+- `bootstrap / onboarding`
 - `scan`
 - `show digest`
 - `feedback`
 - `capture research`
 
-Do not assume onboarding helpers, extra source adapters, or `MEMORY.md` are part of the Codex contract.
+Do not assume extra source adapters are part of the Codex contract.
 
 ## Shared Runtime Shape
 
+- `scripts/bootstrap/bootstrap_workspace.py`
+  Seeds starter workspace files from a company URL and optional NAICS.
 - `scripts/scan/run_scan.py`
   Federal scan orchestrator. Uses `SAM.gov` search and hydration plus `scripts/scan/usaspending_enrich.py` for award-history enrichment.
 - `scripts/show/show_digest.py`
@@ -49,8 +52,19 @@ The two USAspending modules are intentionally separate today:
 2. Restart Codex or refresh skill discovery if needed.
 3. Export `SAM_API_KEY` in the environment where Codex will run commands.
 4. Use a normal project folder as `--workspace`; the skill root and workspace are separate paths.
+5. Optional, but useful if you want one shared command surface across hosts:
+
+```bash
+export PWIN_AI_OPPS_ROOT="$HOME/.codex/skills/pwin-ai-opportunities"
+```
 
 ## Direct Script Examples
+
+Bootstrap a workspace from a company site:
+
+```bash
+python3 "$HOME/.codex/skills/pwin-ai-opportunities/scripts/bootstrap/bootstrap_workspace.py" --workspace "$PWD" --company-url "https://example.com" --naics "541511,541512"
+```
 
 Run a scan:
 

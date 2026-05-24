@@ -20,16 +20,19 @@ Everything under `scripts/`, `templates/`, `references/`, and `examples/` is sha
 
 Current shipped scope:
 
+- `bootstrap / onboarding`
 - federal-only opportunity work
 - `scan`
 - `show digest`
 - `feedback`
 - `capture research`
 
-Do not assume onboarding flows, extra federal data adapters, `near-misses`, or `MEMORY.md` are part of the shipped OpenClaw contract.
+Do not assume extra federal data adapters or `near-misses` are part of the shipped OpenClaw contract.
 
 ## Shared Runtime Shape
 
+- `scripts/bootstrap/bootstrap_workspace.py`
+  Seeds starter workspace files from a company URL and optional NAICS.
 - `scripts/scan/run_scan.py`
   Runs the federal opportunity scan, writes the dated opportunity set, explanations, digest-entry map, report, and digest.
 - `scripts/show/show_digest.py`
@@ -51,8 +54,19 @@ The scan and capture paths each keep their own USAspending helper module because
 1. Clone or copy the repo root into `~/.openclaw/skills/pwin-ai-opportunities/`.
 2. Export `SAM_API_KEY` in the environment where OpenClaw will run commands.
 3. Use any normal OpenClaw project folder as `--workspace`; the workspace is where `procurement/` artifacts live.
+4. Optional, but useful if you want one shared command surface across hosts:
+
+```bash
+export PWIN_AI_OPPS_ROOT="$HOME/.openclaw/skills/pwin-ai-opportunities"
+```
 
 ## Direct Script Examples
+
+Bootstrap a workspace from a company site:
+
+```bash
+python3 "$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/bootstrap/bootstrap_workspace.py" --workspace "$PWD" --company-url "https://example.com" --naics "541511,541512"
+```
 
 Run a scan:
 
