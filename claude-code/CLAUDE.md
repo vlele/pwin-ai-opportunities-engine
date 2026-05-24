@@ -26,6 +26,7 @@ This folder is a Claude Code adapter for the shared `pwin-ai-opportunities` bund
 
 ## Shared command surface
 
+- `bootstrap` -> `scripts/bootstrap/bootstrap_workspace.py`
 - `scan` -> `scripts/scan/run_scan.py`
 - `show digest` -> `scripts/show/show_digest.py`
 - `feedback` -> `scripts/feedback/apply_feedback.py`

@@ -15,6 +15,8 @@
 3. Ensure runtime credentials are available:
    - `SAM_API_KEY`
    - the model credentials your Codex install already expects
+4. Optional, but useful if you want one shared command surface across hosts:
+   `export PWIN_AI_OPPS_ROOT="$HOME/.codex/skills/pwin-ai-opportunities"`
 
 ## What Codex uses
 
@@ -40,4 +42,10 @@ Capture research:
 
 ```bash
 python3 "$HOME/.codex/skills/pwin-ai-opportunities/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth full_360
+```
+
+Bootstrap a workspace from a company site:
+
+```bash
+python3 "$HOME/.codex/skills/pwin-ai-opportunities/scripts/bootstrap/bootstrap_workspace.py" --workspace "$PWD" --company-url "https://example.com" --naics "541511,541512"
 ```

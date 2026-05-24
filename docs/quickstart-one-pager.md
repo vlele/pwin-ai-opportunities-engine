@@ -21,6 +21,7 @@ Clone the repo into your Codex skills folder:
 
 ```bash
 git clone https://github.com/vlele/pwin-ai-opportunities-engine.git "$HOME/.codex/skills/pwin-ai-opportunities"
+export PWIN_AI_OPPS_ROOT="$HOME/.codex/skills/pwin-ai-opportunities"
 ```
 
 If Codex does not pick it up immediately, restart Codex or refresh skill discovery.
@@ -31,6 +32,7 @@ Clone the repo into your OpenClaw skills folder:
 
 ```bash
 git clone https://github.com/vlele/pwin-ai-opportunities-engine.git "$HOME/.openclaw/skills/pwin-ai-opportunities"
+export PWIN_AI_OPPS_ROOT="$HOME/.openclaw/skills/pwin-ai-opportunities"
 ```
 
 ### Claude Code
@@ -45,7 +47,7 @@ cp -R "$PWIN_AI_OPPS_ROOT/claude-code/.claude/commands/." "$HOME/.claude/command
 ```
 
 Then copy or merge `claude-code/CLAUDE.md` into the Claude Code project context you normally use.
-After that, Claude Code users can call the command pack with prompts such as `/pwin-scan`, `/pwin-research`, `/pwin-feedback`, and `/pwin-show-digest`.
+After that, Claude Code users can call the command pack with prompts such as `/pwin-bootstrap`, `/pwin-scan`, `/pwin-research`, `/pwin-feedback`, and `/pwin-show-digest`.
 
 ## 2. Add your keys
 
@@ -69,25 +71,37 @@ cd "$HOME/work/acme-capture"
 
 This skill writes its outputs into `procurement/` inside that workspace.
 
-## 4. Seed the vendor profile from a company URL
+## 4. Bootstrap the workspace from the company URL
 
-The easiest start is to give the tool the company's website and let it create the starter files. Use a prompt like this:
+Run the bootstrap script:
 
-```text
-Use pwin-ai-opportunities. My company website is https://example.com.
-Seed procurement/vendor-profile.json, procurement/preferences.json,
-procurement/source-registry.json, procurement/STARTER_PROFILE.md, and MEMORY.md.
-Infer candidate NAICS from the site, keep website-derived facts provisional until I confirm them,
-and ask me only for the most important missing facts.
+```bash
+python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" \
+  --workspace "$PWD" \
+  --company-url "https://example.com"
 ```
 
-If you already know NAICS codes, add them to the same prompt.
+If you already know the NAICS codes, add them too:
 
-Note: `preferences.json` and `source-registry.json` will be created automatically on the first scan if they do not exist, but results are better if you seed the profile first.
+```bash
+python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" \
+  --workspace "$PWD" \
+  --company-url "https://example.com" \
+  --naics "541511,541512"
+```
+
+That creates:
+- `procurement/vendor-profile.json`
+- `procurement/preferences.json`
+- `procurement/source-registry.json`
+- `procurement/STARTER_PROFILE.md`
+- `MEMORY.md`
+
+Then review `procurement/STARTER_PROFILE.md` and confirm or correct the provisional fields before the first real scan.
 
 ## 5. Run the first scan
 
-Once the workspace is seeded, ask your tool:
+Once the workspace is bootstrapped, ask your tool:
 
 ```text
 Use pwin-ai-opportunities and run a federal opportunity scan for the next 30 to 45 days in this workspace.
@@ -134,7 +148,7 @@ The skill logs that feedback to `procurement/feedback-events.jsonl` and updates 
 1. Install the repo in the folder your host expects.
 2. Set `SAM_API_KEY` and keep your normal LLM key in place.
 3. Open a workspace folder.
-4. Seed the company profile from the website URL.
+4. Bootstrap the company profile from the website URL.
 5. Run a scan.
 6. Research a stable ID.
 7. Give feedback in plain English.

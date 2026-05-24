@@ -25,6 +25,7 @@ export PWIN_AI_OPPS_ROOT="$HOME/src/pwin-ai-opportunities"
 
 ## Shared command pack
 
+- `pwin-bootstrap.md`
 - `pwin-scan.md`
 - `pwin-show-digest.md`
 - `pwin-feedback.md`

@@ -4,6 +4,8 @@ description: pWin.ai Opportunities runs federal opportunity scans, renders stabl
 ---
 
 Use this skill when the user wants any of the following:
+- onboarding or bootstrap from a company website
+- seeding `vendor-profile.json` or starter workspace files
 - a federal opportunity scan or daily digest
 - the latest digest or a dated digest
 - feedback such as `like A1`, `dislike W2`, `hide E1`, or `never show grants`
@@ -33,6 +35,39 @@ When calling orchestrator scripts:
 Do not re-implement script logic inside the prompt. Route to the correct script, inspect the JSON it prints, read the final artifact it points to, and answer from that artifact.
 
 ## Modes
+
+### 0. Bootstrap / Onboarding
+
+Use when the user asks to:
+- bootstrap a workspace from a company website
+- seed `vendor-profile.json`
+- create starter onboarding files
+- get started from a company URL
+
+Run:
+
+```bash
+python3 "<SKILL_ROOT>/scripts/bootstrap/bootstrap_workspace.py" --workspace "$PWD" --company-url "<company url>"
+```
+
+If the user supplies NAICS codes, add:
+
+```bash
+--naics "541511,541512"
+```
+
+If the user says the NAICS are only tentative, add:
+
+```bash
+--naics-status candidate
+```
+
+After the script runs:
+- inspect its JSON stdout
+- read the `starter_profile_path` it returns
+- report the files created
+- summarize the inferred company summary, candidate competencies, and candidate NAICS
+- clearly label website-derived facts as provisional until confirmed
 
 ### 1. Scan
 
@@ -178,6 +213,9 @@ Critical source rules:
 
 The workspace should maintain:
 - `procurement/source-registry.json`
+- `procurement/vendor-profile.json`
+- `procurement/preferences.json`
+- `procurement/STARTER_PROFILE.md`
 - `procurement/feedback-events.jsonl`
 - `procurement/capture-requests.jsonl`
 - `procurement/digest-entry-map/YYYY-MM-DD.json`
@@ -266,6 +304,7 @@ For skill-path failures specifically:
 ## References
 
 Read these only when needed for the chosen mode:
+- `SKILL_ROOT/references/onboarding-playbook.md`
 - `SKILL_ROOT/references/scan-playbook.md`
 - `SKILL_ROOT/references/capture-research-playbook.md`
 - `SKILL_ROOT/references/usaspending-payloads.md`
@@ -277,6 +316,7 @@ Read these only when needed for the chosen mode:
 ## Examples
 
 Use the shipped examples as behavioral anchors:
+- `SKILL_ROOT/examples/commands-bootstrap.txt`
 - `SKILL_ROOT/examples/good-digest-2026-05-09.md`
 - `SKILL_ROOT/examples/good-digest-entry-map-2026-05-09.json`
 - `SKILL_ROOT/examples/good-capture-brief-partial.md`
@@ -291,6 +331,7 @@ Use the shipped examples as behavioral anchors:
 
 ## What Not To Do
 
+- Do not ask the user to hand-author starter files when the bootstrap script can seed them.
 - Do not read old capture artifacts and present them as the current answer.
 - Do not invent stable IDs that are not in the digest or digest-entry map.
 - Do not ask the user to choose between API and browser paths before trying the documented automatable path.

@@ -15,6 +15,8 @@
    - `SAM_API_KEY`
    - the LLM credentials your OpenClaw install already expects
 3. Use any normal OpenClaw workspace as the `--workspace` target.
+4. Optional, but useful if you want one shared command surface across hosts:
+   `export PWIN_AI_OPPS_ROOT="$HOME/.openclaw/skills/pwin-ai-opportunities"`
 
 ## Direct script examples
 
@@ -40,4 +42,10 @@ Capture research:
 
 ```bash
 python3 "$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth full_360
+```
+
+Bootstrap a workspace from a company site:
+
+```bash
+python3 "$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/bootstrap/bootstrap_workspace.py" --workspace "$PWD" --company-url "https://example.com" --naics "541511,541512"
 ```
