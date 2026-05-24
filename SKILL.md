@@ -1,46 +1,36 @@
 ---
 name: pwin-ai-opportunities
-description: pWin.ai Opportunities discovers federal opportunities, renders stable-ID digests, applies user feedback, and produces fresh evidence-backed capture briefs through deterministic local scripts.
-metadata: {"openclaw":{"emoji":"🧭"}}
+description: pWin.ai Opportunities runs federal opportunity scans, renders stable-ID digests, applies user feedback, and produces decision-grade capture research from shared local scripts and templates.
 ---
 
 Use this skill when the user wants any of the following:
 - a federal opportunity scan or daily digest
 - the latest digest or a dated digest
 - feedback such as `like A1`, `dislike W2`, `hide E1`, or `never show grants`
-- capture research such as `research A1` or `research 0231571d...`
+- capture research such as `research A1`, `research W2`, or `capture deep dive on A1`
 
-Use the slash command form:
-- `/pwin-ai-opportunities scan 30-45`
-- `/pwin-ai-opportunities research A1`
-- `/pwin-ai-opportunities feedback "like A1"`
+Host-specific wrappers may expose slash commands or command packs, but the shared bundle is script-driven.
 
-## Installed skill path
+## Skill Root
 
-This bundle assumes it is installed here:
+Treat the directory containing this `SKILL.md` as `SKILL_ROOT`.
 
-`$HOME/.openclaw/skills/pwin-ai-opportunities/`
+Common install locations:
+- OpenClaw: `$HOME/.openclaw/skills/pwin-ai-opportunities`
+- Codex: `$HOME/.codex/skills/pwin-ai-opportunities`
 
-When calling orchestrator scripts, use the installed-skill path directly.
+When calling orchestrator scripts:
+- use `SKILL_ROOT/scripts/...`
+- do not run `./scripts/...` from the workspace
+- do not assume `$PWD` is the skill root
 
-Do not run:
-- `./scripts/...` from the workspace
-- `scripts/...` relative to `$PWD`
+## Core Principle
 
-Use:
-- `"$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/..."`
+- The model should decide which mode to run.
+- Scripts should decide how the workflow executes.
+- The user-facing answer should come from the fresh artifacts produced by the script, not improvised chat prose.
 
-## Core principle
-
-This `v15.2` bundle is intentionally thinner than earlier versions.
-
-- The model should decide **which mode** to run.
-- Scripts should decide **how the workflow executes**.
-- The user-facing answer should come from the **fresh artifacts produced by the script**, not from improvised chat prose.
-
-Do not re-implement script logic inside the prompt. Route to the correct script, inspect the script's JSON result, read the final artifact it points to, and answer from that artifact.
-
-This `v15.2` bundle expects the scan script to attempt live retrieval before rendering a digest.
+Do not re-implement script logic inside the prompt. Route to the correct script, inspect the JSON it prints, read the final artifact it points to, and answer from that artifact.
 
 ## Modes
 
@@ -55,21 +45,16 @@ Use when the user asks to:
 Run:
 
 ```bash
-python3 "$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/scan/run_scan.py" --workspace "$PWD" --horizon "30-45" --federal-only
+python3 "<SKILL_ROOT>/scripts/scan/run_scan.py" --workspace "$PWD" --horizon "30-45" --federal-only
 ```
 
 Notes:
 - Replace `30-45` with the horizon inferred from the user message.
-- The scan script is responsible for:
-  - source-registry refresh
-  - digest rendering
-  - stable entry IDs
-  - digest-entry-map creation
-  - basic validation
+- The scan script is responsible for source-registry refresh, digest rendering, stable entry IDs, digest-entry-map creation, and basic validation.
 
 After the script runs:
 - inspect its JSON stdout
-- read the digest path it returns
+- read the `digest_path` it returns
 - answer from that digest
 - do not invent a second digest in chat
 
@@ -80,20 +65,16 @@ Use when the user asks to:
 - show a digest for a specific date
 - show digest entries
 
-Run for latest:
+Run:
 
 ```bash
-python3 "$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/show/show_digest.py" --workspace "$PWD" --date latest
+python3 "<SKILL_ROOT>/scripts/show/show_digest.py" --workspace "$PWD" --date latest
 ```
 
-Run for a specific date:
-
-```bash
-python3 "$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/show/show_digest.py" --workspace "$PWD" --date "2026-05-10"
-```
+For a specific date, replace `latest` with `YYYY-MM-DD`.
 
 After the script runs:
-- read the digest path it returns
+- read the `digest_path` it returns
 - quote or summarize only what is in that digest
 - if the digest has no stable IDs, say that clearly and recommend re-running the scan script
 
@@ -109,7 +90,7 @@ Use when the user says things like:
 Run:
 
 ```bash
-python3 "$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/feedback/apply_feedback.py" --workspace "$PWD" --text "<user message>"
+python3 "<SKILL_ROOT>/scripts/feedback/apply_feedback.py" --workspace "$PWD" --text "<user message>"
 ```
 
 The feedback script is responsible for:
@@ -134,7 +115,7 @@ Use when the user says:
 Run:
 
 ```bash
-python3 "$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth full_360
+python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth full_360
 ```
 
 Replace `A1` with the provided entry or identifier.
@@ -144,21 +125,21 @@ The capture orchestrator is responsible for:
 - request logging
 - local notice-context loading
 - public-source enrichment attempts
-- USAspending POST enrichment when applicable
+- USAspending enrichment when applicable
 - brief rendering
 - evidence rendering
 - validation
 
 After it runs:
 - inspect its JSON stdout
-- read the fresh brief path it returns
+- read the fresh `brief_path` it returns
 - answer from that brief
 - if it returns `PARTIAL_CAPTURE_RESEARCH`, say so plainly
 - if it returns `FAILED`, say so plainly and include the failure reason
 
-Do not satisfy capture research by reading `*-capture.md` directly unless the orchestrator itself points to that file as the current validated artifact for this run.
+Do not satisfy capture research by reading an old brief directly unless the orchestrator itself points to that file as the current validated artifact for this run.
 
-## Script stdout contract
+## Script Stdout Contract
 
 Each orchestrator should print compact JSON.
 
@@ -171,7 +152,7 @@ Expected fields:
 - `canonical_record_id`
 - `recommended_next_moves`
 
-Treat that JSON as authoritative for this run.
+Treat that JSON as authoritative for the current run.
 
 ## Sources
 
@@ -193,7 +174,7 @@ Critical source rules:
 - Never print or log secret values such as `SAM_API_KEY`.
 - For `USAspending`, use documented JSON `POST` requests.
 
-## Artifact contract
+## Artifact Contract
 
 The workspace should maintain:
 - `procurement/source-registry.json`
@@ -212,7 +193,7 @@ Stable ID policy:
 - use canonical IDs such as `noticeId` or `opportunity_id` for machines
 - preserve both in every capture brief and evidence object
 
-## Capture brief expectations
+## Capture Brief Expectations
 
 Every capture brief, even partial, must render these sections:
 - `Executive Brief`
@@ -231,7 +212,7 @@ If evidence is missing:
 - do not omit the section
 - mark it `currently unavailable`, `blocked`, `throttled`, or `still pending`
 
-## Response contract
+## Response Contract
 
 For scan and show-digest responses:
 - answer from the digest file
@@ -245,28 +226,25 @@ For feedback responses:
 
 For capture responses:
 - answer from the fresh brief
-- include:
-  - stable ID when available
-  - canonical ID
-  - current research status
-  - brief path
-  - evidence path
-  - concise `What I recommend next`
+- include stable ID when available
+- include canonical ID
+- include current research status
+- include brief path
+- include evidence path
+- include concise next actions
 
 Do not end a capture response with a menu unless:
 - a valid brief already exists for the current request, and
 - the next step truly requires user approval or authentication
 
-## Failure rules
+## Failure Rules
 
 If a script fails:
 - say it failed
 - give the script-reported reason
 - do not improvise a fake success result
 - do not continue into unrelated workspace exploration
-- do not switch into onboarding, identity, vibe, or bootstrap chat
-- do not suggest `git pull`, `git submodule update`, `make setup`, or similar repo-repair steps unless the user explicitly asked for repo repair
-- do not inspect `BOOTSTRAP.md`, `IDENTITY.md`, `USER.md`, `AGENTS.md`, or other unrelated workspace files as a fallback for this skill
+- do not switch into onboarding, bootstrap, or unrelated repo-repair chat
 
 For capture research specifically:
 - if the request log was not written, the run is failed
@@ -279,40 +257,39 @@ If browser retrieval fails:
 - attempt official USAspending enrichment when relevant and possible
 - only ask the user for help after the automatable path is exhausted
 
-For installed-skill path failures specifically:
-- if `"$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/..."`
-  is missing, the run is failed
+For skill-path failures specifically:
+- if `SKILL_ROOT/scripts/...` is missing, the run is failed
 - report that the skill installation is incomplete or miscopied
-- ask only for reinstall/copy verification of the skill bundle
+- ask only for reinstall or copy verification of the skill bundle
 - do not propose workspace repo commands as a substitute
 
 ## References
 
 Read these only when needed for the chosen mode:
-- `{baseDir}/references/scan-playbook.md`
-- `{baseDir}/references/capture-research-playbook.md`
-- `{baseDir}/references/usaspending-payloads.md`
-- `{baseDir}/references/validation-rules.md`
-- `{baseDir}/references/source-catalog.md`
-- `{baseDir}/references/feedback-learning.md`
-- `{baseDir}/references/validation-and-recovery.md`
+- `SKILL_ROOT/references/scan-playbook.md`
+- `SKILL_ROOT/references/capture-research-playbook.md`
+- `SKILL_ROOT/references/usaspending-payloads.md`
+- `SKILL_ROOT/references/validation-rules.md`
+- `SKILL_ROOT/references/source-catalog.md`
+- `SKILL_ROOT/references/feedback-learning.md`
+- `SKILL_ROOT/references/validation-and-recovery.md`
 
 ## Examples
 
 Use the shipped examples as behavioral anchors:
-- `{baseDir}/examples/good-digest-2026-05-09.md`
-- `{baseDir}/examples/good-digest-entry-map-2026-05-09.json`
-- `{baseDir}/examples/good-capture-brief-partial.md`
-- `{baseDir}/examples/good-capture-brief-complete.md`
-- `{baseDir}/examples/good-capture-evidence-partial.json`
-- `{baseDir}/examples/good-capture-evidence-complete.json`
-- `{baseDir}/examples/good-user-response-partial.txt`
-- `{baseDir}/examples/good-user-response-complete.txt`
-- `{baseDir}/examples/bad-seed-stub.md`
-- `{baseDir}/examples/bad-menu-only-response.txt`
-- `{baseDir}/examples/bad-legacy-brief-reuse.md`
+- `SKILL_ROOT/examples/good-digest-2026-05-09.md`
+- `SKILL_ROOT/examples/good-digest-entry-map-2026-05-09.json`
+- `SKILL_ROOT/examples/good-capture-brief-partial.md`
+- `SKILL_ROOT/examples/good-capture-brief-complete.md`
+- `SKILL_ROOT/examples/good-capture-evidence-partial.json`
+- `SKILL_ROOT/examples/good-capture-evidence-complete.json`
+- `SKILL_ROOT/examples/good-user-response-partial.txt`
+- `SKILL_ROOT/examples/good-user-response-complete.txt`
+- `SKILL_ROOT/examples/bad-seed-stub.md`
+- `SKILL_ROOT/examples/bad-menu-only-response.txt`
+- `SKILL_ROOT/examples/bad-legacy-brief-reuse.md`
 
-## What not to do
+## What Not To Do
 
 - Do not read old capture artifacts and present them as the current answer.
 - Do not invent stable IDs that are not in the digest or digest-entry map.

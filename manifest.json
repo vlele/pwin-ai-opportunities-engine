@@ -1,8 +1,8 @@
 {
   "schema": "pwin-ai-opportunities.manifest/v1",
   "name": "pwin-ai-opportunities",
-  "version": "1.5.2",
-  "description": "pWin.ai Opportunities with installed-skill script paths, live SAM scan retrieval, vendor-aware digests, and stricter stable-ID validation",
+  "version": "1.6.0",
+  "description": "pWin.ai Opportunities as a shared multi-runtime skill package for OpenClaw, Codex, and Claude-oriented adapters",
   "requiredArtifacts": [
     {
       "name": "opportunities",
