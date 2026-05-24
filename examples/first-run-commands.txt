@@ -1,5 +1,0 @@
-# First-run command examples
-
-/pwin-ai-opportunities scan 30-45
-/pwin-ai-opportunities research A1
-/pwin-ai-opportunities feedback "like A1"

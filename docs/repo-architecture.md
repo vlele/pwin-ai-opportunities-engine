@@ -24,26 +24,25 @@ This repo therefore uses:
 
 ```text
 pwin-ai-opportunities/
-├── SKILL.md
-├── manifest.json
-├── SECURITY.md
-├── TRUST.md
-├── agents/
-│   └── openai.yaml
-├── scripts/
-├── templates/
-├── references/
-├── examples/
-├── assets/
-├── claude-code/
-│   ├── CLAUDE.md
-│   └── .claude/
-│       └── commands/
-└── docs/
-    ├── install-openclaw.md
-    ├── install-codex.md
-    ├── install-claude-code.md
-    └── repo-architecture.md
+|- SKILL.md
+|- manifest.json
+|- SECURITY.md
+|- TRUST.md
+|- agents/
+|  `- openai.yaml
+|- scripts/
+|- templates/
+|- references/
+|- examples/
+|- claude-code/
+|  |- CLAUDE.md
+|  `- .claude/
+|     `- commands/
+`- docs/
+   |- install-openclaw.md
+   |- install-codex.md
+   |- install-claude-code.md
+   `- repo-architecture.md
 ```
 
 ## Shared Root Responsibilities
@@ -57,13 +56,11 @@ pwin-ai-opportunities/
 - `scripts/`
   Deterministic execution layer shared by every host.
 - `templates/`
-  Shared render templates and JSON templates.
+  Shipped render templates and JSON templates used by the current runtime.
 - `references/`
-  Deeper playbooks and source guidance.
+  Deeper playbooks and source guidance for the shipped modes.
 - `examples/`
-  Golden behavioral anchors.
-- `assets/`
-  Reserved for future icons or host-facing media files.
+  Retained behavioral anchors for scan and capture outputs.
 
 ## Claude Adapter Responsibilities
 

@@ -1,1 +1,0 @@
-openclaw cron add   --name "Government Opportunity Scout"   --cron "0 9 * * *"   --tz "America/New_York"   --session isolated   --message "Execute Government Opportunity Scout. Apply any new feedback events first, scan enabled official sources, write today's full report and digest, number each report entry, and announce the digest with a feedback footer."   --announce

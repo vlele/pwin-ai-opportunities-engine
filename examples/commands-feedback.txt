@@ -1,3 +1,0 @@
-/pwin-ai-opportunities feedback "like A1"
-/pwin-ai-opportunities feedback "dislike W2 because too small"
-/pwin-ai-opportunities feedback "never show grants"

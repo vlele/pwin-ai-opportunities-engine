@@ -1,6 +1,0 @@
-/pwin-ai-opportunities scan 30-45
-/pwin-ai-opportunities run today's opportunity scan with a 30 to 45 day time horizon
-/pwin-ai-opportunities scan open federal opportunities due in 60 to 90 days
-
-Installed script path used by the skill:
-$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/scan/run_scan.py
