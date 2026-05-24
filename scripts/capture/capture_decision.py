@@ -452,6 +452,27 @@ def _detect_award_basis(text: str) -> str:
     return "Evaluation basis not explicit in current evidence"
 
 
+def _detect_transition_window(text: str) -> str:
+    lower = text.lower()
+    if "no transition" in lower or "no phase-in" in lower:
+        return "No transition period stated in current evidence"
+    patterns = (
+        r"(\d{1,3})\s*-\s*day transition",
+        r"(\d{1,3})\s+day transition",
+        r"transition period of (\d{1,3}) days",
+        r"phase[- ]in period of (\d{1,3}) days",
+        r"within (\d{1,3}) days after award",
+        r"(\d{1,3})\s+calendar days(?: after award)?",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, lower)
+        if match:
+            return f"{match.group(1)}-day transition / mobilization signal"
+    if any(marker in lower for marker in CONTINUITY_MARKERS):
+        return "Transition sensitivity is visible, but the exact transition window is not explicit in current evidence"
+    return "Not explicit in current evidence"
+
+
 def _detect_vehicle_posture(text: str, vehicle_signals: list[str], contract_vehicles: list[str]) -> dict[str, Any]:
     lower = f"{text} {' '.join(vehicle_signals)}".lower()
     access_paths: list[str] = []
@@ -505,7 +526,9 @@ def _required_qualification_gaps(profile: dict[str, Any], text: str) -> dict[str
 
 def _set_aside_access(set_aside_text: str, vendor_set_asides: list[str]) -> tuple[str, bool]:
     normalized = _normalize_text(set_aside_text)
-    if not normalized or "no set aside" in normalized:
+    if not normalized or normalized in {"not stated", "na", "n a", "unknown"}:
+        return "Set-aside posture is not stated in the current evidence.", True
+    if "no set aside" in normalized or "full and open" in normalized or "unrestricted" in normalized:
         return "No visible socioeconomic barrier in the current record.", True
     vendor_tokens = " ".join(_normalize_text(value) for value in vendor_set_asides)
     match = bool(vendor_tokens and any(token in vendor_tokens for token in normalized.split()))
@@ -566,11 +589,14 @@ def _priority_analysis(
     if not public_research.get("leadership_priority_signals"):
         unknowns.append("Program-level customer priorities still need validation through named officials, industry day material, or formal Q&A.")
 
+    mission_problem = (
+        _clean_excerpt(public_research.get("mission_context_signals", [])[0], max_chars=320)
+        if public_research.get("mission_context_signals")
+        else "Mission problem is not corroborated beyond the solicitation text in current evidence."
+    )
+
     return {
-        "mission_problem": _clean_excerpt(
-            public_research.get("mission_context_signals", [notice_text])[0] if public_research.get("mission_context_signals") else notice_text,
-            max_chars=320,
-        ),
+        "mission_problem": mission_problem,
         "evidence_backed_priorities": _dedupe_strings(evidence_backed),
         "likely_priorities": _dedupe_strings(likely),
         "unknowns": _dedupe_strings(unknowns),
@@ -620,10 +646,17 @@ def _funding_analysis(
     evidence = _dedupe_strings(
         _string_list(award_signals.get("budget_signals", []), max_items=3)
         + _string_list(public_research.get("budget_document_signals", []), max_items=2)
-        + _string_list(funding_assessment.get("notes", []), max_items=2)
+        + (
+            ["Attachment package includes pricing, schedule, or amendment artifacts that can be used for direct funding validation."]
+            if useful_attachment_budget
+            else []
+        )
     )
+    if not evidence:
+        timing_risk.append("No corroborated funding evidence was found in this run; timing and durability remain assumptions until validated.")
     open_questions = _dedupe_strings(
         [
+            *_string_list(funding_assessment.get("gap_notes", []), max_items=2),
             *([gap for gap in evidence_gaps if "budget" in gap.lower() or "fund" in gap.lower()][:2]),
             "Is there a named budget line, forecast item, or obligated predecessor contract that directly maps to this requirement?",
         ]
@@ -632,7 +665,7 @@ def _funding_analysis(
         "funding_confidence": confidence,
         "trend_direction": trend,
         "risk_to_timing_or_award": _dedupe_strings(timing_risk) or ["No major timing risk surfaced beyond normal procurement uncertainty."],
-        "evidence": evidence or ["Funding was checked, but current evidence is still light."],
+        "evidence": evidence,
         "open_questions": open_questions,
     }
 
@@ -1592,6 +1625,7 @@ def build_capture_decision_sections(
     )
     contract_type = _detect_contract_type(notice_text)
     award_basis = _detect_award_basis(notice_text)
+    transition_window = _detect_transition_window(notice_text)
     contract_vehicles = _profile_contract_vehicles(vendor_profile)
     vehicle_posture = _detect_vehicle_posture(notice_text, vehicle_signals, contract_vehicles)
     vehicle_access_paths = vehicle_posture.get("access_paths", [])
@@ -1671,7 +1705,9 @@ def build_capture_decision_sections(
         "contract_structure": ", ".join(contract_structures) if contract_structures else "Not explicit in current evidence",
         "set_aside": set_aside_text,
         "contract_type": contract_type,
+        "evaluation_basis": award_basis,
         "award_basis": award_basis,
+        "transition_window": transition_window,
         "due_date": str(opportunity.get("due_date", "") or "Not stated"),
         "days_until_due": str(opportunity.get("days_until_due", "") or "Not stated"),
         "estimated_value": _currency(opportunity.get("estimated_value")),
@@ -1685,6 +1721,10 @@ def build_capture_decision_sections(
 
     acquisition_strategy = {
         "requirement_type": _requirement_type(str(opportunity.get("notice_type", "") or ""), notice_text),
+        "contract_vehicle": snapshot["contract_vehicle"],
+        "contract_structure": snapshot["contract_structure"],
+        "set_aside": snapshot["set_aside"],
+        "contract_type": contract_type,
         "vehicle_assessment": _dedupe_strings(
             [
                 *([f"Likely pre-existing vehicle or access gate: {', '.join(vehicle_access_paths)}."] if vehicle_access_paths else []),
@@ -1717,6 +1757,7 @@ def build_capture_decision_sections(
             ]
         ),
         "evaluation_basis": award_basis,
+        "transition_window": transition_window,
         "shaping_signals": _dedupe_strings(
             [
                 *(
@@ -1757,6 +1798,7 @@ def build_capture_decision_sections(
                 f"Notice type: {snapshot['notice_type']}.",
                 f"Set-aside: {snapshot['set_aside']}.",
                 f"Contract type signal: {contract_type}.",
+                f"Transition window signal: {transition_window}.",
                 f"Funding confidence assessed as {funding_analysis['funding_confidence']}.",
                 f"Current recommendation: {recommendation['recommendation']} ({recommendation['score_total']}/100).",
             ]

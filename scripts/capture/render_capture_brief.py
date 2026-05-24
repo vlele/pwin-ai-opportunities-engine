@@ -67,7 +67,8 @@ def _opportunity_snapshot(snapshot: dict[str, Any]) -> str:
         ("Contract Structure", "contract_structure"),
         ("Set-Aside", "set_aside"),
         ("Contract Type", "contract_type"),
-        ("Award Basis", "award_basis"),
+        ("Evaluation Basis", "evaluation_basis"),
+        ("Transition Window", "transition_window"),
         ("Due Date", "due_date"),
         ("Days Until Due", "days_until_due"),
         ("Estimated Value", "estimated_value"),
@@ -155,8 +156,13 @@ def _funding_block(section: dict[str, Any]) -> str:
 def _acquisition_block(section: dict[str, Any]) -> str:
     return "\n".join(
         [
+            f"**Contract Vehicle:** {_md_cell(section.get('contract_vehicle'))}",
+            f"**Contract Structure:** {_md_cell(section.get('contract_structure'))}",
+            f"**Set-Aside:** {_md_cell(section.get('set_aside'))}",
+            f"**Contract Type:** {_md_cell(section.get('contract_type'))}",
             f"**Requirement Type:** {_md_cell(section.get('requirement_type'))}",
             f"**Evaluation Basis:** {_md_cell(section.get('evaluation_basis'))}",
+            f"**Transition Window:** {_md_cell(section.get('transition_window'))}",
             "",
             "### Vehicle / Eligibility Assessment",
             _markdown_list(section.get("vehicle_assessment", [])),
@@ -401,9 +407,22 @@ def _action_plan_block(section: dict[str, Any]) -> str:
 
 
 def _assumptions_block(section: dict[str, Any]) -> str:
-    return "\n".join(
+    blocks = [
+        f"**Overall Confidence:** {_md_cell(section.get('overall_confidence'))}",
+    ]
+    if section.get("memo_honesty_score") not in (None, ""):
+        blocks.append(f"**Memo Honesty Score:** {_md_cell(section.get('memo_honesty_score'))} / 100")
+    if section.get("release_warning"):
+        blocks.extend(
+            [
+                f"**Release Warning:** {_md_cell(section.get('release_warning'))}",
+                "",
+                "### Why This Memo Is Still Capped",
+                _markdown_list(section.get("honesty_drivers", [])),
+            ]
+        )
+    blocks.extend(
         [
-            f"**Overall Confidence:** {_md_cell(section.get('overall_confidence'))}",
             "",
             "### Known Facts",
             _markdown_list(section.get("facts", [])),
@@ -418,12 +437,19 @@ def _assumptions_block(section: dict[str, Any]) -> str:
             _markdown_list(section.get("unknowns", [])),
         ]
     )
+    return "\n".join(blocks)
 
 
 def _executive_judgment_block(section: dict[str, Any]) -> str:
-    return "\n".join(
+    blocks = [
+        section.get("executive_summary", "Judgment not generated."),
+    ]
+    if section.get("memo_honesty_score") not in (None, ""):
+        blocks.append(f"**Memo Honesty Score:** {_md_cell(section.get('memo_honesty_score'))} / 100")
+    if section.get("release_warning"):
+        blocks.append(f"**Release Warning:** {_md_cell(section.get('release_warning'))}")
+    blocks.extend(
         [
-            section.get("executive_summary", "Judgment not generated."),
             "",
             "### Should We Pursue?",
             _markdown_list([f"{section.get('recommendation', 'Undetermined')} ({section.get('score_total', 0)}/100)."] + list(section.get("why", [])[:3])),
@@ -441,6 +467,15 @@ def _executive_judgment_block(section: dict[str, Any]) -> str:
             _markdown_list(section.get("next_best_actions", [])),
         ]
     )
+    if section.get("honesty_drivers"):
+        blocks.extend(
+            [
+                "",
+                "### Why This Memo Is Still Capped",
+                _markdown_list(section.get("honesty_drivers", [])),
+            ]
+        )
+    return "\n".join(blocks)
 
 
 def _pursuit_block(section: dict[str, Any]) -> str:

@@ -66,6 +66,10 @@ SIGNAL_STOPWORDS = {
     "based",
 }
 OBJECTIVE_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+OBJECTIVE_STRUCTURED_SPLIT_RE = re.compile(
+    r"(?=\b(?:CLIN\s+\d{3,4}[A-Z]?|SubCLIN\s+\d{3,4}[A-Z]?|Task\s+\d+(?:\.\d+)?|Subtask\s+\d+(?:\.\d+)?|PWS(?:\s+Section)?\s+\d+(?:\.\d+)?|Section\s+\d+(?:\.\d+)?|Performance Objective(?:\s+\d+)?|Deliverable(?:s)?|Transition(?:\s+Plan)?|Period of Performance)\b)",
+    re.IGNORECASE,
+)
 OBJECTIVE_KEYWORDS = (
     "shall",
     "must",
@@ -454,7 +458,12 @@ def _objective_stakeholder_text(buyer: str, contacts: list[dict[str, str]]) -> s
     return "; ".join(values) if values else buyer or "N/A"
 
 
-def _attachment_text_pool(attachment_bundle: dict[str, object], max_items: int = 5) -> list[str]:
+def _ordered_attachment_items(
+    attachment_bundle: dict[str, object],
+    *,
+    allowed_categories: set[str] | None = None,
+    max_items: int = 6,
+) -> list[dict[str, object]]:
     attachments = attachment_bundle.get("attachments", []) if isinstance(attachment_bundle, dict) else []
     priority = {
         "statement_of_work": 0,
@@ -464,12 +473,20 @@ def _attachment_text_pool(attachment_bundle: dict[str, object], max_items: int =
         "amendment": 4,
         "other": 5,
     }
-    ordered = sorted(
-        [item for item in attachments if isinstance(item, dict)],
-        key=lambda item: priority.get(str(item.get("category", "other")), 9),
-    )
+    ordered = [
+        item
+        for item in attachments
+        if isinstance(item, dict)
+        and (allowed_categories is None or str(item.get("category", "other")) in allowed_categories)
+    ]
+    ordered.sort(key=lambda item: priority.get(str(item.get("category", "other")), 9))
+    return ordered[:max_items]
+
+
+def _attachment_text_pool(attachment_bundle: dict[str, object], max_items: int = 5) -> list[str]:
+    ordered = _ordered_attachment_items(attachment_bundle, max_items=max_items)
     texts: list[str] = []
-    for item in ordered[:max_items]:
+    for item in ordered:
         text_excerpt = _clean_excerpt(item.get("text_excerpt", ""), max_chars=5000)
         if text_excerpt:
             texts.append(text_excerpt)
@@ -481,23 +498,14 @@ def _attachment_text_pool(attachment_bundle: dict[str, object], max_items: int =
 
 
 def _objective_scope_texts(attachment_bundle: dict[str, object], max_items: int = 6) -> list[str]:
-    attachments = attachment_bundle.get("attachments", []) if isinstance(attachment_bundle, dict) else []
     scope_categories = {"statement_of_work", "solicitation", "instructions_evaluation"}
-    priority = {
-        "statement_of_work": 0,
-        "solicitation": 1,
-        "instructions_evaluation": 2,
-    }
-    ordered = sorted(
-        [
-            item
-            for item in attachments
-            if isinstance(item, dict) and str(item.get("category", "other")) in scope_categories
-        ],
-        key=lambda item: priority.get(str(item.get("category", "other")), 9),
+    ordered = _ordered_attachment_items(
+        attachment_bundle,
+        allowed_categories=scope_categories,
+        max_items=max_items,
     )
     texts: list[str] = []
-    for item in ordered[:max_items]:
+    for item in ordered:
         for snippet in item.get("snippets", []) or []:
             cleaned = _clean_excerpt(snippet, max_chars=320)
             if cleaned:
@@ -508,13 +516,66 @@ def _objective_scope_texts(attachment_bundle: dict[str, object], max_items: int 
     return _dedupe_strings(texts)
 
 
+def _attachment_objective_candidates(attachment_bundle: dict[str, object], max_items: int = 18) -> list[str]:
+    candidate_categories = {"statement_of_work", "solicitation", "instructions_evaluation", "questions_answers", "amendment"}
+    ordered = _ordered_attachment_items(
+        attachment_bundle,
+        allowed_categories=candidate_categories,
+        max_items=6,
+    )
+    candidates: list[str] = []
+    marker_keywords = (
+        "clin ",
+        "subclin",
+        "task ",
+        "subtask",
+        "deliverable",
+        "transition",
+        "period of performance",
+        "pws",
+        "shall",
+        "must",
+        "provide",
+        "deliver",
+        "maintain",
+        "report",
+        "staff",
+    )
+    for item in ordered:
+        values = [*(item.get("snippets", []) or []), item.get("text_excerpt", "")]
+        for value in values:
+            cleaned = _clean_excerpt(value, max_chars=7000)
+            if not cleaned:
+                continue
+            structured_parts = [part for part in OBJECTIVE_STRUCTURED_SPLIT_RE.split(cleaned) if part.strip()]
+            if len(structured_parts) <= 1:
+                structured_parts = re.split(r"(?<=;)\s+|(?<=[.!?])\s+", cleaned)
+            for part in structured_parts:
+                sentence = SPACE_RE.sub(" ", part).strip(" -;:")
+                lower = sentence.lower()
+                if len(sentence) < 60:
+                    continue
+                if not any(marker in lower for marker in marker_keywords):
+                    continue
+                candidates.append(sentence[:360])
+                if len(candidates) >= max_items:
+                    return _dedupe_strings(candidates)[:max_items]
+    return _dedupe_strings(candidates)[:max_items]
+
+
 def _objective_requirement_tokens(
     title: str,
     summary: str,
     explanation_summary: str,
     attachment_bundle: dict[str, object],
 ) -> set[str]:
-    seed_values: list[str] = [*_objective_scope_texts(attachment_bundle, max_items=6), title, summary, explanation_summary]
+    seed_values: list[str] = [
+        *_attachment_objective_candidates(attachment_bundle, max_items=18),
+        *_objective_scope_texts(attachment_bundle, max_items=6),
+        title,
+        summary,
+        explanation_summary,
+    ]
     tokens = _signal_tokens(*seed_values)
     return {token for token in tokens if token not in OBJECTIVE_ADMIN_TOKENS}
 
@@ -559,20 +620,22 @@ def _decompose_objectives(
     attachment_bundle: dict[str, object],
 ) -> list[str]:
     candidates: list[str] = []
+    attachment_candidates = _attachment_objective_candidates(attachment_bundle, max_items=20)
     attachment_texts = _objective_scope_texts(attachment_bundle, max_items=6)
     requirement_tokens = _objective_requirement_tokens(title, summary, explanation_summary, attachment_bundle)
     attachment_seed_text = " ".join(attachment_texts)
-    attachments_thin = len(attachment_texts) < 2 or len(attachment_seed_text) < 900
-    seed_values = [*attachment_texts]
+    attachments_thin = (len(attachment_candidates) < 2 and len(attachment_texts) < 2) or len(attachment_seed_text) < 900
+    seed_values = [*attachment_candidates, *attachment_texts]
     if attachments_thin:
-        seed_values.extend([summary, explanation_summary, title])
-    elif title:
+        seed_values.extend([summary, explanation_summary])
+    elif not attachment_candidates and title:
         seed_values.append(title)
     for value in seed_values:
-        for part in OBJECTIVE_SENTENCE_RE.split(_clean_excerpt(value, max_chars=8000)):
+        parts = [value] if value in attachment_candidates else OBJECTIVE_SENTENCE_RE.split(_clean_excerpt(value, max_chars=8000))
+        for part in parts:
             sentence = SPACE_RE.sub(" ", part).strip(" -")
             lower = sentence.lower()
-            if len(sentence) < 70 or len(sentence) > 260:
+            if len(sentence) < 70 or len(sentence) > 340:
                 continue
             if sentence.endswith("?"):
                 continue
@@ -951,6 +1014,7 @@ def _funding_assessment(
     useful_attachment_budget = bool(attachment_budget_signals)
     useful_evidence_found = useful_award_history or useful_budget_documents or useful_attachment_budget
     notes: list[str] = []
+    gap_notes: list[str] = []
     if useful_award_history:
         notes.append("USAspending surfaced relevant award-history rows.")
     if useful_budget_documents:
@@ -958,7 +1022,7 @@ def _funding_assessment(
     if useful_attachment_budget:
         notes.append("SAM attachments exposed pricing, schedule, or amendment budget clues.")
     if not useful_evidence_found:
-        notes.append("Funding was checked, but no substantive funding evidence was found beyond query status.")
+        gap_notes.append("Funding was checked, but no substantive funding evidence was found beyond query status.")
     return {
         "checked": True,
         "useful_evidence_found": useful_evidence_found,
@@ -966,6 +1030,58 @@ def _funding_assessment(
         "useful_budget_documents": useful_budget_documents,
         "useful_attachment_budget": useful_attachment_budget,
         "notes": notes,
+        "gap_notes": gap_notes,
+    }
+
+
+def _memo_honesty_assessment(
+    public_research: dict[str, object],
+    objective_row_count: int,
+    fallback_objective_rows: int,
+    real_funding_signal_count: int,
+    attachments_expected: bool,
+    parsed_attachment_count: int,
+) -> dict[str, object]:
+    score = 100
+    concerns: list[str] = []
+    requirement_relevant_ratio = float(public_research.get("requirement_relevant_ratio", 0.0) or 0.0)
+    core_context_anchor_count = int(public_research.get("core_context_anchor_count", 0) or 0)
+
+    if objective_row_count and fallback_objective_rows:
+        if fallback_objective_rows >= objective_row_count:
+            score -= 35
+            concerns.append("All objective rows still depend on fallback decomposition rather than validated task structure.")
+        else:
+            score -= 20
+            concerns.append("Some objective rows still depend on fallback decomposition rather than validated task structure.")
+    if requirement_relevant_ratio < 0.5:
+        score -= 25 if requirement_relevant_ratio < 0.25 else 15
+        concerns.append(
+            f"Public-source relevance is still weak ({requirement_relevant_ratio:.2f} requirement-bearing ratio across admitted public sources)."
+        )
+    if real_funding_signal_count == 0:
+        score -= 20
+        concerns.append("No real funding signal was corroborated in this run.")
+    if core_context_anchor_count == 0:
+        score -= 10
+        concerns.append("No requirement-bearing mission, budget, or forecast anchor source survived admission.")
+    if attachments_expected and parsed_attachment_count == 0:
+        score -= 15
+        concerns.append("Expected attachments were not parsed, which leaves scope interpretation under-supported.")
+
+    score = max(0, score)
+    confidence_band = "High" if score >= 80 else "Medium" if score >= 60 else "Low"
+    release_warning = (
+        "Release warning: this memo is informative but not yet decision-grade until fallback objectives, public-source relevance, and funding corroboration improve."
+        if concerns
+        else ""
+    )
+    return {
+        "score": score,
+        "confidence_band": confidence_band,
+        "requirement_relevant_ratio": requirement_relevant_ratio,
+        "release_warning": release_warning,
+        "drivers": concerns,
     }
 
 
@@ -1351,6 +1467,14 @@ def main() -> int:
     real_funding_signal_count = sum(
         1 for signal in budget_funding_signals if not str(signal or "").startswith("No funding corroboration found")
     )
+    memo_honesty = _memo_honesty_assessment(
+        public_research,
+        len(objective_rows),
+        fallback_objective_rows,
+        real_funding_signal_count,
+        bool(attachment_bundle.get("attachments_expected")),
+        len(attachment_bundle.get("attachments", []) or []),
+    )
     decision_sections = build_capture_decision_sections(
         vendor_profile=vendor_profile,
         resolved=resolved,
@@ -1366,6 +1490,21 @@ def main() -> int:
         evidence_gaps=evidence_gaps,
         stakeholder_contacts=stakeholder_contacts,
         vehicle_signals=vehicle_signals,
+    )
+    decision_sections.setdefault("capture_judgment", {}).update(
+        {
+            "memo_honesty_score": memo_honesty.get("score", 0),
+            "memo_honesty_confidence": memo_honesty.get("confidence_band", "Low"),
+            "release_warning": memo_honesty.get("release_warning", ""),
+            "honesty_drivers": memo_honesty.get("drivers", []),
+        }
+    )
+    decision_sections.setdefault("assumptions_unknowns_confidence", {}).update(
+        {
+            "memo_honesty_score": memo_honesty.get("score", 0),
+            "release_warning": memo_honesty.get("release_warning", ""),
+            "honesty_drivers": memo_honesty.get("drivers", []),
+        }
     )
     evidence = {
         "request_id": request_id,
@@ -1498,6 +1637,7 @@ def main() -> int:
         ],
         "evidence_gaps": evidence_gaps,
         "source_log": public_sources,
+        "memo_honesty_assessment": memo_honesty,
         "validation": {
             "all_required_sections_present": False,
             "contains_placeholders": False,
@@ -1513,6 +1653,7 @@ def main() -> int:
                 "fallback_objective_rows": fallback_objective_rows,
                 "real_funding_signal_count": real_funding_signal_count,
             },
+            "memo_honesty": memo_honesty,
             "stub_stage_exited_before_response": True,
             "menu_only_fallback_used": False,
         },

@@ -14,7 +14,10 @@ import urllib.request
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
-from PyPDF2 import PdfReader
+try:
+    from PyPDF2 import PdfReader
+except ImportError:  # pragma: no cover - optional dependency
+    PdfReader = None
 from common.paths import today_local_str
 
 
@@ -313,6 +316,24 @@ NON_REQUIREMENT_KEYWORDS = {
     "agency",
     "office",
     "department",
+    "industry",
+    "day",
+    "presolicitation",
+    "information",
+    "sources",
+    "sought",
+    "purpose",
+    "event",
+    "objective",
+    "objectives",
+    "provide",
+    "provided",
+    "better",
+    "understanding",
+    "promote",
+    "competition",
+    "current",
+    "future",
 }
 POLICY_FALLBACK_DOMAINS = [
     "nist.gov",
@@ -443,6 +464,10 @@ def _top_keywords(title: str, notice_text: str, limit: int = 8) -> list[str]:
         if len(combined) >= limit:
             break
     return combined
+
+
+def _priority_title_keywords(title: str, limit: int = 5) -> list[str]:
+    return [token for token in _signal_tokens(title) if token not in NON_REQUIREMENT_KEYWORDS][:limit]
 
 
 def _keyword_query_clause(keywords: list[str], limit: int = 3) -> str:
@@ -808,6 +833,7 @@ def _source_quality_score(
     url_hints: list[str],
     text_hints: list[str],
     label_tokens: list[str],
+    priority_keyword_tokens: list[str],
     keyword_tokens: list[str],
     policy_refs: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -817,8 +843,10 @@ def _source_quality_score(
         score -= 6
     combined_tokens = set(_signal_tokens(combined))
     entity_overlap = len(combined_tokens & set(label_tokens))
+    priority_overlap = len(combined_tokens & set(priority_keyword_tokens))
     objective_overlap = len(combined_tokens & set(keyword_tokens))
     score += min(4, entity_overlap)
+    score += min(6, priority_overlap * 2)
     score += min(5, objective_overlap)
     compact_combined = combined.replace(" ", "")
     marker_hit = _category_marker_hit(category, combined, url, text_hints)
@@ -837,7 +865,9 @@ def _source_quality_score(
     }
     requirement_keywords_present = bool(keyword_tokens)
     requirement_relevant = entity_overlap > 0 and (
-        objective_overlap > 0 or (category == "leadership" and not requirement_keywords_present)
+        objective_overlap > 0
+        and (priority_overlap > 0 or not priority_keyword_tokens)
+        or (category == "leadership" and not requirement_keywords_present and entity_overlap > 0)
     )
     if category == "policy_compliance":
         policy_ref_hits = 0
@@ -884,13 +914,22 @@ def _source_quality_score(
             }
     if category == "mission_context":
         if not marker_hit:
-            score -= 8
-    if category == "leadership":
-        if not marker_hit:
-            score -= 8
+            return {
+                "quality_score": -10,
+                "entity_overlap": entity_overlap,
+                "objective_overlap": objective_overlap,
+                "marker_hit": marker_hit,
+                "requirement_relevant": False,
+            }
+    if category == "leadership" and not marker_hit:
+        score -= 8
     if category != "policy_compliance" and entity_overlap == 0 and objective_overlap == 0:
         score -= 8
-    if category in {"mission_context", "oversight", "public_discourse"} and (entity_overlap == 0 or objective_overlap == 0):
+    if category in {"mission_context", "oversight", "public_discourse"} and (
+        entity_overlap == 0
+        or objective_overlap == 0
+        or (priority_keyword_tokens and priority_overlap == 0)
+    ):
         return {
             "quality_score": -10,
             "entity_overlap": entity_overlap,
@@ -898,7 +937,9 @@ def _source_quality_score(
             "marker_hit": marker_hit,
             "requirement_relevant": False,
         }
-    if category in {"budget_funding", "acquisition_forecast"} and objective_overlap == 0:
+    if category in {"budget_funding", "acquisition_forecast"} and (
+        objective_overlap == 0 or (priority_keyword_tokens and priority_overlap == 0)
+    ):
         return {
             "quality_score": -10,
             "entity_overlap": entity_overlap,
@@ -914,7 +955,9 @@ def _source_quality_score(
             "marker_hit": marker_hit,
             "requirement_relevant": False,
         }
-    if category == "leadership" and requirement_keywords_present and objective_overlap == 0:
+    if category == "leadership" and requirement_keywords_present and (
+        objective_overlap == 0 or (priority_keyword_tokens and priority_overlap == 0)
+    ):
         return {
             "quality_score": -10,
             "entity_overlap": entity_overlap,
@@ -1100,6 +1143,8 @@ def _header_published_date(headers: Any) -> str:
 
 
 def _extract_pdf_text(data: bytes, max_pages: int = 6) -> str:
+    if PdfReader is None:
+        raise RuntimeError("PyPDF2 unavailable")
     reader = PdfReader(io.BytesIO(data))
     pages: list[str] = []
     for page in reader.pages[:max_pages]:
@@ -1137,6 +1182,17 @@ def fetch_url_excerpt(url: str, timeout: int = DEFAULT_TIMEOUT, max_chars: int =
                     raw = raw[:DEFAULT_MAX_BYTES]
                 published_date = _header_published_date(response.headers)
             if url.lower().endswith(".pdf") or "pdf" in content_type.lower():
+                if PdfReader is None:
+                    return {
+                        "status": "ok",
+                        "url": url,
+                        "content_type": content_type,
+                        "published_date": published_date,
+                        "title": "",
+                        "text_excerpt": "",
+                        "truncated": truncated,
+                        "parser_status": "dependency_missing:PyPDF2",
+                    }
                 text = _extract_pdf_text(raw)
                 title = ""
                 excerpt = _normalize_text(text)[:max_chars]
@@ -1155,6 +1211,7 @@ def fetch_url_excerpt(url: str, timeout: int = DEFAULT_TIMEOUT, max_chars: int =
                 "title": title,
                 "text_excerpt": excerpt,
                 "truncated": truncated,
+                "parser_status": "parsed_pdf" if (url.lower().endswith(".pdf") or "pdf" in content_type.lower()) else "parsed_html",
             }
         except urllib.error.HTTPError as exc:
             last_http_error = {"status": "http_error", "url": url, "code": exc.code}
@@ -1217,6 +1274,7 @@ def _source_from_result(
     url_hints: list[str],
     text_hints: list[str],
     label_tokens: list[str],
+    priority_keyword_tokens: list[str],
     keyword_tokens: list[str],
     policy_refs: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
@@ -1246,6 +1304,7 @@ def _source_from_result(
         url_hints,
         text_hints,
         label_tokens,
+        priority_keyword_tokens,
         keyword_tokens,
         policy_refs,
     )
@@ -1276,6 +1335,7 @@ def _source_from_candidate_url(
     url_hints: list[str],
     text_hints: list[str],
     label_tokens: list[str],
+    priority_keyword_tokens: list[str],
     keyword_tokens: list[str],
     policy_refs: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
@@ -1295,6 +1355,7 @@ def _source_from_candidate_url(
         url_hints,
         text_hints,
         label_tokens,
+        priority_keyword_tokens,
         keyword_tokens,
         policy_refs,
     )
@@ -1324,6 +1385,7 @@ def _discover_sources_from_sitemaps(
     url_hints: list[str],
     text_hints: list[str],
     label_tokens: list[str],
+    priority_keyword_tokens: list[str],
     keyword_tokens: list[str],
     policy_refs: list[dict[str, Any]],
     *,
@@ -1370,6 +1432,7 @@ def _discover_sources_from_sitemaps(
             url_hints,
             text_hints,
             label_tokens,
+            priority_keyword_tokens,
             keyword_tokens,
             policy_refs,
         )
@@ -1386,6 +1449,7 @@ def _discover_sources(
     queries: list[str],
     allowed_domains: list[str],
     labels: list[str],
+    priority_keywords: list[str],
     keywords: list[str],
     policy_refs: list[dict[str, Any]],
     *,
@@ -1398,6 +1462,7 @@ def _discover_sources(
         for token in _dedupe_strings(_signal_tokens(*labels) + _label_acronyms(labels, allowed_domains))
         if token not in GENERIC_ENTITY_TOKENS
     ]
+    priority_keyword_tokens = _dedupe_strings(_signal_tokens(*priority_keywords))
     keyword_tokens = _dedupe_strings(_signal_tokens(*keywords))
     url_hints, text_hints = _category_hints(category, labels, keywords, policy_refs)
     seen_urls: set[str] = set()
@@ -1407,6 +1472,7 @@ def _discover_sources(
         url_hints,
         text_hints,
         label_tokens,
+        priority_keyword_tokens,
         keyword_tokens,
         policy_refs,
         max_sources=max_sources,
@@ -1434,6 +1500,7 @@ def _discover_sources(
                 url_hints,
                 text_hints,
                 label_tokens,
+                priority_keyword_tokens,
                 keyword_tokens,
                 policy_refs,
             )
@@ -1482,8 +1549,9 @@ def fetch_public_research(
     title = str(entry.get("title", "") or "")
     labels = _agency_labels(buyer)
     domains = infer_official_domains(buyer, str(entry.get("url", "") or ""))
+    priority_keywords = _priority_title_keywords(title)
     keywords = _top_keywords(title, _clean_notice_seed(notice_text))
-    requirement_clause = _keyword_query_clause(keywords)
+    requirement_clause = _keyword_query_clause(priority_keywords or keywords)
     contacts = stakeholder_contacts or []
     query_labels = _dedupe_strings(_label_acronyms(labels, domains) + labels)
     primary_label = query_labels[0] if query_labels else buyer or title
@@ -1554,6 +1622,7 @@ def fetch_public_research(
         mission_queries,
         _category_allowed_domains("mission_context", domains, buyer, policy_refs),
         labels,
+        priority_keywords or keywords,
         keywords,
         policy_refs,
         max_sources=2,
@@ -1563,6 +1632,7 @@ def fetch_public_research(
         budget_queries,
         _category_allowed_domains("budget_funding", domains, buyer, policy_refs),
         labels,
+        priority_keywords or keywords,
         keywords,
         policy_refs,
         max_sources=2,
@@ -1572,6 +1642,7 @@ def fetch_public_research(
         forecast_queries,
         _category_allowed_domains("acquisition_forecast", domains, buyer, policy_refs),
         labels,
+        priority_keywords or keywords,
         keywords,
         policy_refs,
         max_sources=1,
@@ -1581,6 +1652,7 @@ def fetch_public_research(
         oversight_queries,
         _category_allowed_domains("oversight", domains, buyer, policy_refs),
         labels,
+        priority_keywords or keywords,
         keywords,
         policy_refs,
         max_sources=2,
@@ -1590,6 +1662,7 @@ def fetch_public_research(
         leadership_queries,
         _category_allowed_domains("leadership", domains, buyer, policy_refs),
         labels,
+        priority_keywords or keywords,
         keywords,
         policy_refs,
         max_sources=2,
@@ -1599,6 +1672,7 @@ def fetch_public_research(
         policy_queries,
         _category_allowed_domains("policy_compliance", domains, buyer, policy_refs),
         labels,
+        priority_keywords or keywords,
         keywords,
         policy_refs,
         max_sources=3,
@@ -1608,6 +1682,7 @@ def fetch_public_research(
         public_discourse_queries,
         _category_allowed_domains("public_discourse", domains, buyer, policy_refs),
         labels,
+        priority_keywords or keywords,
         keywords,
         policy_refs,
         max_sources=2,
@@ -1645,6 +1720,8 @@ def fetch_public_research(
         1 for key, value in category_anchor_counts.items() if key in {"budget_funding", "acquisition_forecast"} and value > 0
     )
     quality_score = sum(int(item.get("quality_score", 0) or 0) for item in source_log)
+    requirement_relevant_count = sum(1 for item in source_log if bool(item.get("requirement_relevant")))
+    requirement_relevant_ratio = round(requirement_relevant_count / len(source_log), 2) if source_log else 0.0
 
     return {
         "status": "ok" if source_log else "no_results",
@@ -1655,6 +1732,8 @@ def fetch_public_research(
         "core_context_anchor_count": core_context_anchor_count,
         "funding_or_buying_anchor_count": funding_or_buying_anchor_count,
         "quality_score": quality_score,
+        "requirement_relevant_count": requirement_relevant_count,
+        "requirement_relevant_ratio": requirement_relevant_ratio,
         "mission_context_signals": [_snippet_line(source) for source in mission_sources],
         "budget_document_signals": [_snippet_line(source) for source in budget_sources],
         "acquisition_forecast_signals": [_snippet_line(source) for source in forecast_sources],
