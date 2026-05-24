@@ -13,8 +13,9 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from common.jsonl import append_jsonl
-from common.paths import safe_slug, standard_procurement_paths, today_local_str, utc_now_iso, write_json, write_text
+from common.paths import load_json, safe_slug, standard_procurement_paths, today_local_str, utc_now_iso, write_json, write_text
 from common.validation import validate_capture_brief_text
+from capture.capture_decision import build_capture_decision_sections
 from capture.fetch_notice_attachments import fetch_notice_attachments
 from capture.fetch_notice_context import load_notice_context
 from capture.fetch_public_context import fetch_public_research, fetch_url_excerpt
@@ -683,6 +684,12 @@ def _relevant_award_rows(
     return selected
 
 
+def _agency_anchor_award_rows(rows: list[dict[str, object]]) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    agency_rows = [row for row in rows if row.get("_agency_match")]
+    adjacent_rows = [row for row in rows if not row.get("_agency_match")]
+    return agency_rows, adjacent_rows
+
+
 def _award_history_signals(
     usaspending_result: dict[str, object],
     title: str,
@@ -691,28 +698,25 @@ def _award_history_signals(
 ) -> dict[str, object]:
     response = ((usaspending_result.get("spending_by_award") or {}).get("response") or {}) if isinstance(usaspending_result, dict) else {}
     queries = list(response.get("query_terms", []) or usaspending_result.get("search_terms", []) or [])
-    relevant_rows = _relevant_award_rows(usaspending_result, title, summary, buyer)
-    agency_rows = [row for row in relevant_rows if row.get("_agency_match")]
-    amount_rows = agency_rows or relevant_rows
+    candidate_rows = _relevant_award_rows(usaspending_result, title, summary, buyer)
+    agency_rows, adjacent_rows = _agency_anchor_award_rows(candidate_rows)
+    relevant_rows = agency_rows
+    amount_rows = agency_rows
     all_amounts = [amount for amount in (_safe_float(row.get("Award Amount")) for row in amount_rows) if amount is not None]
-    likely_rows = agency_rows or relevant_rows
+    likely_rows = agency_rows
     likely_incumbents = _dedupe_strings([str(row.get("Recipient Name", "") or "") for row in likely_rows])[:4]
-    competitive_rows = agency_rows or relevant_rows
+    competitive_rows = agency_rows
     frequent_primes = [
         name
         for name, _ in Counter(str(row.get("Recipient Name", "") or "") for row in competitive_rows if row.get("Recipient Name")).most_common(5)
     ]
-    emerging_challengers = (
-        []
-        if agency_rows
-        else _dedupe_strings(
-            [
-                str(row.get("Recipient Name", "") or "")
-                for row in relevant_rows
-                if not row.get("_agency_match") and str(row.get("Recipient Name", "") or "")
-            ]
-        )[:4]
-    )
+    emerging_challengers = _dedupe_strings(
+        [
+            str(row.get("Recipient Name", "") or "")
+            for row in adjacent_rows
+            if str(row.get("Recipient Name", "") or "")
+        ]
+    )[:4]
 
     budget_signals: list[str] = []
     related_procurements: list[str] = []
@@ -751,11 +755,11 @@ def _award_history_signals(
             notes.append(
                 f"Agency-matched award history appears under {', '.join(matched_agencies[:3])}."
             )
-        if len(relevant_rows) > len(agency_rows):
+        if adjacent_rows:
             notes.append(
                 "Additional cross-agency matches indicate adjacent market performers, but they are not direct proof of incumbency on this solicitation."
             )
-        for row in (agency_rows or relevant_rows)[:4]:
+        for row in agency_rows[:4]:
             related_procurements.append(
                 f"Award {row.get('Award ID', 'N/A')}: {row.get('Recipient Name', 'Unknown')} | {_currency(row.get('Award Amount'))} | {row.get('Awarding Sub Agency', row.get('Awarding Agency', 'Unknown'))} | {_clean_excerpt(row.get('Description', ''), max_chars=180)}"
             )
@@ -773,10 +777,15 @@ def _award_history_signals(
         )
     else:
         budget_signals.append(
-            f"USAspending returned no clearly relevant award-history matches across query terms: {', '.join(queries) if queries else 'none'}."
+            f"USAspending returned no clearly relevant same-agency award-history matches across query terms: {', '.join(queries) if queries else 'none'}."
         )
-        notes.append("No clearly relevant prior award history was surfaced from the current USAspending query set.")
-        evidence_gaps.append("USAspending did not surface clearly relevant prior awards, so incumbent and funding signals still need manual validation.")
+        if adjacent_rows:
+            notes.append(
+                f"{len(adjacent_rows)} adjacent cross-agency USAspending matches were excluded from funding and incumbency proof because they do not share the customer chain."
+            )
+        else:
+            notes.append("No clearly relevant prior award history was surfaced from the current USAspending query set.")
+        evidence_gaps.append("USAspending did not surface clearly relevant same-agency prior awards, so incumbent and funding signals still need manual validation.")
         source_log.append(
             {
                 "title": "USAspending award history search",
@@ -785,7 +794,7 @@ def _award_history_signals(
                 "published_date": "N/A",
                 "accessed_date": today_local_str(),
                 "tier": 1,
-                "relevance": f"No clearly relevant awards across queries: {', '.join(queries) if queries else 'none'}",
+                "relevance": f"No clearly relevant same-agency awards across queries: {', '.join(queries) if queries else 'none'}",
                 "confidence": 1,
             }
         )
@@ -793,6 +802,7 @@ def _award_history_signals(
     return {
         "queries": queries,
         "relevant_awards": relevant_rows,
+        "adjacent_awards": adjacent_rows[:6],
         "budget_signals": budget_signals,
         "related_procurements": related_procurements,
         "competitive_landscape": {
@@ -815,7 +825,8 @@ def _funding_assessment(
     attachment_budget_signals: list[str],
 ) -> dict[str, object]:
     useful_award_history = bool(award_signals.get("relevant_awards"))
-    useful_budget_documents = bool(public_research.get("budget_document_signals", []))
+    budget_anchor_count = int(((public_research.get("category_anchor_counts") or {}).get("budget_funding", 0)) or 0)
+    useful_budget_documents = budget_anchor_count > 0
     useful_attachment_budget = bool(attachment_budget_signals)
     useful_evidence_found = useful_award_history or useful_budget_documents or useful_attachment_budget
     notes: list[str] = []
@@ -882,6 +893,7 @@ def main() -> int:
 
     workspace = Path(args.workspace)
     bundle_root = Path(__file__).resolve().parents[2]
+    vendor_profile = load_json(workspace / "procurement" / "vendor-profile.json", default={})
     resolved = resolve_entry(workspace, args.entry)
     digest_date = resolved.get("digest_date") or today_local_str()
     display_entry = resolved.get("report_entry_id") or "direct"
@@ -1035,10 +1047,12 @@ def main() -> int:
     attachment_scope_or_notice_snippets = attachment_scope_snippets or [notice_excerpt[:300] or "No substantive notice excerpt captured in this run."]
     attachment_text_blob = " ".join(attachment_text_pool).lower()
     vehicle_signals = []
-    if "gsa" in attachment_text_blob or "multiple award schedule" in attachment_text_blob:
+    if "gsa mas" in attachment_text_blob or "multiple award schedule" in attachment_text_blob or "federal supply schedule" in attachment_text_blob:
         vehicle_signals.append("Attachment text references a GSA or schedule-style acquisition path that should be validated against the solicitation package.")
-    if "idiq" in attachment_text_blob or "task order" in attachment_text_blob or "delivery order" in attachment_text_blob:
-        vehicle_signals.append("Attachment text references order-based execution language, so vehicle structure and ordering assumptions should be verified.")
+    if "indefinite-delivery-indefinite-quantity" in attachment_text_blob or "indefinite delivery indefinite quantity" in attachment_text_blob or "idiq" in attachment_text_blob:
+        vehicle_signals.append("Attachment text references an IDIQ-style contract structure that should be validated against the solicitation package.")
+    if "single award task order contract" in attachment_text_blob or "satoc" in attachment_text_blob:
+        vehicle_signals.append("Attachment text references a SATOC / task-order contract structure that should be validated against the solicitation package.")
     if not vehicle_signals:
         vehicle_signals.append("Likely vehicle path remains unconfirmed from the current public package; validate open-market versus existing-vehicle assumptions.")
     attachment_competitive_notes = _dedupe_strings(
@@ -1164,11 +1178,27 @@ def main() -> int:
                 ),
             }
         )
+    decision_sections = build_capture_decision_sections(
+        vendor_profile=vendor_profile,
+        resolved=resolved,
+        opportunity=opportunity,
+        explanation=explanation,
+        notice_context_text=notice_context_text,
+        attachment_bundle=attachment_bundle,
+        attachment_validation=attachment_validation,
+        public_research=public_research,
+        award_signals=award_signals,
+        funding_assessment=funding_assessment,
+        source_log=public_sources,
+        evidence_gaps=evidence_gaps,
+        stakeholder_contacts=stakeholder_contacts,
+        vehicle_signals=vehicle_signals,
+    )
     evidence = {
         "request_id": request_id,
         "generated_at": utc_now_iso(),
         "status": status,
-        "vendor_name": "Vendor",
+        "vendor_name": decision_sections.get("vendor_name", "Vendor"),
         "entry": {
             "report_entry_id": resolved.get("report_entry_id", ""),
             "digest_date": digest_date,
@@ -1307,15 +1337,19 @@ def main() -> int:
             "menu_only_fallback_used": False,
         },
     }
+    evidence.update(decision_sections)
 
     brief_text = render_capture_brief(bundle_root / "templates" / "capture-brief.template.md", evidence)
     brief_validation = validate_capture_brief_text(brief_text)
     evidence["validation"]["all_required_sections_present"] = brief_validation["all_required_sections_present"]
     coverage_categories = int(public_research.get("qualified_category_count", 0) or 0)
     public_research_quality_score = int(public_research.get("quality_score", 0) or 0)
+    core_context_anchor_count = int(public_research.get("core_context_anchor_count", 0) or 0)
+    funding_or_buying_anchor_count = int(public_research.get("funding_or_buying_anchor_count", 0) or 0)
     strong_public_sources = sum(
         1 for item in (public_research.get("source_log", []) or []) if int(item.get("quality_score", 0) or 0) >= 12
     )
+    same_agency_award_history = bool(award_signals.get("relevant_awards"))
     attachment_lookup_clean = (
         attachment_bundle.get("status") in {"ok", "empty"}
         and not (attachment_bundle.get("errors", []) or [])
@@ -1333,6 +1367,8 @@ def main() -> int:
         and len(public_sources) >= 8
         and coverage_categories >= 4
         and strong_public_sources >= 5
+        and core_context_anchor_count >= 1
+        and (same_agency_award_history or funding_or_buying_anchor_count >= 1)
         and public_research_quality_score >= 90
     ):
         status = "360_DEEP_RESEARCH_COMPLETE"

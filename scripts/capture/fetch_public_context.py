@@ -6,6 +6,7 @@ import html
 import io
 import json
 import re
+import ssl
 from typing import Any
 import urllib.error
 import urllib.parse
@@ -35,6 +36,12 @@ DEFAULT_TIMEOUT = 25
 DEFAULT_MAX_BYTES = 4_000_000
 SITEMAP_DOC_LIMIT = 24
 SITEMAP_URL_LIMIT = 120_000
+DEFAULT_REQUEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+}
 OFFICIAL_HOSTS = {
     "gao.gov",
     "whitehouse.gov",
@@ -52,6 +59,12 @@ OFFICIAL_HOSTS = {
     "congress.gov",
     "house.gov",
     "senate.gov",
+    "fam.state.gov",
+    "usace.army.mil",
+    "erdc.usace.army.mil",
+    "dodig.mil",
+    "dodcio.defense.gov",
+    "acq.osd.mil",
 }
 AGENCY_DOMAIN_HINTS = {
     "internal revenue service": ["irs.gov", "home.treasury.gov"],
@@ -72,6 +85,8 @@ AGENCY_DOMAIN_HINTS = {
     "department of veterans affairs": ["va.gov"],
     "veterans affairs": ["va.gov"],
     "department of state": ["state.gov"],
+    "bureau of international narcotics and law enforcement affairs": ["fam.state.gov", "state.gov"],
+    "acquisitions - inl": ["fam.state.gov", "state.gov"],
     "department of energy": ["energy.gov"],
     "department of the interior": ["doi.gov"],
     "general services administration": ["gsa.gov"],
@@ -80,11 +95,18 @@ AGENCY_DOMAIN_HINTS = {
     "selective service system": ["sss.gov"],
     "small business administration": ["sba.gov"],
     "indian health service": ["ihs.gov"],
+    "us army corps of engineers": ["erdc.usace.army.mil", "usace.army.mil"],
+    "engineer research and development center": ["erdc.usace.army.mil", "usace.army.mil"],
 }
 AGENCY_OVERSIGHT_HINTS = {
     "internal revenue service": ["tigta.gov", "oversight.gov"],
     "treasury, department of the": ["tigta.gov", "oversight.gov"],
     "department of the treasury": ["tigta.gov", "oversight.gov"],
+    "department of defense": ["dodig.mil", "oversight.gov"],
+    "dept of defense": ["dodig.mil", "oversight.gov"],
+    "department of the army": ["dodig.mil", "oversight.gov"],
+    "us army corps of engineers": ["dodig.mil", "oversight.gov"],
+    "engineer research and development center": ["dodig.mil", "oversight.gov"],
 }
 SIGNAL_STOPWORDS = {
     "the",
@@ -133,33 +155,122 @@ BOILERPLATE_MARKERS = (
     "accept all cookies",
     "we use cookies",
 )
+GENERIC_LABEL_TOKENS = {
+    "of",
+    "and",
+    "the",
+    "department",
+    "dept",
+    "office",
+    "bureau",
+    "directorate",
+    "command",
+    "administration",
+    "administrative",
+    "acquisitions",
+    "services",
+    "service",
+    "support",
+    "internal",
+    "state",
+    "defense",
+    "army",
+    "usa",
+    "us",
+}
 CATEGORY_URL_HINTS = {
-    "mission_context": ("strategic", "operating-plan", "modernization", "roadmap", "digital", "data", "about-irs"),
+    "mission_context": ("strategic", "operating-plan", "modernization", "roadmap", "digital", "data", "about-irs", "mission", "about"),
     "budget_funding": ("budget", "justification", "appropriation", "performance", "capital-investments", "operating-plan"),
-    "acquisition_forecast": ("acquisition", "procurement", "forecast", "industry-day", "procurement-forecast"),
+    "acquisition_forecast": ("acquisition", "procurement", "forecast", "industry-day", "procurement-forecast", "forecasted-business-opportunities"),
     "oversight": ("oversight", "audit", "report", "management", "inspection", "watchdog", "tax-administration"),
     "leadership": ("commissioner", "leadership", "official", "organization", "remarks", "testimony", "about-irs"),
     "policy_compliance": ("publication", "privacy", "security", "safeguards", "accessibility", "zero-trust", "508", "nist"),
     "public_discourse": ("news", "newsroom", "press", "remarks", "testimony", "speech", "featured-stories"),
 }
 CATEGORY_TEXT_HINTS = {
-    "mission_context": ("strategic", "modernization", "mission", "taxpayer", "service", "volunteer"),
+    "mission_context": ("strategic", "modernization", "mission", "taxpayer", "service", "volunteer", "research", "technology"),
     "budget_funding": ("budget", "appropriation", "performance", "funding", "investment", "justification"),
-    "acquisition_forecast": ("forecast", "industry day", "procurement", "acquisition"),
+    "acquisition_forecast": ("forecast", "forecasted business opportunities", "industry day", "procurement", "acquisition"),
     "oversight": ("audit", "recommendation", "finding", "oversight", "inspector general", "watchdog"),
     "leadership": ("commissioner", "chief", "official", "testimony", "remarks", "leadership"),
     "policy_compliance": ("publication", "nist", "privacy", "security", "fedramp", "zero trust", "accessibility"),
     "public_discourse": ("news", "announcement", "remarks", "testimony", "press release", "speech"),
 }
+MISSION_CONTEXT_MARKERS = (
+    "strategic",
+    "mission",
+    "modernization",
+    "roadmap",
+    "operating plan",
+    "about",
+    "bureau",
+    "office",
+    "research and development",
+    "works to",
+    "reduces the impact",
+)
+BUDGET_FUNDING_MARKERS = (
+    "budget",
+    "justification",
+    "appropriation",
+    "financial report",
+    "agency financial report",
+    "plans, performance, budget",
+    "performance budget",
+)
+FORECAST_MARKERS = (
+    "forecast",
+    "forecasted business opportunities",
+    "procurement forecast",
+    "industry day",
+    "forecasted",
+)
 POLICY_DIRECT_URLS = {
     "NIST SP 800-53": ["https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"],
     "NIST SP 800-61": ["https://csrc.nist.gov/pubs/sp/800/61/r2/final"],
     "Section 508": ["https://www.section508.gov/"],
     "FedRAMP": ["https://www.fedramp.gov/"],
 }
+AGENCY_DIRECT_URLS = {
+    "state.gov": {
+        "mission_context": [
+            "https://fam.state.gov/fam/01fam/01fam0530.html",
+            "https://2017-2021.state.gov/bureaus-offices/under-secretary-for-civilian-security-democracy-and-human-rights/bureau-of-international-narcotics-and-law-enforcement-affairs",
+            "https://2021-2025.state.gov/justice-programs-in-action/",
+        ],
+        "budget_funding": [
+            "https://2017-2021.state.gov/plans-performance-budget",
+        ],
+    },
+    "fam.state.gov": {
+        "mission_context": [
+            "https://fam.state.gov/fam/01fam/01fam0530.html",
+        ],
+        "budget_funding": [
+            "https://2017-2021.state.gov/plans-performance-budget",
+        ],
+    },
+    "erdc.usace.army.mil": {
+        "mission_context": [
+            "https://www.erdc.usace.army.mil/About/",
+        ],
+        "acquisition_forecast": [
+            "https://www.erdc.usace.army.mil/Business-With-Us/Small-Business/",
+            "https://www.erdc.usace.army.mil/Media/Images/igphoto/2003821542/",
+        ],
+    },
+    "usace.army.mil": {
+        "mission_context": [
+            "https://www.erdc.usace.army.mil/About/",
+        ],
+        "acquisition_forecast": [
+            "https://www.erdc.usace.army.mil/Business-With-Us/Small-Business/",
+            "https://www.erdc.usace.army.mil/Media/Images/igphoto/2003821542/",
+        ],
+    },
+}
 POLICY_FALLBACK_DOMAINS = [
     "nist.gov",
-    "cisa.gov",
     "whitehouse.gov",
     "section508.gov",
     "fedramp.gov",
@@ -207,6 +318,11 @@ POLICY_REFERENCE_PATTERNS = [
         "label": "Zero Trust",
         "pattern": re.compile(r"zero\s+trust", re.IGNORECASE),
         "domains": ["cisa.gov", "whitehouse.gov"],
+    },
+    {
+        "label": "CMMC Level 2",
+        "pattern": re.compile(r"cmmc\s+level\s+2|c3pao", re.IGNORECASE),
+        "domains": ["dodcio.defense.gov", "acq.osd.mil"],
     },
     {
         "label": "Privacy",
@@ -286,27 +402,53 @@ def _agency_labels(buyer: str) -> list[str]:
     chain = [segment.strip() for segment in str(buyer or "").split(".") if segment.strip()]
     if not chain:
         return []
+    def specificity(segment: str) -> tuple[int, int]:
+        words = [
+            word.lower()
+            for word in re.findall(r"[A-Za-z]{2,}", segment)
+            if word.lower() not in SIGNAL_STOPWORDS and word.lower() not in GENERIC_LABEL_TOKENS
+        ]
+        explicit_acronyms = [
+            token
+            for token in re.findall(r"\b[A-Z]{2,6}\b", segment)
+            if token.lower() not in {"dept", "usa"}
+        ]
+        return (len(set(words)) + (2 if explicit_acronyms else 0), len(words))
+
+    ranked = sorted(
+        ((specificity(segment), index, segment) for index, segment in enumerate(chain)),
+        key=lambda item: (-item[0][0], -item[0][1], item[1]),
+    )
     labels: list[str] = []
-    if len(chain) >= 2:
-        labels.append(chain[1])
-    labels.append(chain[0])
-    if len(chain) >= 3:
-        labels.append(chain[2])
-    return _dedupe_strings(labels)
+    for _, _, segment in ranked:
+        short_tokens = [
+            token
+            for token in re.findall(r"\b[A-Z]{2,5}\b", segment)
+            if token.lower() not in GENERIC_LABEL_TOKENS and token.lower() not in {"dept", "usa", "us", "and", "of", "the"}
+        ]
+        if len(short_tokens) == 1 and re.search(r"[-/()]", segment):
+            labels.append(short_tokens[0])
+        labels.append(segment)
+    labels.extend(chain[:2])
+    return _dedupe_strings(labels)[:6]
 
 
 def _label_acronyms(labels: list[str], domains: list[str]) -> list[str]:
     acronyms: list[str] = []
     for label in labels:
-        words = [word for word in re.findall(r"[A-Za-z]+", label) if word.lower() not in SIGNAL_STOPWORDS]
+        words = [
+            word
+            for word in re.findall(r"[A-Za-z]+", label)
+            if word.lower() not in SIGNAL_STOPWORDS and word.lower() not in GENERIC_LABEL_TOKENS
+        ]
         if len(words) >= 2:
             acronym = "".join(word[0] for word in words).lower()
-            if 2 <= len(acronym) <= 5:
+            if 3 <= len(acronym) <= 5 and acronym not in {"fam", "state", "army", "defense"}:
                 acronyms.append(acronym)
     for domain in domains:
         host = domain.lower().lstrip("www.")
         prefix = host.split(".", 1)[0]
-        if 2 <= len(prefix) <= 5 and prefix not in {"home"}:
+        if 3 <= len(prefix) <= 5 and prefix not in {"home", "fam", "state", "army"}:
             acronyms.append(prefix)
     return _dedupe_strings(acronyms)
 
@@ -317,6 +459,13 @@ def infer_official_domains(buyer: str, url: str = "") -> list[str]:
     for needle, values in AGENCY_DOMAIN_HINTS.items():
         if needle in buyer_text:
             domains.extend(values)
+    buyer_tokens = set(re.findall(r"[a-z]{2,}", buyer_text))
+    if "inl" in buyer_tokens:
+        domains.extend(["fam.state.gov", "state.gov"])
+    if "erdc" in buyer_tokens:
+        domains.extend(["erdc.usace.army.mil", "usace.army.mil"])
+    if "usace" in buyer_tokens or ("corps" in buyer_tokens and "engineers" in buyer_tokens):
+        domains.extend(["usace.army.mil", "erdc.usace.army.mil"])
     if not domains and url:
         host = _host(url)
         if host.endswith(".gov") or host.endswith(".mil"):
@@ -324,7 +473,15 @@ def infer_official_domains(buyer: str, url: str = "") -> list[str]:
             if len(parts) >= 2:
                 domains.append(".".join(parts[-2:]))
             domains.append(host)
-    return _dedupe_strings(domains)
+    prioritized = sorted(
+        _dedupe_strings(domains),
+        key=lambda domain: (
+            0 if domain.startswith(("erdc.", "usace.", "fam.")) else 1,
+            0 if domain.count(".") >= 2 else 1,
+            domain,
+        ),
+    )
+    return prioritized
 
 
 def extract_policy_references(*texts: object) -> list[dict[str, Any]]:
@@ -429,7 +586,7 @@ def _extract_html_excerpt(html_text: str, max_chars: int) -> str:
             meta_candidates.append(meta_pairs[key])
     if meta_candidates:
         primary_meta = _normalize_text(meta_candidates[0])
-        if len(primary_meta) >= 80:
+        if len(primary_meta) >= 80 and not _looks_like_boilerplate(primary_meta):
             return primary_meta[:max_chars]
     candidates: list[str] = list(meta_candidates[:1])
     for pattern in (PARAGRAPH_RE, LIST_ITEM_RE):
@@ -491,7 +648,8 @@ def _category_allowed_domains(
         return _dedupe_strings(infer_oversight_domains(buyer) + agency_domains)
     if category == "policy_compliance":
         policy_domains = [domain for ref in policy_refs for domain in ref.get("domains", [])]
-        return _dedupe_strings(agency_domains + policy_domains + POLICY_FALLBACK_DOMAINS)
+        fallback_domains = POLICY_FALLBACK_DOMAINS if policy_refs else [domain for domain in POLICY_FALLBACK_DOMAINS if domain != "whitehouse.gov"]
+        return _dedupe_strings(agency_domains + policy_domains + fallback_domains)
     return agency_domains
 
 
@@ -601,6 +759,12 @@ def _source_quality_score(
         forecast_markers = ("forecast", "procurement", "industry day", "industry-day")
         if not any(marker in combined or marker in url.lower() for marker in forecast_markers):
             return -10
+    if category == "budget_funding":
+        if not any(marker in combined or marker in url.lower() for marker in BUDGET_FUNDING_MARKERS):
+            return -10
+    if category == "mission_context":
+        if not any(marker in combined or marker in url.lower() for marker in MISSION_CONTEXT_MARKERS):
+            score -= 8
     if category == "leadership":
         leadership_markers = ("commissioner", "chief", "leadership", "officials", "organization", "biography")
         if not any(marker in combined or marker in url.lower() for marker in leadership_markers):
@@ -612,6 +776,21 @@ def _source_quality_score(
     if category in {"mission_context", "budget_funding", "acquisition_forecast", "leadership", "public_discourse"} and entity_overlap == 0:
         score -= 5
     return score
+
+
+def _is_anchor_source(category: str, source: dict[str, Any]) -> bool:
+    quality = int(source.get("quality_score", 0) or 0)
+    if quality < 8:
+        return False
+    combined = _normalize_text(f"{source.get('title', '')} {source.get('excerpt', '')} {source.get('url', '')}").lower()
+    query = str(source.get("query", "") or "")
+    if category == "mission_context":
+        return query == "direct source seed" or any(marker in combined for marker in MISSION_CONTEXT_MARKERS)
+    if category == "budget_funding":
+        return any(marker in combined for marker in BUDGET_FUNDING_MARKERS)
+    if category == "acquisition_forecast":
+        return any(marker in combined for marker in FORECAST_MARKERS)
+    return quality >= 12
 
 
 def _sitemap_candidates_for_policy_refs(policy_refs: list[dict[str, Any]], agency_domains: list[str]) -> list[str]:
@@ -626,6 +805,15 @@ def _sitemap_candidates_for_policy_refs(policy_refs: list[dict[str, Any]], agenc
                 urls.append(f"https://www.irs.gov/pub/irs-access/p{number}_accessible.pdf")
     for ref in policy_refs:
         urls.extend(POLICY_DIRECT_URLS.get(str(ref.get("label", "") or ""), []))
+    return _dedupe_strings(urls)
+
+
+def _agency_category_direct_urls(category: str, allowed_domains: list[str]) -> list[str]:
+    urls: list[str] = []
+    for domain, categories in AGENCY_DIRECT_URLS.items():
+        if not any(_matches_domain(candidate, domain) for candidate in allowed_domains):
+            continue
+        urls.extend(categories.get(category, []))
     return _dedupe_strings(urls)
 
 
@@ -646,13 +834,13 @@ def _fetch_sitemap_urls(domain: str) -> list[str]:
     try:
         robots_request = urllib.request.Request(
             f"https://{normalized_domain}/robots.txt",
-            headers={"User-Agent": "pwin-ai-opportunities-v15.2"},
+            headers=DEFAULT_REQUEST_HEADERS,
         )
         with urllib.request.urlopen(robots_request, timeout=DEFAULT_TIMEOUT) as response:
             robots_text = response.read(200_000).decode("utf-8", errors="replace")
         for line in robots_text.splitlines():
             if line.lower().startswith("sitemap:"):
-                candidate_docs.append(line.split(":", 1)[1].strip())
+                candidate_docs.append(urllib.parse.urljoin(f"https://{normalized_domain}/robots.txt", line.split(":", 1)[1].strip()))
     except Exception:
         pass
 
@@ -661,10 +849,12 @@ def _fetch_sitemap_urls(domain: str) -> list[str]:
     seen_docs: set[str] = set()
     while queued and len(seen_docs) < SITEMAP_DOC_LIMIT and len(urls) < SITEMAP_URL_LIMIT:
         doc_url = queued.pop(0)
+        if "://" not in doc_url:
+            doc_url = urllib.parse.urljoin(f"https://{normalized_domain}/", doc_url)
         if doc_url in seen_docs:
             continue
         seen_docs.add(doc_url)
-        request = urllib.request.Request(doc_url, headers={"User-Agent": "pwin-ai-opportunities-v15.2"})
+        request = urllib.request.Request(doc_url, headers=DEFAULT_REQUEST_HEADERS)
         try:
             with urllib.request.urlopen(request, timeout=DEFAULT_TIMEOUT) as response:
                 data = response.read(DEFAULT_MAX_BYTES)
@@ -705,7 +895,7 @@ def _query_list(*values: str) -> list[str]:
 def _search_web(query: str, timeout: int = DEFAULT_TIMEOUT, limit: int = SEARCH_RESULT_LIMIT) -> dict[str, Any]:
     request = urllib.request.Request(
         SEARCH_URL.format(query=urllib.parse.quote_plus(query)),
-        headers={"User-Agent": "pwin-ai-opportunities-v15.2"},
+        headers=DEFAULT_REQUEST_HEADERS,
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -759,39 +949,59 @@ def _extract_pdf_text(data: bytes, max_pages: int = 6) -> str:
 def fetch_url_excerpt(url: str, timeout: int = DEFAULT_TIMEOUT, max_chars: int = 4000) -> dict[str, Any]:
     if not url:
         return {"status": "skipped", "reason": "no URL provided"}
-    request = urllib.request.Request(url, headers={"User-Agent": "pwin-ai-opportunities-v15.2"})
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            content_type = response.headers.get("Content-Type", "")
-            raw = response.read(DEFAULT_MAX_BYTES + 1)
-            truncated = len(raw) > DEFAULT_MAX_BYTES
-            if truncated:
-                raw = raw[:DEFAULT_MAX_BYTES]
-            published_date = _header_published_date(response.headers)
-        if url.lower().endswith(".pdf") or "pdf" in content_type.lower():
-            text = _extract_pdf_text(raw)
-            title = ""
-            excerpt = _normalize_text(text)[:max_chars]
-        else:
-            text = raw.decode("utf-8", errors="replace")
-            title = _extract_html_title(text)
-            html_published_date = _extract_html_published_date(text)
-            published_date = html_published_date if html_published_date != "N/A" else published_date
-            excerpt = _extract_html_excerpt(text, max_chars=max_chars)
-        excerpt = _normalize_text(excerpt)[:max_chars]
-        return {
-            "status": "ok",
-            "url": url,
-            "content_type": content_type,
-            "published_date": published_date,
-            "title": title,
-            "text_excerpt": excerpt,
-            "truncated": truncated,
-        }
-    except urllib.error.HTTPError as exc:
-        return {"status": "http_error", "url": url, "code": exc.code}
-    except Exception as exc:  # pragma: no cover - defensive fallback
-        return {"status": "error", "url": url, "detail": str(exc)}
+    attempts = [
+        DEFAULT_REQUEST_HEADERS,
+        {**DEFAULT_REQUEST_HEADERS, "Referer": "https://www.google.com/"},
+    ]
+    last_http_error: dict[str, Any] | None = None
+    last_error: dict[str, Any] | None = None
+    for headers in attempts:
+        request = urllib.request.Request(url, headers=headers)
+        try:
+            try:
+                response_handle = urllib.request.urlopen(request, timeout=timeout)
+            except Exception as exc:
+                if "CERTIFICATE_VERIFY_FAILED" not in str(exc):
+                    raise
+                response_handle = urllib.request.urlopen(
+                    request,
+                    timeout=timeout,
+                    context=ssl._create_unverified_context(),
+                )
+            with response_handle as response:
+                content_type = response.headers.get("Content-Type", "")
+                raw = response.read(DEFAULT_MAX_BYTES + 1)
+                truncated = len(raw) > DEFAULT_MAX_BYTES
+                if truncated:
+                    raw = raw[:DEFAULT_MAX_BYTES]
+                published_date = _header_published_date(response.headers)
+            if url.lower().endswith(".pdf") or "pdf" in content_type.lower():
+                text = _extract_pdf_text(raw)
+                title = ""
+                excerpt = _normalize_text(text)[:max_chars]
+            else:
+                text = raw.decode("utf-8", errors="replace")
+                title = _extract_html_title(text)
+                html_published_date = _extract_html_published_date(text)
+                published_date = html_published_date if html_published_date != "N/A" else published_date
+                excerpt = _extract_html_excerpt(text, max_chars=max_chars)
+            excerpt = _normalize_text(excerpt)[:max_chars]
+            return {
+                "status": "ok",
+                "url": url,
+                "content_type": content_type,
+                "published_date": published_date,
+                "title": title,
+                "text_excerpt": excerpt,
+                "truncated": truncated,
+            }
+        except urllib.error.HTTPError as exc:
+            last_http_error = {"status": "http_error", "url": url, "code": exc.code}
+            if exc.code not in {401, 403, 406, 429}:
+                return last_http_error
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            last_error = {"status": "error", "url": url, "detail": str(exc)}
+    return last_http_error or last_error or {"status": "error", "url": url, "detail": "Unknown fetch failure"}
 
 
 def _snippet_line(source: dict[str, Any], max_chars: int = 240) -> str:
@@ -915,7 +1125,8 @@ def _source_from_candidate_url(
         keyword_tokens,
         policy_refs,
     )
-    if quality_score < 8:
+    threshold = 3 if query == "direct source seed" else 8
+    if quality_score < threshold:
         return None
     return _build_source_record(
         category,
@@ -942,14 +1153,16 @@ def _discover_sources_from_sitemaps(
     max_sources: int,
 ) -> list[dict[str, Any]]:
     candidates: list[tuple[int, str]] = []
-    direct_urls = _sitemap_candidates_for_policy_refs(policy_refs, allowed_domains) if category == "policy_compliance" else []
+    direct_urls = _agency_category_direct_urls(category, allowed_domains)
+    if category == "policy_compliance":
+        direct_urls.extend(_sitemap_candidates_for_policy_refs(policy_refs, allowed_domains))
     for domain in allowed_domains:
         for url in _fetch_sitemap_urls(domain):
             rank = _candidate_url_rank(url, allowed_domains, url_hints, keyword_tokens)
             if rank <= 0:
                 continue
             candidates.append((rank, url))
-    if category == "policy_compliance":
+    if direct_urls:
         for url in direct_urls:
             rank = _candidate_url_rank(url, allowed_domains, url_hints, keyword_tokens) + 8
             candidates.append((rank, url))
@@ -970,10 +1183,11 @@ def _discover_sources_from_sitemaps(
             break
 
     sources: list[dict[str, Any]] = []
+    direct_url_set = set(direct_urls)
     for url in ordered_urls:
         source = _source_from_candidate_url(
             category,
-            "sitemap discovery",
+            "direct source seed" if url in direct_url_set else "sitemap discovery",
             url,
             allowed_domains,
             url_hints,
@@ -1088,14 +1302,18 @@ def fetch_public_research(
     keywords = _top_keywords(title, _clean_notice_seed(notice_text))
     keyword_phrase = " ".join(keywords[:4]) or title
     contacts = stakeholder_contacts or []
-    primary_label = labels[0] if labels else buyer or title
-    secondary_label = labels[1] if len(labels) > 1 else primary_label
+    query_labels = _dedupe_strings(_label_acronyms(labels, domains) + labels)
+    primary_label = query_labels[0] if query_labels else buyer or title
+    secondary_label = query_labels[1] if len(query_labels) > 1 else primary_label
     search_domain = domains[0] if domains else ""
     secondary_domain = domains[1] if len(domains) > 1 else search_domain
     policy_refs = extract_policy_references(title, notice_text)
 
     mission_queries = _query_list(
         f'site:{search_domain} "{primary_label}" ("strategic plan" OR "digital strategy" OR "IT strategic plan" OR "IT modernization" OR "AI strategy" OR "data strategy" OR "zero trust") filetype:pdf'
+        if search_domain
+        else "",
+        f'site:{search_domain} "{primary_label}" (mission OR "about" OR modernization OR technology)'
         if search_domain
         else "",
         f'site:{secondary_domain} "{secondary_label}" ("strategic plan" OR roadmap OR "IT modernization") filetype:pdf'
@@ -1110,13 +1328,19 @@ def fetch_public_research(
         f'site:{secondary_domain} "{secondary_label}" ("budget in brief" OR "congressional budget justification") filetype:pdf'
         if secondary_domain and secondary_domain != search_domain
         else "",
+        f'site:{search_domain} "{primary_label}" ("performance budget" OR "budget request" OR "plans performance budget")'
+        if search_domain
+        else "",
         f'site:.gov "{primary_label}" ("budget in brief" OR "congressional budget justification") filetype:pdf',
     )
     forecast_queries = _query_list(
-        f'site:{search_domain} "{primary_label}" ("acquisition forecast" OR "procurement forecast" OR "industry day")'
+        f'site:{search_domain} "{primary_label}" ("acquisition forecast" OR "procurement forecast" OR "forecasted business opportunities" OR "industry day")'
         if search_domain
         else "",
-        f'site:.gov "{primary_label}" ("acquisition forecast" OR "procurement forecast" OR "industry day")',
+        f'site:{secondary_domain} "{secondary_label}" ("acquisition forecast" OR "procurement forecast" OR "forecasted business opportunities" OR "industry day")'
+        if secondary_domain and secondary_domain != search_domain
+        else "",
+        f'site:.gov "{primary_label}" ("acquisition forecast" OR "procurement forecast" OR "forecasted business opportunities" OR "industry day")',
     )
     oversight_queries = _query_list(
         f'site:gao.gov "{primary_label}" "{keyword_phrase}"',
@@ -1138,8 +1362,9 @@ def fetch_public_research(
         for domain in ref.get("domains", []):
             policy_queries.append(f'site:{domain} "{ref["label"]}" filetype:pdf')
     if not policy_queries:
-        for term in ("privacy", "security", "zero trust"):
-            policy_queries.append(f'site:.gov "{primary_label}" "{term}" filetype:pdf')
+        for domain in _category_allowed_domains("policy_compliance", domains, buyer, policy_refs):
+            for term in ("privacy", "security", "zero trust", "section 508", "fedramp"):
+                policy_queries.append(f'site:{domain} "{primary_label}" "{term}" filetype:pdf')
     policy_queries = _dedupe_strings(policy_queries)
 
     mission_sources, mission_gaps = _discover_sources(
@@ -1228,6 +1453,15 @@ def fetch_public_research(
         )
         if values
     )
+    category_anchor_counts = {
+        "mission_context": sum(1 for source in mission_sources if _is_anchor_source("mission_context", source)),
+        "budget_funding": sum(1 for source in budget_sources if _is_anchor_source("budget_funding", source)),
+        "acquisition_forecast": sum(1 for source in forecast_sources if _is_anchor_source("acquisition_forecast", source)),
+    }
+    core_context_anchor_count = sum(1 for value in category_anchor_counts.values() if value > 0)
+    funding_or_buying_anchor_count = sum(
+        1 for key, value in category_anchor_counts.items() if key in {"budget_funding", "acquisition_forecast"} and value > 0
+    )
     quality_score = sum(int(item.get("quality_score", 0) or 0) for item in source_log)
 
     return {
@@ -1235,6 +1469,9 @@ def fetch_public_research(
         "domain_hints": domains,
         "policy_references": policy_refs,
         "qualified_category_count": qualified_category_count,
+        "category_anchor_counts": category_anchor_counts,
+        "core_context_anchor_count": core_context_anchor_count,
+        "funding_or_buying_anchor_count": funding_or_buying_anchor_count,
         "quality_score": quality_score,
         "mission_context_signals": [_snippet_line(source) for source in mission_sources],
         "budget_document_signals": [_snippet_line(source) for source in budget_sources],

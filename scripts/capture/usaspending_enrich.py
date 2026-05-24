@@ -26,6 +26,9 @@ GENERIC_TERMS = {
     "synopsis",
     "amendment",
     "notice",
+    "next",
+    "generation",
+    "acquisition",
 }
 SOLICITATION_ID_RE = re.compile(r"(?:solicitation(?: number)?|notice id)\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{5,})", re.IGNORECASE)
 ACRONYM_RE = re.compile(r"\(([A-Z][A-Z0-9-]{1,14})\)")
@@ -108,6 +111,11 @@ def _compact_query(value: str) -> str:
     return cleaned if 0 < len(cleaned) <= MAX_QUERY_LENGTH else ""
 
 
+def _all_generic_tokens(value: str) -> bool:
+    tokens = [token.lower() for token in re.findall(r"[A-Za-z0-9]+", value)]
+    return bool(tokens) and all(token in GENERIC_TERMS for token in tokens)
+
+
 def build_search_terms(search_text: str, title: str = "", summary: str = "", buyer: str = "") -> list[str]:
     title_text = title or search_text
     combined = f"{title_text}\n{summary or ''}"
@@ -131,7 +139,7 @@ def build_search_terms(search_text: str, title: str = "", summary: str = "", buy
             phrase_parts = phrase.split()
             if len(phrase_parts) >= 3:
                 compact_tail = _compact_query(" ".join(phrase_parts[-3:]))
-                if compact_tail:
+                if compact_tail and not _all_generic_tokens(compact_tail):
                     terms.append(compact_tail)
         if acronym.lower() not in GENERIC_TERMS:
             terms.append(acronym)
