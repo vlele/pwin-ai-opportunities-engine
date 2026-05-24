@@ -8,6 +8,9 @@ import urllib.request
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from common.paths import utc_now_iso
+from common.runtime import USER_AGENT
+
 SEARCH_URL = "https://api.sam.gov/opportunities/v2/search"
 
 
@@ -88,7 +91,7 @@ def _normalize_record(record: dict[str, Any], queried_naics: str) -> dict[str, A
         "summary": _record_value(record, "description", "additionalInfoLink", "summary") or "N/A",
         "point_of_contact": record.get("pointOfContact", []) if isinstance(record.get("pointOfContact"), list) else [],
         "resource_links": record.get("resourceLinks", []) if isinstance(record.get("resourceLinks"), list) else [],
-        "retrieval_timestamp": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "retrieval_timestamp": utc_now_iso(),
         "raw_match_evidence": {
             "queried_naics": queried_naics,
             "full_desc_loaded": False,
@@ -146,7 +149,7 @@ def search_sam_opportunities(
         )
         request = urllib.request.Request(
             f"{SEARCH_URL}?{query}",
-            headers={"User-Agent": "pwin-ai-opportunities-v15.2"},
+            headers={"User-Agent": USER_AGENT},
             method="GET",
         )
         try:

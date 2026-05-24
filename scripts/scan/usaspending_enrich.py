@@ -5,6 +5,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from common.runtime import USER_AGENT
+
 
 AWARD_SEARCH_URL = "https://api.usaspending.gov/api/v2/search/spending_by_award/"
 
@@ -39,7 +41,7 @@ def post_award_search(search_text: str, page: int = 1, limit: int = 10, timeout:
     request = urllib.request.Request(
         AWARD_SEARCH_URL,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "User-Agent": "pwin-ai-opportunities-v15"},
+        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
         method="POST",
     )
     try:

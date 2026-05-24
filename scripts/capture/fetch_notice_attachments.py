@@ -14,6 +14,7 @@ from xml.etree import ElementTree as ET
 
 from PyPDF2 import PdfReader
 from docx import Document
+from common.runtime import USER_AGENT
 
 
 SEARCH_URL = "https://api.sam.gov/opportunities/v2/search"
@@ -164,7 +165,7 @@ def _download_attachment(
     timeout: int = 45,
     max_bytes: int = 8_000_000,
 ) -> dict[str, Any]:
-    request = urllib.request.Request(url, headers={"User-Agent": "pwin-ai-opportunities-v15.2"})
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         data = response.read(max_bytes + 1)
         truncated = len(data) > max_bytes
@@ -207,7 +208,7 @@ def _fetch_public_notice_record(notice_id: str, solicitation_number: str = "", t
         return {"status": "missing_identifier", "record": {}}
     request = urllib.request.Request(
         f"{SEARCH_URL}?{urllib.parse.urlencode(params)}",
-        headers={"User-Agent": "pwin-ai-opportunities-v15.2"},
+        headers={"User-Agent": USER_AGENT},
         method="GET",
     )
     try:
@@ -230,7 +231,7 @@ def _fetch_public_resource_links(notice_id: str, timeout: int = 30) -> dict[str,
         return {"status": "missing_identifier", "resources": []}
     request = urllib.request.Request(
         PUBLIC_RESOURCES_URL.format(notice_id=urllib.parse.quote(notice_id)),
-        headers={"User-Agent": "pwin-ai-opportunities-v15.2"},
+        headers={"User-Agent": USER_AGENT},
         method="GET",
     )
     try:

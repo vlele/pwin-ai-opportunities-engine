@@ -6,6 +6,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from common.runtime import USER_AGENT
+
 
 RECIPIENT_AUTOCOMPLETE_URL = "https://api.usaspending.gov/api/v2/autocomplete/recipient/"
 AWARD_SEARCH_URL = "https://api.usaspending.gov/api/v2/search/spending_by_award/"
@@ -73,7 +75,7 @@ def _post_json(url: str, payload: dict[str, Any], timeout: int = 20) -> dict[str
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "User-Agent": "pwin-ai-opportunities-v15"},
+        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
         method="POST",
     )
     try:

@@ -7,6 +7,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from common.runtime import USER_AGENT
+
 NOTICE_DESC_URL = "https://api.sam.gov/prod/opportunities/v1/noticedesc"
 
 
@@ -31,7 +33,7 @@ def hydrate_sam_notice(notice_id: str, timeout: int = 20) -> dict[str, Any]:
     query = urllib.parse.urlencode({"noticeid": notice_id, "api_key": api_key})
     request = urllib.request.Request(
         f"{NOTICE_DESC_URL}?{query}",
-        headers={"User-Agent": "pwin-ai-opportunities-v15.2"},
+        headers={"User-Agent": USER_AGENT},
         method="GET",
     )
     try:
