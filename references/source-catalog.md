@@ -1,6 +1,6 @@
 # Source catalog
 
-This catalog favors official repositories first. It is designed to answer the question: "what should this skill check besides SAM.gov?"
+This catalog favors official repositories first. It is designed to answer the question: "what should this skill check besides SAM.gov within the current federal-only release?"
 
 ## Default-on sources
 
@@ -54,45 +54,9 @@ This catalog favors official repositories first. It is designed to answer the qu
 - **API docs:** https://api.simpler.grants.gov
 - **Default status:** off unless the user wants grants or the profile clearly indicates grant eligibility
 
-### 5. Virginia eVA / Virginia Business Opportunities (VBO)
-- **Type:** state procurement marketplace
-- **What it covers:** Virginia business opportunities, open construction, future procurements, and related state views
-- **Access pattern:** official public portal
-- **Why it matters:** strong state-level source when Virginia matters to the user
-- **Trust tier:** 2 to 3 depending on extraction mode
-- **Portal:** https://eva.virginia.gov/
-- **Notes:** also exposes NIGP tooling, which is useful because some state systems use commodity coding rather than NAICS alone
-
-### 6. New York State Contract Reporter
-- **Type:** state contracting opportunities
-- **What it covers:** New York State bid and contracting notices
-- **Access pattern:** official public portal
-- **Why it matters:** valuable state source for New York work
-- **Trust tier:** 2 to 3 depending on extraction depth
-- **Portal:** https://www.nyscr.ny.gov/
-- **Notes:** some detail views may encourage account creation; keep this source opt-in if the user does not care about New York
-
-### 7. California Cal eProcure
-- **Type:** state eProcurement portal
-- **What it covers:** California state bidding opportunities
-- **Access pattern:** official public portal
-- **Why it matters:** valuable state source for California work
-- **Trust tier:** 2
-- **Portal:** https://caleprocure.ca.gov/
-- **Notes:** public viewing is available without login or fees
-
-### 8. Texas ESBD / TxSmartBuy
-- **Type:** state and local bid search
-- **What it covers:** statewide state and local bid opportunities
-- **Access pattern:** official public portal
-- **Why it matters:** useful for Texas-focused suppliers
-- **Trust tier:** 2
-- **Portal:** https://www.txsmartbuy.gov/esbd
-- **Notes:** Texas guidance emphasizes class/item codes in addition to general vendor matching; map those tags from the user's plain-language profile when possible
-
 ## Auth-required or special-case sources
 
-### 9. GSA eBuy Open
+### 5. GSA eBuy Open
 - **Type:** RFQ / RFP market research and archive environment
 - **What it covers:** historical or research-oriented access to eBuy RFQ/RFP information
 - **Access pattern:** official portal with authentication requirements
@@ -102,19 +66,28 @@ This catalog favors official repositories first. It is designed to answer the qu
 - **Default status:** disabled by default
 - **Notes:** enable only when the user confirms they have access and wants it included
 
+## Out of scope for this release
+
+State and local procurement portals are intentionally excluded from the v1 scan scope.
+
+Examples:
+- Virginia eVA / Virginia Business Opportunities
+- New York State Contract Reporter
+- California Cal eProcure
+- Texas ESBD / TxSmartBuy
+
 ## Operational guidance
 
 1. Start with federal prime, federal subcontract, and forecast sources.
 2. Enable grants only when appropriate.
-3. Add state portals based on geography or buyer strategy.
+3. Do not add state or local procurement portals in this release.
 4. Keep auth-required portals disabled until explicitly requested.
 5. Prefer structured API sources when both API and browser paths exist.
 6. Track which taxonomy each source uses:
    - NAICS
-   - state commodity or class/item codes
    - grant categories
    - set-aside or eligibility labels
 
 ## Taxonomy note
 
-Not every repository centers on NAICS. Some state systems emphasize NIGP or class/item codes. The skill should quietly translate the user's plain-language business description into those secondary tags rather than making the user learn multiple procurement coding systems up front.
+For this release, center matching on federal taxonomies such as NAICS, set-aside signals, buyer labels, and award types. State and local commodity-code systems are deferred to a later phase.
