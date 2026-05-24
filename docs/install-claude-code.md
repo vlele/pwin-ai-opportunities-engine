@@ -1,37 +1,88 @@
-# Claude Code Cheat Sheet
+# Claude Code Install Notes
 
-- Install path: not a drop-in skill folder.
-- Recommended usage: keep the repo cloned, then copy the Claude adapter into a project or install user-level commands under `~/.claude/commands/`.
-- Files that matter: `claude-code/CLAUDE.md`, `claude-code/.claude/commands/*.md`, plus a reliable path to the shared `scripts/` bundle.
-- Files they can ignore: `manifest.json`, `agents/openai.yaml`.
-- User mental model: `this is a command pack plus project memory`, not `this is a skill folder`.
-- Friction level: medium.
-- Verdict: workable, but only really clean because the Claude adapter is separated from the repo root.
+Claude Code uses this repo as a shared script bundle plus a Claude-specific adapter.
 
-## Recommended install
+It is not a drop-in skill folder.
 
-1. Clone the repo somewhere stable, for example:
-   `~/src/pwin-ai-opportunities`
+## What Claude Uses
+
+- `claude-code/CLAUDE.md`
+  Claude-specific operating guidance
+- `claude-code/.claude/commands/*.md`
+  Thin command prompts that resolve `PWIN_AI_OPPS_ROOT` and call the shared Python scripts
+- the shared repo root referenced by `PWIN_AI_OPPS_ROOT`
+
+Claude does not need `manifest.json` or `agents/openai.yaml`.
+
+## Minimum Requirements
+
+- Python 3 available as `python3`
+- `SAM_API_KEY` exported in the shell that will run the scripts
+- the LLM credentials your Claude Code install already uses
+- a stable checkout path for this repo
+- a workspace folder where the runtime can read and write `procurement/` artifacts
+
+Current shipped scope:
+
+- federal-only opportunity work
+- `scan`
+- `show digest`
+- `feedback`
+- `capture research`
+
+Do not assume onboarding commands, bootstrap promises, extra data-source adapters, or `MEMORY.md` are part of the Claude adapter contract.
+
+## Recommended Install
+
+1. Clone the repo somewhere stable, for example `~/src/pwin-ai-opportunities`.
 2. Export the shared bundle root:
 
 ```bash
 export PWIN_AI_OPPS_ROOT="$HOME/src/pwin-ai-opportunities"
 ```
 
-3. Copy the command pack:
-   - user-level: `~/.claude/commands/pwin-ai-opportunities/`
-   - project-level: `<project>/.claude/commands/`
-4. Copy or merge `claude-code/CLAUDE.md` into the project context where Claude Code will read it.
+3. Copy the command pack into either:
+   - `~/.claude/commands/pwin-ai-opportunities/`
+   - `<project>/.claude/commands/`
+4. Copy `claude-code/CLAUDE.md` into the Claude project context, or merge its guidance into an existing project `CLAUDE.md`.
 
-## Shared command pack
+## Shared Command Pack
 
-- `pwin-scan.md`
-- `pwin-show-digest.md`
-- `pwin-feedback.md`
-- `pwin-research.md`
+- `pwin-scan.md` -> `scripts/scan/run_scan.py`
+- `pwin-show-digest.md` -> `scripts/show/show_digest.py`
+- `pwin-feedback.md` -> `scripts/feedback/apply_feedback.py`
+- `pwin-research.md` -> `scripts/capture/run_capture_research.py`
 
-These commands assume the shared scripts still live under `PWIN_AI_OPPS_ROOT`.
+These commands are wrappers over the shared runtime. They should not recreate scan or capture logic in prompt text.
 
-## Why this is not a drop-in skill folder
+## Runtime Notes
 
-OpenClaw and Codex both want the repo root to behave like the installed skill itself. Claude Code works better when its project memory and reusable command prompts are separated from the underlying script bundle. This repo keeps that separation by placing the Claude adapter under `claude-code/`.
+- scan-time USAspending lives in `scripts/scan/usaspending_enrich.py` and supports shortlist enrichment
+- capture-time USAspending lives in `scripts/capture/usaspending_enrich.py` and supports deeper capture research
+- capture also depends on internal helpers such as `fetch_notice_context.py`, `fetch_notice_attachments.py`, and `fetch_public_context.py`
+
+## Direct Script Examples
+
+Run a scan:
+
+```bash
+python3 "$PWIN_AI_OPPS_ROOT/scripts/scan/run_scan.py" --workspace "$PWD" --horizon "30-45" --federal-only
+```
+
+Show the latest digest:
+
+```bash
+python3 "$PWIN_AI_OPPS_ROOT/scripts/show/show_digest.py" --workspace "$PWD" --date latest
+```
+
+Apply feedback:
+
+```bash
+python3 "$PWIN_AI_OPPS_ROOT/scripts/feedback/apply_feedback.py" --workspace "$PWD" --text "prefer subcontracting over prime"
+```
+
+Run capture research:
+
+```bash
+python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth full_360
+```
