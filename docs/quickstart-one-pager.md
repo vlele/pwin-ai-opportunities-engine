@@ -88,6 +88,14 @@ Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
 and treat NAICS 541511 and 541512 as candidates.
 ```
 
+In Claude Code, use the command pack:
+
+```text
+/pwin-bootstrap workspace path $PWD and company URL https://example.com
+/pwin-bootstrap workspace path $PWD and company URL https://example.com with confirmed NAICS 541511 and 541512
+/pwin-bootstrap workspace path $PWD and company URL https://example.com with candidate NAICS 541511 and 541512
+```
+
 That creates or updates:
 
 - `procurement/vendor-profile.json`
@@ -117,6 +125,12 @@ Once the workspace is bootstrapped, ask:
 Use pwin-ai-opportunities and run a federal opportunity scan for the next 30 to 45 days in this workspace.
 ```
 
+In Claude Code, use:
+
+```text
+/pwin-scan workspace path $PWD and horizon 30-45
+```
+
 Expected first-run behavior:
 
 - if `SAM_API_KEY` is missing, the scan reports `missing_api_key`
@@ -131,12 +145,24 @@ Ask:
 Use pwin-ai-opportunities and show the latest digest.
 ```
 
+In Claude Code, use:
+
+```text
+/pwin-show-digest workspace path $PWD and date latest
+```
+
 ## 7. Run Capture Research
 
 Pick a stable ID from the digest and ask:
 
 ```text
 Use pwin-ai-opportunities and research A1 with full capture depth.
+```
+
+In Claude Code, use:
+
+```text
+/pwin-research workspace path $PWD and entry A1 with full capture depth
 ```
 
 That produces a fresh capture brief and evidence file under `procurement/capture-briefs/` and `procurement/capture-evidence/`.
@@ -150,6 +176,13 @@ never show grants
 like A1
 dislike W2 because too small
 more like A1
+```
+
+In Claude Code, the command-pack equivalent is:
+
+```text
+/pwin-feedback workspace path $PWD and text never show grants
+/pwin-feedback workspace path $PWD and text like A1
 ```
 
 That feedback is logged to `procurement/feedback-events.jsonl` and applied to future scans.
@@ -188,7 +221,7 @@ That feedback is logged to `procurement/feedback-events.jsonl` and applied to fu
 
 ## Direct Script Equivalents
 
-These are helpful for debugging or CI. In normal OpenClaw and Codex usage, prefer the chat prompts above.
+These are helpful for debugging or CI. In normal OpenClaw and Codex usage, prefer the chat prompts above. In Claude Code, prefer the `/pwin-*` command pack shown above.
 
 ```bash
 python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" --workspace "$PWD" --company-url "https://example.com"
