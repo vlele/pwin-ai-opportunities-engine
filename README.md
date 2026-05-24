@@ -1,8 +1,8 @@
 # pWin.ai Opportunities for OpenClaw
 
-If you can clone a repo and run one bootstrap command, you can use this skill.
+If you can clone a repo and paste one OpenClaw prompt, you can use this skill.
 
-`pwin-ai-opportunities` turns OpenClaw into a lightweight federal opportunity scanner and capture-research assistant. Install the skill, set one extra API key, point it at a company website, and it will create the starter workspace files for you.
+`pwin-ai-opportunities` turns OpenClaw into a lightweight federal opportunity scanner and capture-research assistant. Install the skill, set one extra API key, point it at a company website, and OpenClaw will create the starter workspace files for you.
 
 ## Why it feels easy
 
@@ -36,21 +36,17 @@ The skill writes everything under `procurement/` inside that workspace.
 
 ## Easiest first use
 
-Bootstrap the workspace from the company site:
+Ask OpenClaw:
 
-```bash
-python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" \
-  --workspace "$PWD" \
-  --company-url "https://example.com"
+```text
+Use pwin-ai-opportunities and bootstrap this workspace from https://example.com.
 ```
 
-If you already know NAICS, add them too:
+If you already know NAICS, say:
 
-```bash
-python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" \
-  --workspace "$PWD" \
-  --company-url "https://example.com" \
-  --naics "541511,541512"
+```text
+Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
+with confirmed NAICS 541511 and 541512.
 ```
 
 That creates:
@@ -61,10 +57,10 @@ That creates:
 - `procurement/STARTER_PROFILE.md`
 - `MEMORY.md`
 
-Then run your first scan:
+Then ask for your first scan:
 
-```bash
-python3 "$PWIN_AI_OPPS_ROOT/scripts/scan/run_scan.py" --workspace "$PWD" --horizon "30-45" --federal-only
+```text
+Use pwin-ai-opportunities and run a federal opportunity scan for the next 30 to 45 days in this workspace.
 ```
 
 ## What you get back
@@ -75,12 +71,13 @@ python3 "$PWIN_AI_OPPS_ROOT/scripts/scan/run_scan.py" --workspace "$PWD" --horiz
 - Evidence files that show what the research run used
 - Feedback logging so future shortlists improve
 
-## Copy-paste commands
+## Copy-paste prompts
 
-```bash
-python3 "$PWIN_AI_OPPS_ROOT/scripts/show/show_digest.py" --workspace "$PWD" --date latest
-python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth full_360
-python3 "$PWIN_AI_OPPS_ROOT/scripts/feedback/apply_feedback.py" --workspace "$PWD" --text "like A1"
+```text
+Use pwin-ai-opportunities and show the latest digest.
+Use pwin-ai-opportunities and research A1 with full capture depth.
+never show grants
+like A1
 ```
 
 ## Good to know
@@ -88,5 +85,6 @@ python3 "$PWIN_AI_OPPS_ROOT/scripts/feedback/apply_feedback.py" --workspace "$PW
 - The current shipped scope is federal-only.
 - The only extra key this skill needs is `SAM_API_KEY`.
 - Website-derived bootstrap fields are provisional until you confirm them.
+- OpenClaw should normally be invoked in chat; the Python scripts are the implementation layer underneath the skill.
 - Detailed setup notes live in `docs/install-openclaw.md`.
 - The broader walkthrough lives in `docs/quickstart-one-pager.md`.

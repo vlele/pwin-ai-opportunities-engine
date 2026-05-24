@@ -1,6 +1,7 @@
-# First-run command examples
+# First-run prompt examples
 
-/pwin-ai-opportunities bootstrap https://example.com
-/pwin-ai-opportunities scan 30-45
-/pwin-ai-opportunities research A1
-/pwin-ai-opportunities feedback "like A1"
+Use pwin-ai-opportunities and bootstrap this workspace from https://example.com.
+Use pwin-ai-opportunities and run a federal opportunity scan for the next 30 to 45 days in this workspace.
+Use pwin-ai-opportunities and research A1 with full capture depth.
+never show grants
+like A1

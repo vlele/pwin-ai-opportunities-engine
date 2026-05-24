@@ -68,31 +68,24 @@ This skill writes its outputs into `procurement/` inside that workspace.
 
 ## 4. Bootstrap the Workspace from the Company URL
 
-Run the bootstrap script:
+In OpenClaw or Codex, ask:
 
-```bash
-python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" \
-  --workspace "$PWD" \
-  --company-url "https://example.com"
+```text
+Use pwin-ai-opportunities and bootstrap this workspace from https://example.com.
 ```
 
-If you already know the NAICS codes, add them too:
+If you already know the NAICS codes, say:
 
-```bash
-python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" \
-  --workspace "$PWD" \
-  --company-url "https://example.com" \
-  --naics "541511,541512"
+```text
+Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
+with confirmed NAICS 541511 and 541512.
 ```
 
-If those NAICS are still tentative, mark them as candidates:
+If those NAICS are still tentative, say:
 
-```bash
-python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" \
-  --workspace "$PWD" \
-  --company-url "https://example.com" \
-  --naics "541511,541512" \
-  --naics-status candidate
+```text
+Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
+and treat NAICS 541511 and 541512 as candidates.
 ```
 
 That creates:
@@ -107,10 +100,10 @@ Then review `procurement/STARTER_PROFILE.md` and confirm or correct the provisio
 
 ## 5. Run the First Scan
 
-Once the workspace is bootstrapped, run:
+Once the workspace is bootstrapped, ask:
 
-```bash
-python3 "$PWIN_AI_OPPS_ROOT/scripts/scan/run_scan.py" --workspace "$PWD" --horizon "30-45" --federal-only
+```text
+Use pwin-ai-opportunities and run a federal opportunity scan for the next 30 to 45 days in this workspace.
 ```
 
 Expected first-run behavior:
@@ -121,18 +114,18 @@ Expected first-run behavior:
 
 ## 6. Read the Digest
 
-Show the latest digest:
+Ask:
 
-```bash
-python3 "$PWIN_AI_OPPS_ROOT/scripts/show/show_digest.py" --workspace "$PWD" --date latest
+```text
+Use pwin-ai-opportunities and show the latest digest.
 ```
 
 ## 7. Run Capture Research
 
-Pick a stable ID from the digest and run:
+Pick a stable ID from the digest and ask:
 
-```bash
-python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth full_360
+```text
+Use pwin-ai-opportunities and research A1 with full capture depth.
 ```
 
 That produces a fresh capture brief and evidence file under `procurement/capture-briefs/` and `procurement/capture-evidence/`.
@@ -142,9 +135,9 @@ That produces a fresh capture brief and evidence file under `procurement/capture
 Use plain-English feedback such as:
 
 ```text
+never show grants
 like A1
 dislike W2 because too small
-never show grants
 more like A1
 ```
 
@@ -181,3 +174,15 @@ That feedback is logged to `procurement/feedback-events.jsonl` and applied to fu
 5. Review the starter profile.
 6. Run the federal-only scan.
 7. Read the digest, research a stable ID, and give feedback.
+
+## Direct Script Equivalents
+
+These are helpful for debugging or CI. In normal OpenClaw and Codex usage, prefer the chat prompts above.
+
+```bash
+python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" --workspace "$PWD" --company-url "https://example.com"
+python3 "$PWIN_AI_OPPS_ROOT/scripts/scan/run_scan.py" --workspace "$PWD" --horizon "30-45" --federal-only
+python3 "$PWIN_AI_OPPS_ROOT/scripts/show/show_digest.py" --workspace "$PWD" --date latest
+python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth full_360
+python3 "$PWIN_AI_OPPS_ROOT/scripts/feedback/apply_feedback.py" --workspace "$PWD" --text "never show grants"
+```

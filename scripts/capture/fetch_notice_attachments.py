@@ -12,8 +12,15 @@ import urllib.request
 import zipfile
 from xml.etree import ElementTree as ET
 
-from PyPDF2 import PdfReader
-from docx import Document
+try:
+    from PyPDF2 import PdfReader
+except ImportError:  # pragma: no cover - optional dependency
+    PdfReader = None
+
+try:
+    from docx import Document
+except ImportError:  # pragma: no cover - optional dependency
+    Document = None
 from common.runtime import USER_AGENT
 
 
@@ -82,6 +89,8 @@ def _attachment_category(filename: str) -> str:
 
 
 def _extract_pdf_text(data: bytes, max_pages: int = 8) -> str:
+    if PdfReader is None:
+        raise RuntimeError("PyPDF2 unavailable")
     reader = PdfReader(io.BytesIO(data))
     pages: list[str] = []
     for page in reader.pages[:max_pages]:
@@ -90,6 +99,8 @@ def _extract_pdf_text(data: bytes, max_pages: int = 8) -> str:
 
 
 def _extract_docx_text(data: bytes) -> str:
+    if Document is None:
+        raise RuntimeError("python-docx unavailable")
     document = Document(io.BytesIO(data))
     values = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
     return "\n".join(values)
@@ -124,6 +135,10 @@ def _extract_plain_text(data: bytes) -> str:
 
 def _extract_attachment_text(filename: str, content_type: str, data: bytes) -> tuple[str, str]:
     lowered = filename.lower()
+    if lowered.endswith(".pdf") and PdfReader is None:
+        return "", "dependency_missing:PyPDF2"
+    if lowered.endswith(".docx") and Document is None:
+        return "", "dependency_missing:python-docx"
     try:
         if lowered.endswith(".pdf"):
             return _extract_pdf_text(data), "parsed_pdf"

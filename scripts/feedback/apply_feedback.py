@@ -163,6 +163,7 @@ def main() -> int:
     full_record = _load_full_record(workspace, resolved)
     resolved_record = _resolved_record_payload(full_record, resolved)
     is_resolved = resolved.get("status") == "resolved"
+    display_entry_id = entry_id or (str(resolved.get("report_entry_id", "") or "").strip() if is_resolved else "")
     report_bucket = str(resolved.get("bucket", "") or "")
     digest_date = resolved.get("digest_date") or digest_map.get("digest_date", today_local_str())
     vendor_profile = load_json(workspace / "procurement" / "vendor-profile.json", default={})
@@ -176,7 +177,7 @@ def main() -> int:
         "digest_date": digest_date,
         "digest_path": digest_map.get("digest_path", ""),
         "resolved_from_latest_digest": is_resolved,
-        "report_entry_id": entry_id or resolved.get("report_entry_id", ""),
+        "report_entry_id": display_entry_id,
         "report_bucket": report_bucket,
         "user_id": "",
         "user_utterance": user_text,
@@ -224,7 +225,7 @@ def main() -> int:
         "feedback_path": feedback_path.as_posix(),
         "preferences_path": preferences_path.as_posix(),
         "feedback": feedback_kind,
-        "report_entry_id": entry_id or resolved.get("report_entry_id", ""),
+        "report_entry_id": display_entry_id,
         "resolved": is_resolved,
         "reason_codes": reason_codes,
         "learning_summary": learning_summary,

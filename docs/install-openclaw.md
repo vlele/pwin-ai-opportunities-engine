@@ -60,7 +60,49 @@ The scan and capture paths each keep their own USAspending helper module because
 export PWIN_AI_OPPS_ROOT="$HOME/.openclaw/skills/pwin-ai-opportunities"
 ```
 
+## OpenClaw Prompt Examples
+
+Bootstrap a workspace from a company site:
+
+```text
+Use pwin-ai-opportunities and bootstrap this workspace from https://ais.com.
+```
+
+Bootstrap with confirmed NAICS:
+
+```text
+Use pwin-ai-opportunities and bootstrap this workspace from https://ais.com
+with confirmed NAICS 541511 and 541512.
+```
+
+Run the first scan:
+
+```text
+Use pwin-ai-opportunities and run a federal opportunity scan for the next 30 to 45 days in this workspace.
+```
+
+Show the digest:
+
+```text
+Use pwin-ai-opportunities and show the latest digest.
+```
+
+Give feedback:
+
+```text
+never show grants
+like A1
+```
+
+Run capture research:
+
+```text
+Use pwin-ai-opportunities and research A1 with full capture depth.
+```
+
 ## Direct Script Examples
+
+These are useful for debugging or CI. In normal OpenClaw use, prefer the chat prompts above.
 
 Bootstrap a workspace from a company site:
 
@@ -83,7 +125,7 @@ python3 "$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/show/show_digest.p
 Apply feedback:
 
 ```bash
-python3 "$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/feedback/apply_feedback.py" --workspace "$PWD" --text "hide E1"
+python3 "$HOME/.openclaw/skills/pwin-ai-opportunities/scripts/feedback/apply_feedback.py" --workspace "$PWD" --text "never show grants"
 ```
 
 Run capture research:
