@@ -32,7 +32,7 @@ Do not assume extra federal data adapters or `near-misses` are part of the shipp
 ## Shared Runtime Shape
 
 - `scripts/bootstrap/bootstrap_workspace.py`
-  Seeds starter workspace files from a company URL and optional NAICS.
+  Seeds starter workspace files from a company URL and optional NAICS, and populates or merges `procurement/vendor-profile.json` plus `procurement/preferences.json`.
 - `scripts/scan/run_scan.py`
   Runs the federal opportunity scan, writes the dated opportunity set, explanations, digest-entry map, report, and digest.
 - `scripts/show/show_digest.py`
@@ -74,6 +74,15 @@ Bootstrap with confirmed NAICS:
 Use pwin-ai-opportunities and bootstrap this workspace from https://ais.com
 with confirmed NAICS 541511 and 541512.
 ```
+
+Bootstrap behavior to expect:
+
+- `procurement/vendor-profile.json` is created or updated, not left empty
+- confirmed NAICS you provide land in `naics.confirmed`
+- tentative or inferred NAICS land in `naics.candidates`
+- inferred competencies, keyword tags, buyer notes, provenance, and a starter fit narrative are added
+- website-derived facts are marked provisional until you confirm them
+- `procurement/preferences.json` excludes `grants` by default and seeds positive keywords from the inferred capabilities
 
 Run the first scan:
 

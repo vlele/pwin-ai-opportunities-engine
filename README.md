@@ -2,12 +2,12 @@
 
 If you can clone a repo and paste one OpenClaw prompt, you can use this skill.
 
-`pwin-ai-opportunities` turns OpenClaw into a lightweight federal opportunity scanner and capture-research assistant. Install the skill, set one extra API key, point it at a company website, and OpenClaw will create the starter workspace files for you.
+`pwin-ai-opportunities` turns OpenClaw into a lightweight federal opportunity scanner and capture-research assistant. Install the skill, set one extra API key, point it at a company website, and OpenClaw will create and pre-populate the starter workspace files for you.
 
 ## Why it feels easy
 
 - You talk to it in normal English.
-- The first-run bootstrap creates the starter files for you.
+- The first-run bootstrap creates and pre-populates the starter files for you.
 - Every run writes real files into your workspace, so nothing is trapped in chat.
 - The workflow is simple: bootstrap, scan, research, and give feedback.
 
@@ -49,13 +49,24 @@ Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
 with confirmed NAICS 541511 and 541512.
 ```
 
-That creates:
+That creates or updates:
 
 - `procurement/vendor-profile.json`
 - `procurement/preferences.json`
 - `procurement/source-registry.json`
 - `procurement/STARTER_PROFILE.md`
 - `MEMORY.md`
+
+Bootstrap also pre-populates `procurement/vendor-profile.json` with:
+
+- Bootstrap metadata and a `needs_user_confirmation` status
+- `company.website` plus an inferred company name and summary
+- Inferred `core_competencies`, `other_taxonomy_tags.keywords`, and a starter `fit_narrative`
+- Confirmed `naics.confirmed` values when you provide confirmed codes
+- Candidate `naics.candidates` values from tentative input plus website inference
+- Candidate buyer notes, provenance facts, and a reminder that website-derived facts are still provisional
+
+It also seeds `procurement/preferences.json` to exclude `grants` by default, prefer `contracts`, `subcontracts`, and `forecasts`, and reuse the inferred capability keywords. If `vendor-profile.json` already exists, bootstrap merges into it instead of wiping your existing work.
 
 Then ask for your first scan:
 

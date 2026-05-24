@@ -88,13 +88,24 @@ Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
 and treat NAICS 541511 and 541512 as candidates.
 ```
 
-That creates:
+That creates or updates:
 
 - `procurement/vendor-profile.json`
 - `procurement/preferences.json`
 - `procurement/source-registry.json`
 - `procurement/STARTER_PROFILE.md`
 - `MEMORY.md`
+
+Bootstrap does more than create empty files. It immediately pre-populates `procurement/vendor-profile.json` with:
+
+- bootstrap metadata and a `needs_user_confirmation` status
+- `company.website` plus an inferred company name and summary
+- inferred `core_competencies`, `other_taxonomy_tags.keywords`, and a starter `fit_narrative`
+- confirmed `naics.confirmed` values when you provide confirmed codes
+- candidate `naics.candidates` values from tentative input plus website inference
+- candidate buyer notes, provenance facts, and a reminder that website-derived facts are still provisional
+
+It also seeds `procurement/preferences.json` to exclude `grants` by default, prefer `contracts`, `subcontracts`, and `forecasts`, and reuse the inferred capability keywords. If `procurement/vendor-profile.json` already exists, bootstrap merges into it instead of resetting the file.
 
 Then review `procurement/STARTER_PROFILE.md` and confirm or correct the provisional fields before the first real scan.
 
@@ -171,7 +182,7 @@ That feedback is logged to `procurement/feedback-events.jsonl` and applied to fu
 2. Export `SAM_API_KEY`.
 3. Create a workspace.
 4. Bootstrap it from the company website.
-5. Review the starter profile.
+5. Review the starter profile and the populated `vendor-profile.json`.
 6. Run the federal-only scan.
 7. Read the digest, research a stable ID, and give feedback.
 
