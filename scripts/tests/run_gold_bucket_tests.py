@@ -13,6 +13,7 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 import scan.run_scan as scan_run  # type: ignore
+from common.paths import utc_now_iso
 
 
 def _evaluate_case(
@@ -163,7 +164,7 @@ def main() -> int:
     failed_case_ids = [item["id"] for item in results if not item["passed"]]
     output = {
         "status": "OK" if not failed_case_ids else "FAILED",
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": utc_now_iso(),
         "case_count": len(results),
         "passed": len(results) - len(failed_case_ids),
         "failed": len(failed_case_ids),

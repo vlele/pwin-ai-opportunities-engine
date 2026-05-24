@@ -13,6 +13,7 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from common.paths import load_json, today_local_str, utc_now_iso, write_json
+from common.runtime import NOT_IMPLEMENTED_IN_BUNDLE_STATUS
 from common.source_registry import (
     enabled_sources_summary,
     filter_sources_for_policy,
@@ -1266,7 +1267,7 @@ def main() -> int:
             source_statuses.append(
                 {
                     "source_id": source_id,
-                    "status": "not_implemented_in_v15_2",
+                    "status": NOT_IMPLEMENTED_IN_BUNDLE_STATUS,
                     "record_count": 0,
                 }
             )

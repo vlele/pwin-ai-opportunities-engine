@@ -4,29 +4,32 @@ description: pWin.ai Opportunities runs federal opportunity scans, renders stabl
 ---
 
 Use this skill when the user wants any of the following:
+
 - a federal opportunity scan or daily digest
 - the latest digest or a dated digest
 - feedback such as `like A1`, `dislike W2`, `hide E1`, or `never show grants`
 - capture research such as `research A1`, `research W2`, or `capture deep dive on A1`
 
-Host-specific wrappers may expose slash commands or command packs, but the shared bundle is script-driven.
+Host-specific wrappers may expose slash commands or command packs, but the shared bundle is script-driven. If a helper or playbook is not present in the installed bundle, do not assume an alternate onboarding path exists.
 
 ## Skill Root
 
 Treat the directory containing this `SKILL.md` as `SKILL_ROOT`.
 
 Common install locations:
+
 - OpenClaw: `$HOME/.openclaw/skills/pwin-ai-opportunities`
 - Codex: `$HOME/.codex/skills/pwin-ai-opportunities`
 
 When calling orchestrator scripts:
+
 - use `SKILL_ROOT/scripts/...`
 - do not run `./scripts/...` from the workspace
 - do not assume `$PWD` is the skill root
 
 ## Core Principle
 
-- The model should decide which mode to run.
+- The model should decide which shipped mode to run.
 - Scripts should decide how the workflow executes.
 - The user-facing answer should come from the fresh artifacts produced by the script, not improvised chat prose.
 
@@ -37,6 +40,7 @@ Do not re-implement script logic inside the prompt. Route to the correct script,
 ### 1. Scan
 
 Use when the user asks to:
+
 - run today's scan
 - scan a 30-45 day horizon
 - scan a 60-90 day horizon
@@ -49,18 +53,23 @@ python3 "<SKILL_ROOT>/scripts/scan/run_scan.py" --workspace "$PWD" --horizon "30
 ```
 
 Notes:
+
 - Replace `30-45` with the horizon inferred from the user message.
-- The scan script is responsible for source-registry refresh, digest rendering, stable entry IDs, digest-entry-map creation, and basic validation.
+- The scan script refreshes the runtime source registry, writes dated snapshots, builds stable entry IDs, and renders the report and digest.
+- The shipped source set is federal-only and currently implemented for `SAM.gov` plus `USAspending.gov` enrichment.
 
 After the script runs:
+
 - inspect its JSON stdout
 - read the `digest_path` it returns
 - answer from that digest
 - do not invent a second digest in chat
+- if the scan reports `no_naics`, say plainly that the current workspace does not have usable NAICS for SAM retrieval
 
 ### 2. Show Digest
 
 Use when the user asks to:
+
 - show the latest digest
 - show a digest for a specific date
 - show digest entries
@@ -74,13 +83,16 @@ python3 "<SKILL_ROOT>/scripts/show/show_digest.py" --workspace "$PWD" --date lat
 For a specific date, replace `latest` with `YYYY-MM-DD`.
 
 After the script runs:
+
 - read the `digest_path` it returns
 - quote or summarize only what is in that digest
+- use `digest_entry_map_path` when present for stable IDs
 - if the digest has no stable IDs, say that clearly and recommend re-running the scan script
 
 ### 3. Feedback
 
 Use when the user says things like:
+
 - `like A1`
 - `dislike W2 because too small`
 - `hide E1`
@@ -94,12 +106,14 @@ python3 "<SKILL_ROOT>/scripts/feedback/apply_feedback.py" --workspace "$PWD" --t
 ```
 
 The feedback script is responsible for:
+
 - logging a structured feedback event
 - preserving the user utterance
 - resolving the entry ID when possible
-- updating structured preference state when safe
+- recomputing learned preferences in `preferences.json`
 
 After the script runs:
+
 - report what was logged
 - tell the user which future runs will be affected
 - do not claim model retraining
@@ -107,6 +121,7 @@ After the script runs:
 ### 4. Capture Research
 
 Use when the user says:
+
 - `research A1`
 - `research W2`
 - `research 0231571d...`
@@ -121,6 +136,7 @@ python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" --workspace "$PWD
 Replace `A1` with the provided entry or identifier.
 
 The capture orchestrator is responsible for:
+
 - entry resolution
 - request logging
 - local notice-context loading
@@ -128,9 +144,10 @@ The capture orchestrator is responsible for:
 - USAspending enrichment when applicable
 - brief rendering
 - evidence rendering
-- validation
+- brief validation
 
 After it runs:
+
 - inspect its JSON stdout
 - read the fresh `brief_path` it returns
 - answer from that brief
@@ -144,6 +161,7 @@ Do not satisfy capture research by reading an old brief directly unless the orch
 Each orchestrator should print compact JSON.
 
 Expected fields:
+
 - `status`
 - `request_id` when applicable
 - `brief_path` or `digest_path`
@@ -156,28 +174,50 @@ Treat that JSON as authoritative for the current run.
 
 ## Sources
 
-Default active federal sources:
-- `SAM.gov`
-- `USAspending.gov`
-- `SBA SUBNet`
-- `Acquisition.gov`
+The shipped runtime contract is federal-only.
 
-Default source policy:
+Currently implemented sources:
+
+- `SAM.gov` live contract opportunities
+- `USAspending.gov` award-history enrichment
+
+Source rules:
+
 - official sources first
 - federal only by default
-- no state or local sources in this phase
-- Tier 4 sources only when explicitly enabled by the user and clearly labeled
+- no state or local sources in this release
+- do not describe stale source IDs from older revisions as active shipped behavior
 
 Critical source rules:
+
 - For `SAM.gov` search, use `ncode=`.
 - For `SAM.gov` noticedesc, use the official endpoint and never treat a noticedesc URL as full text.
 - Never print or log secret values such as `SAM_API_KEY`.
 - For `USAspending`, use documented JSON `POST` requests.
 
-## Artifact Contract
+Not in the shipped source contract:
 
-The workspace should maintain:
+- SBA SUBNet
+- Acquisition.gov forecasts
+- GSA eBuy Open
+- grants sources
+- commercial enrichment portals
+
+## Runtime Files
+
+Operator-managed inputs commonly read by the shipped modes:
+
+- `procurement/preferences.json`
 - `procurement/source-registry.json`
+- `procurement/vendor-profile.json`
+
+Notes:
+
+- `vendor-profile.json` is optional at the file-system level, but the scan path will return `no_naics` if it cannot derive usable NAICS from the current workspace inputs.
+- This bundle does not promise onboarding files or `MEMORY.md`.
+
+The workspace should maintain these shipped runtime artifacts:
+
 - `procurement/feedback-events.jsonl`
 - `procurement/capture-requests.jsonl`
 - `procurement/digest-entry-map/YYYY-MM-DD.json`
@@ -189,42 +229,55 @@ The workspace should maintain:
 - `procurement/capture-evidence/YYYY-MM-DD/ENTRYID-opportunityid-requestid.json`
 
 Stable ID policy:
+
 - use `A1`, `W2`, `E1`, `S1` for humans
 - use canonical IDs such as `noticeId` or `opportunity_id` for machines
-- preserve both in every capture brief and evidence object
+- preserve both in digest-entry-map data and capture outputs
 
 ## Capture Brief Expectations
 
-Every capture brief, even partial, must render these sections:
-- `Executive Brief`
-- `Objective Matrix`
-- `Stakeholder and People Map`
-- `Budget, Funding, and Spending Signals`
-- `Related Procurements and Vehicle Signals`
-- `Competitive Landscape`
-- `Public Discourse and Market Signals`
-- `Recommended Next Research Moves`
-- `Action Items (Next 10 Days)`
-- `Assumptions to Validate`
-- `Evidence Annex`
+The shipped capture validator currently requires these headings:
+
+- `## 1. Executive Capture Judgment`
+- `## 2. Opportunity Snapshot`
+- `## 3. Pursuit Recommendation and Score`
+- `## 4. Evidence Ledger`
+- `## 5. Document Inventory and Missing Items`
+- `## 6. Customer and Mission Analysis`
+- `## 7. Funding and Spending Trend Analysis`
+- `## 8. Acquisition Strategy`
+- `## 9. Incumbent Analysis`
+- `## 10. Contracting Office and Stakeholder Map`
+- `## 11. Competitive Landscape`
+- `## 12. Partner and Teaming Analysis`
+- `## 13. Fit Against Our Capabilities and Past Performance`
+- `## 14. Subtle Signals and Capture Implications`
+- `## 15. Recommended Win Strategy`
+- `## 16. Questions to Ask`
+- `## 17. Action Plan`
+- `## 18. Assumptions, Unknowns, and Confidence`
 
 If evidence is missing:
+
 - do not omit the section
 - mark it `currently unavailable`, `blocked`, `throttled`, or `still pending`
 
 ## Response Contract
 
 For scan and show-digest responses:
+
 - answer from the digest file
 - keep the reply concise
 - include the digest date
 - include stable IDs if present
 
 For feedback responses:
+
 - say what was logged
 - say whether the impact is immediate, next-run, or both
 
 For capture responses:
+
 - answer from the fresh brief
 - include stable ID when available
 - include canonical ID
@@ -234,12 +287,14 @@ For capture responses:
 - include concise next actions
 
 Do not end a capture response with a menu unless:
+
 - a valid brief already exists for the current request, and
 - the next step truly requires user approval or authentication
 
 ## Failure Rules
 
 If a script fails:
+
 - say it failed
 - give the script-reported reason
 - do not improvise a fake success result
@@ -247,17 +302,20 @@ If a script fails:
 - do not switch into onboarding, bootstrap, or unrelated repo-repair chat
 
 For capture research specifically:
+
 - if the request log was not written, the run is failed
 - if fresh request-scoped brief and evidence files were not written, the run is failed
-- if the final brief is still only a seed stub, the run is failed
+- if the final brief still contains placeholders or is missing required headings, the run is failed
 - if the run stops at a `pick one` menu before rendering a partial or complete brief, the run is failed
 
 If browser retrieval fails:
+
 - continue with automatable non-browser public research first
 - attempt official USAspending enrichment when relevant and possible
 - only ask the user for help after the automatable path is exhausted
 
 For skill-path failures specifically:
+
 - if `SKILL_ROOT/scripts/...` is missing, the run is failed
 - report that the skill installation is incomplete or miscopied
 - ask only for reinstall or copy verification of the skill bundle
@@ -266,6 +324,7 @@ For skill-path failures specifically:
 ## References
 
 Read these only when needed for the chosen mode:
+
 - `SKILL_ROOT/references/scan-playbook.md`
 - `SKILL_ROOT/references/capture-research-playbook.md`
 - `SKILL_ROOT/references/usaspending-payloads.md`
@@ -277,6 +336,7 @@ Read these only when needed for the chosen mode:
 ## Examples
 
 Use the shipped examples as behavioral anchors:
+
 - `SKILL_ROOT/examples/good-digest-2026-05-09.md`
 - `SKILL_ROOT/examples/good-digest-entry-map-2026-05-09.json`
 - `SKILL_ROOT/examples/good-capture-brief-partial.md`
@@ -296,3 +356,4 @@ Use the shipped examples as behavioral anchors:
 - Do not ask the user to choose between API and browser paths before trying the documented automatable path.
 - Do not produce a second freeform brief in chat when a fresh brief file already exists.
 - Do not treat operational notes, draft emails, or cron-job creation as a substitute for a capture brief.
+- Do not claim unsupported sources are active just because they appeared in older revisions of the bundle.

@@ -1,12 +1,13 @@
-# Feedback learning playbook
+# Feedback Learning Playbook
 
 The learning loop should be simple for the user and explainable for reviewers.
 
 ## User-facing rule
 
-A user should be able to react to any report entry in plain language.
+A user should be able to react to any digest entry in plain language.
 
 Examples:
+
 - `like A1`
 - `dislike W2 because too small`
 - `more like A1`
@@ -19,16 +20,18 @@ Examples:
 ## Entry IDs
 
 Each digest item should carry a short ID:
+
 - `A#` for Action Now
 - `W#` for Worth a Look
 - `E#` for Watchlist / Early Shaping
 - `S#` for Suppressed note when shown
 
-The learning system should resolve those IDs against the most recent digest unless the user specifies a report date.
+The learning system resolves those IDs against the most recent digest unless the user specifies a report date.
 
 ## Preferred reason codes
 
 Normalize free-text feedback into reason codes when possible:
+
 - `right_buyer`
 - `wrong_buyer`
 - `right_work`
@@ -48,6 +51,7 @@ Normalize free-text feedback into reason codes when possible:
 Do not claim black-box retraining.
 
 Use an explicit reward ledger:
+
 - pursue / perfect fit: `+2`
 - like / more like this: `+1`
 - watch / neutral: `0`
@@ -55,6 +59,7 @@ Use an explicit reward ledger:
 - hard exclude / never: `-3` and create a hard filter when appropriate
 
 Apply rewards only to dimensions that actually contributed to the recommendation:
+
 - capability keywords
 - buyers
 - NAICS or other taxonomy tags
@@ -76,7 +81,7 @@ Apply rewards only to dimensions that actually contributed to the recommendation
 - low-confidence opportunities should not get promoted into the top bucket from one positive signal alone
 - repeated negative reasons from the same source should trigger source-quality review
 - high-confidence false positives should trigger a visible drift note in the next report
-- every material preference change should appear in both `feedback-events.jsonl` and `MEMORY.md`
+- every material preference change should appear in `feedback-events.jsonl` and in `preferences.json` under `learning.applied_preferences`
 
 ## Report footer
 

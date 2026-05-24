@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 
 from PyPDF2 import PdfReader
+from common.paths import today_local_str
 
 
 TAG_RE = re.compile(r"<[^>]+>")
@@ -382,11 +383,6 @@ LEADERSHIP_ROLE_QUERIES = (
     "Commissioner",
     "Director",
 )
-
-
-def _today_local_str() -> str:
-    return datetime.now().astimezone().date().isoformat()
-
 
 def _normalize_text(value: object) -> str:
     return SPACE_RE.sub(" ", TAG_RE.sub(" ", html.unescape(str(value or "")))).strip()
@@ -1199,7 +1195,7 @@ def _build_source_record(
         "url": url,
         "publisher": host or "official source",
         "published_date": published_date or "N/A",
-        "accessed_date": _today_local_str(),
+        "accessed_date": today_local_str(),
         "tier": 1,
         "relevance": f"{category.replace('_', ' ')} source discovered for current capture research.",
         "confidence": confidence,

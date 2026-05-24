@@ -11,11 +11,6 @@ from zoneinfo import ZoneInfo
 LOCAL_TIMEZONE = ZoneInfo("America/New_York")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-
-def bundle_root_from_script(script_file: str) -> Path:
-    return Path(script_file).resolve().parents[2]
-
-
 def local_now() -> datetime:
     return datetime.now(LOCAL_TIMEZONE)
 
@@ -78,13 +73,6 @@ def latest_dated_file(directory: Path, suffix: str) -> Path | None:
     return files[-1] if files else None
 
 
-def dated_json_dirs(directory: Path) -> list[Path]:
-    if not directory.exists():
-        return []
-    dirs = [path for path in directory.iterdir() if path.is_dir() and DATE_RE.match(path.name)]
-    return sorted(dirs)
-
-
 def standard_procurement_paths(workspace: Path, date_str: str) -> dict[str, Path]:
     base = procurement_dir(workspace)
     return {
@@ -98,7 +86,6 @@ def standard_procurement_paths(workspace: Path, date_str: str) -> dict[str, Path
         "explanations": base / "explanations" / f"{date_str}.json",
         "report": base / "reports" / f"{date_str}.md",
         "digest": base / "digests" / f"{date_str}.md",
-        "near_misses": base / "near-misses" / f"{date_str}.md",
         "digest_entry_map": base / "digest-entry-map" / f"{date_str}.json",
         "run_log": base / "run-logs" / f"{date_str}.log",
     }
@@ -116,4 +103,3 @@ def first_non_empty(values: Iterable[Any], default: Any = "") -> Any:
         if value not in (None, "", [], {}):
             return value
     return default
-

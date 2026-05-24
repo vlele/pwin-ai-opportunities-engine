@@ -35,7 +35,6 @@
     "action_now_min": 75,
     "worth_a_look_min": 60,
     "watchlist_min": 45,
-    "near_miss_min": 45,
     "quarantine_below": 45
   },
   "time_horizon": {
@@ -84,15 +83,13 @@
     "digest_path_pattern": "procurement/digests/YYYY-MM-DD.md",
     "max_action_now": 5,
     "max_worth_a_look": 5,
-    "max_watchlist": 5,
-    "max_near_misses": 3
+    "max_watchlist": 5
   },
   "learning": {
     "policy": "reinforcement_learning_style_explicit_feedback",
     "soft_promotion_threshold": 3,
     "decay_rate_monthly": 0.05,
     "last_learning_update": null,
-    "exploration_near_miss_quota": 1,
     "signal_scores": {
       "buyers": {},
       "keywords": {},
@@ -144,10 +141,6 @@
       "dislike": -1,
       "hard_exclude": -3
     },
-    "notes": []
-  },
-  "provenance": {
-    "seed_type": null,
     "notes": []
   }
 }

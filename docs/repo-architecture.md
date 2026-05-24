@@ -2,94 +2,102 @@
 
 ## Goal
 
-Use one shared source repo for:
+Keep one shared repo for `OpenClaw`, `Codex`, and `Claude Code` while shipping one runtime contract.
 
-- OpenClaw
-- Codex
-- Claude Code
+The current shipped contract is intentionally narrow:
 
-without forcing all three tools into the same mental model.
-
-## Design Choice
-
-OpenClaw and Codex both want a package-shaped repo root.
-Claude Code wants a project adapter.
-
-This repo therefore uses:
-
-- a shared package root for scripts, templates, references, examples, and shared skill instructions
-- a Claude-specific adapter isolated under `claude-code/`
+- federal-only opportunity work
+- `scan`
+- `show digest`
+- `feedback`
+- `capture research`
+- `SAM.gov` plus `USAspending.gov`
 
 ## Layout
 
 ```text
 pwin-ai-opportunities/
-├── SKILL.md
-├── manifest.json
-├── SECURITY.md
-├── TRUST.md
-├── agents/
-│   └── openai.yaml
-├── scripts/
-├── templates/
-├── references/
-├── examples/
-├── assets/
-├── claude-code/
-│   ├── CLAUDE.md
-│   └── .claude/
-│       └── commands/
-└── docs/
-    ├── install-openclaw.md
-    ├── install-codex.md
-    ├── install-claude-code.md
-    └── repo-architecture.md
+|- SKILL.md
+|- manifest.json
+|- SECURITY.md
+|- TRUST.md
+|- agents/
+|  `- openai.yaml
+|- scripts/
+|  |- common/
+|  |- scan/
+|  |- show/
+|  |- feedback/
+|  |- capture/
+|  `- tests/
+|- templates/
+|- references/
+|- examples/
+|- claude-code/
+|  |- CLAUDE.md
+|  `- .claude/
+|     `- commands/
+`- docs/
 ```
 
-## Shared Root Responsibilities
+## Shared Runtime
+
+- `scripts/scan/`
+  Federal scan orchestration, SAM search and hydration, shortlist scoring, digest-entry map generation, digest rendering, and scan-time `USAspending.gov` enrichment.
+- `scripts/show/`
+  Reads the current or dated digest artifacts without rerunning scan logic.
+- `scripts/feedback/`
+  Logs user feedback and applies learned preference updates to runtime state.
+- `scripts/capture/`
+  Runs capture research from a stable entry ID or canonical ID, then uses internal helpers for notice context, attachments, public context, evidence rendering, validation, and capture-time `USAspending.gov` enrichment.
+- `scripts/common/`
+  Shared path, JSON, JSONL, source-registry, and validation utilities used across the shipped modes.
+
+Other folders may exist under `scripts/`, but the supported host-facing command surface is limited to the four modes above.
+
+## Host Adapters
 
 - `SKILL.md`
-  Shared workflow contract for scan, show digest, feedback, and capture research.
+  Shared host-neutral workflow contract used by skill-style hosts.
 - `manifest.json`
-  OpenClaw-oriented bundle metadata that does not interfere with Codex.
+  OpenClaw metadata for shipped artifacts and bundle identity.
 - `agents/openai.yaml`
-  Codex-facing display metadata.
-- `scripts/`
-  Deterministic execution layer shared by every host.
-- `templates/`
-  Shared render templates and JSON templates.
-- `references/`
-  Deeper playbooks and source guidance.
-- `examples/`
-  Golden behavioral anchors.
-- `assets/`
-  Reserved for future icons or host-facing media files.
-
-## Claude Adapter Responsibilities
-
+  Codex metadata for discovery and display.
 - `claude-code/CLAUDE.md`
-  Claude-specific project memory and usage framing.
+  Claude-specific guidance for running the shared bundle.
 - `claude-code/.claude/commands/`
-  Prompt-command pack that points Claude back to the shared scripts.
+  Thin Claude command wrappers that resolve `PWIN_AI_OPPS_ROOT` and call the shared scripts.
 
-## Install Mental Models
+## Source Scope
 
-- OpenClaw: the repo root is the skill folder.
-- Codex: the repo root is the skill folder plus a small amount of UI metadata.
-- Claude Code: the repo root is the shared bundle, and `claude-code/` is the adapter you copy into Claude's command surface.
+The shipped runtime currently implements two live source families:
 
-## Guardrail
+- `SAM.gov` for federal opportunity retrieval and notice hydration
+- `USAspending.gov` for award-history enrichment
 
-Keep `SKILL.md` neutral.
+The USAspending split is deliberate today:
 
-Do not hardcode:
+- `scripts/scan/usaspending_enrich.py` supports scan-time shortlist enrichment
+- `scripts/capture/usaspending_enrich.py` supports deeper capture-time research
 
-- an OpenClaw-only install path
-- slash-command-only usage language
-- Claude-specific project assumptions
+Not part of the shipped source contract:
 
-Host-specific installation and ergonomics should live in:
+- state or local opportunity sources
+- grants sources
+- commercial enrichment portals
+- placeholder adapters from older drafts
 
-- `docs/`
-- `agents/openai.yaml`
-- `claude-code/`
+## Supporting Content
+
+- `templates/`
+  Shipped templates used by the runtime today.
+- `references/`
+  Playbooks and source notes that should match the current script behavior.
+- `examples/`
+  Behavioral anchors and artifact examples, not required runtime inputs.
+
+## Guardrails
+
+- Keep `SKILL.md` host-neutral.
+- Keep host-specific install ergonomics in `docs/`, `agents/openai.yaml`, and `claude-code/`.
+- Do not promise onboarding flows, `near-misses`, `validate-artifacts`, or `MEMORY.md` unless the shipped scripts actually require them.

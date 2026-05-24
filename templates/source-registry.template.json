@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "template_version": "2026-05-10-federal-horizon-refresh-v1",
+  "template_version": "2026-05-24-shipped-sources-v1",
   "default_timezone": "America/New_York",
   "refresh_policy": {
     "refresh_runtime_registry_when_template_changes": true,
@@ -52,107 +52,6 @@
       ],
       "homepage": "https://www.usaspending.gov/",
       "api_docs": "https://api.usaspending.gov/docs/endpoints"
-    },
-    {
-      "id": "sba_subnet_subcontracting",
-      "name": "SBA SUBNet Subcontracting Opportunities",
-      "enabled": true,
-      "default_enabled": true,
-      "opportunity_class": "subcontracts",
-      "trust_tier": 2,
-      "access_mode": "official_public_page",
-      "auth": {
-        "type": "none",
-        "required": false
-      },
-      "taxonomy": [
-        "naics",
-        "buyer",
-        "location",
-        "subcategory"
-      ],
-      "homepage": "https://www.sba.gov/federal-contracting/contracting-guide/prime-subcontracting/subcontracting-opportunities"
-    },
-    {
-      "id": "acquisition_gov_forecasts",
-      "name": "Acquisition.gov Procurement Forecasts",
-      "enabled": true,
-      "default_enabled": true,
-      "opportunity_class": "forecasts",
-      "trust_tier": 2,
-      "access_mode": "official_public_page",
-      "auth": {
-        "type": "none",
-        "required": false
-      },
-      "taxonomy": [
-        "agency",
-        "naics",
-        "set_aside",
-        "forecast_status"
-      ],
-      "homepage": "https://www.acquisition.gov/procurement-forecasts"
-    },
-    {
-      "id": "gsa_ebuy_open",
-      "name": "GSA eBuy Open",
-      "enabled": false,
-      "default_enabled": false,
-      "opportunity_class": "contracts",
-      "trust_tier": 2,
-      "access_mode": "official_auth_portal",
-      "auth": {
-        "type": "user_enabled",
-        "required": true
-      },
-      "taxonomy": [
-        "sin",
-        "buyer",
-        "set_aside"
-      ],
-      "homepage": "https://www.ebuy.gsa.gov"
-    },
-    {
-      "id": "govtribe_commercial_intel",
-      "name": "GovTribe",
-      "enabled": false,
-      "default_enabled": false,
-      "opportunity_class": "commercial_enrichment",
-      "trust_tier": 4,
-      "access_mode": "commercial_api_or_portal",
-      "auth": {
-        "type": "api_key",
-        "env_var": "GOVTRIBE_API_KEY",
-        "required": true
-      },
-      "taxonomy": [
-        "buyer",
-        "naics",
-        "vehicle",
-        "incumbent"
-      ],
-      "homepage": "https://govtribe.com"
-    },
-    {
-      "id": "govwin_commercial_intel",
-      "name": "GovWin",
-      "enabled": false,
-      "default_enabled": false,
-      "opportunity_class": "commercial_enrichment",
-      "trust_tier": 4,
-      "access_mode": "commercial_api_or_portal",
-      "auth": {
-        "type": "api_key",
-        "env_var": "GOVWIN_API_KEY",
-        "required": true
-      },
-      "taxonomy": [
-        "buyer",
-        "naics",
-        "vehicle",
-        "incumbent"
-      ],
-      "homepage": "https://govwin.com"
     }
   ]
 }

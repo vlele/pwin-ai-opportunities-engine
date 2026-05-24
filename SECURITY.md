@@ -1,6 +1,6 @@
 # Security guidance
 
-This `v15` bundle includes small local Python scripts in addition to Markdown and JSON templates.
+This `v1.6.0` bundle includes small local Python scripts in addition to Markdown and JSON templates.
 
 ## What is in scope
 
@@ -17,7 +17,7 @@ This `v15` bundle includes small local Python scripts in addition to Markdown an
 - automatic email sending
 - automatic proposal submission
 
-## Security posture for `v15`
+## Security posture for `v1.6.0`
 
 ### 1. Keep the scripts deterministic
 
