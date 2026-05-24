@@ -2,48 +2,37 @@
   "schema": "pwin-ai-opportunities.manifest/v1",
   "name": "pwin-ai-opportunities",
   "version": "1.6.0",
-  "description": "pWin.ai Opportunities as a shared multi-runtime skill package for OpenClaw, Codex, and Claude-oriented adapters",
+  "description": "pWin.ai Opportunities as a shared multi-runtime bundle for federal scanning, digest lookup, feedback logging, and capture research",
   "requiredArtifacts": [
     {
       "name": "opportunities",
       "path": "procurement/opportunities/{date}.json",
       "required": true,
-      "description": "Normalized opportunity records with source metadata"
+      "description": "Normalized federal opportunity records with source metadata"
     },
     {
       "name": "explanations",
       "path": "procurement/explanations/{date}.json",
       "required": true,
-      "description": "AI-generated match explanations and scoring rationale"
+      "description": "Structured scoring output used to render the report and digest"
+    },
+    {
+      "name": "digestEntryMap",
+      "path": "procurement/digest-entry-map/{date}.json",
+      "required": true,
+      "description": "Stable human entry IDs for digest display, feedback, and capture research"
     },
     {
       "name": "report",
       "path": "procurement/reports/{date}.md",
       "required": true,
-      "description": "Full daily report with all opportunities and analysis",
-      "recoverable": true,
-      "recoverFrom": ["opportunities", "explanations"]
+      "description": "Full dated report rendered by the scan workflow"
     },
     {
       "name": "digest",
       "path": "procurement/digests/{date}.md",
       "required": true,
-      "description": "Concise announced digest for delivery",
-      "recoverable": true,
-      "recoverFrom": ["opportunities", "explanations", "report"]
-    },
-    {
-      "name": "nearMisses",
-      "path": "procurement/near-misses/{date}.md",
-      "required": true,
-      "description": "Near-miss analysis for learning",
-      "recoverable": true,
-      "recoverFrom": ["opportunities", "explanations"]
+      "description": "Concise dated digest rendered by the scan workflow"
     }
-  ],
-  "validation": {
-    "command": "validate-artifacts",
-    "autoRecover": true,
-    "maxRecoveryAttempts": 1
-  }
+  ]
 }

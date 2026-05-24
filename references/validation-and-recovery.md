@@ -1,113 +1,61 @@
 # Validation and Recovery
 
-This document describes the artifact validation and auto-recovery system for pWin.ai Opportunities.
+This bundle does not ship a standalone `validate-artifacts` command or a manifest-driven auto-recovery layer.
 
-## Overview
+## Current validation surface
 
-Daily runs produce five required artifacts. If any are missing, the run is incomplete. The skill can auto-recover certain missing artifacts if their source data exists.
+- `scripts/scan/run_scan.py`
+  Produces the dated scan artifacts and returns JSON with status, paths, source statuses, and stable-entry counts.
+- `scripts/show/show_digest.py`
+  Validates a rendered digest with `validate_digest_text` and returns the digest path plus any available digest-entry-map path.
+- `scripts/feedback/apply_feedback.py`
+  Resolves feedback against the latest digest-entry map, appends the feedback ledger, and recomputes learned preferences.
+- `scripts/capture/run_capture_research.py`
+  Validates the rendered capture brief with `validate_capture_brief_text` and returns request-scoped brief and evidence paths.
 
-## Required Artifacts
+## Scan artifacts the shipped workflow actually maintains
 
-| Artifact | Path | Recoverable | Source Data |
-|----------|------|-------------|-------------|
-| opportunities | `procurement/opportunities/YYYY-MM-DD.json` | No | Primary source |
-| explanations | `procurement/explanations/YYYY-MM-DD.json` | No | Primary source |
-| report | `procurement/reports/YYYY-MM-DD.md` | **Yes** | opportunities + explanations |
-| digest | `procurement/digests/YYYY-MM-DD.md` | **Yes** | opportunities + explanations + report |
-| near-misses | `procurement/near-misses/YYYY-MM-DD.md` | **Yes** | opportunities + explanations |
+For a successful dated scan run, the current code writes:
 
-## Validation Command
+- `procurement/opportunities/YYYY-MM-DD.json`
+- `procurement/explanations/YYYY-MM-DD.json`
+- `procurement/digest-entry-map/YYYY-MM-DD.json`
+- `procurement/reports/YYYY-MM-DD.md`
+- `procurement/digests/YYYY-MM-DD.md`
 
-After running the daily scan, validate completion:
+Not part of the shipped contract:
 
-```
-validate-artifacts {date}
-```
+- `procurement/near-misses/YYYY-MM-DD.md`
+- `validate-artifacts {date}`
+- manifest-level `autoRecover`
 
-### Returns
+## Recovery guidance
 
-- `complete` — all required artifacts present
-- `recovered` — artifacts were missing but successfully rebuilt
-- `incomplete: [list]` — artifacts still missing after recovery attempts
+Use reruns of the shipped scripts, not an external recovery command.
 
-## Auto-Recovery Logic
+### If scan outputs are missing or stale
 
-When `autoRecover: true` is set in `manifest.json`:
+- Missing `opportunities` or `explanations`: rerun `scripts/scan/run_scan.py`
+- Missing `digest-entry-map`, `report`, or `digest`: rerun `scripts/scan/run_scan.py`
+- Missing or empty digest validation from `show_digest.py`: rerun `scripts/scan/run_scan.py`
 
-1. Check for missing required artifacts
-2. For each missing recoverable artifact:
-   - Verify all `recoverFrom` source artifacts exist
-   - Rebuild the missing artifact using templates and source data
-   - Write to the expected path
-3. Re-validate after recovery
-4. Return `recovered` if all artifacts now present, `incomplete` if not
+### If feedback artifacts are missing
 
-## Recovery Scenarios
+- Missing `procurement/feedback-events.jsonl`: rerun `scripts/feedback/apply_feedback.py` with the original user utterance
+- Missing learned preference updates in `preferences.json`: rerun `scripts/feedback/apply_feedback.py`
 
-### Scenario 1: Report Missing, Sources Present
+### If capture artifacts are missing
 
-**Cause:** Agent stopped after writing digest but before report.
+- Missing `procurement/capture-requests.jsonl` entry: rerun `scripts/capture/run_capture_research.py`
+- Missing request-scoped brief or evidence file: rerun `scripts/capture/run_capture_research.py`
+- Capture brief still contains placeholders or missing required headings: treat the run as failed and rerun capture after fixing the upstream issue
 
-**Recovery:**
-- Read `opportunities/{date}.json`
-- Read `explanations/{date}.json`
-- Render `templates/daily-report.template.md`
-- Write `reports/{date}.md`
+## Manual inspection checklist
 
-### Scenario 2: Digest Missing, Sources Present
+When a run looks wrong, check:
 
-**Cause:** Agent stopped after scoring but before digest.
-
-**Recovery:**
-- Read `opportunities/{date}.json`
-- Read `explanations/{date}.json`
-- Render `templates/daily-digest.template.md`
-- Write `digests/{date}.md`
-
-### Scenario 3: Near-Misses Missing, Sources Present
-
-**Cause:** Agent excluded near-miss section or stopped early.
-
-**Recovery:**
-- Read `opportunities/{date}.json` (filter for near-miss tier)
-- Read `explanations/{date}.json`
-- Write `near-misses/{date}.md`
-
-## Non-Recoverable Failures
-
-These require a full re-run:
-
-- `opportunities` missing — source data lost
-- `explanations` missing — scoring rationale lost
-- Multiple artifacts missing with insufficient source data
-
-## Manual Recovery
-
-If auto-recovery fails, manually rebuild:
-
-1. Check which source files exist
-2. Use the appropriate template from `templates/`
-3. Render from structured data
-4. Write to the expected path
-5. Re-run `validate-artifacts {date}`
-
-## Cron Job Integration
-
-Recommended cron prompt pattern:
-
-```
-Run the pwin-ai-opportunities daily scan for {vendor}.
-After completion, run validate-artifacts {date} with auto-recovery enabled.
-If status is 'incomplete', fail the run and report missing artifacts.
-If status is 'complete' or 'recovered', proceed to WhatsApp delivery.
-```
-
-## Failure Behavior
-
-- **Validation fails, no recovery possible:** Run marked failed, no delivery
-- **Validation fails, recovery succeeds:** Run marked success with recovery note
-- **Validation passes:** Normal completion
-
-## Version History
-
-- v1.1.0 — Added validation and auto-recovery system
+1. The JSON stdout returned by the script you ran
+2. The dated artifact paths returned in that JSON
+3. `procurement/source-registry.json` for the active source set
+4. `procurement/preferences.json` for current timing and learning settings
+5. `procurement/digest-entry-map/YYYY-MM-DD.json` before applying feedback or capture research
