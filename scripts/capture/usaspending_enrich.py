@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import json
 import re
-import urllib.error
-import urllib.request
 from typing import Any
 
-from common.runtime import USER_AGENT
-
-
-RECIPIENT_AUTOCOMPLETE_URL = "https://api.usaspending.gov/api/v2/autocomplete/recipient/"
-AWARD_SEARCH_URL = "https://api.usaspending.gov/api/v2/search/spending_by_award/"
+from common.usaspending import (
+    AWARD_SEARCH_URL,
+    RECIPIENT_AUTOCOMPLETE_URL,
+    build_spending_by_award_payload,
+    post_json,
+)
 GENERIC_TERMS = {
     "rfp",
     "rfq",
@@ -44,49 +42,6 @@ MAX_QUERY_LENGTH = 96
 
 def recipient_autocomplete_payload(search_text: str) -> dict[str, Any]:
     return {"search_text": search_text}
-
-
-def spending_by_award_payload(search_text: str, page: int = 1, limit: int = 5) -> dict[str, Any]:
-    return {
-        "filters": {
-            "keywords": [search_text],
-            "award_type_codes": ["A", "B", "C", "D"],
-        },
-        "fields": [
-            "Award ID",
-            "Recipient Name",
-            "Award Amount",
-            "Start Date",
-            "End Date",
-            "Awarding Agency",
-            "Awarding Sub Agency",
-            "Award Type",
-            "Description",
-        ],
-        "page": page,
-        "limit": limit,
-        "sort": "Award Amount",
-        "order": "desc",
-        "subawards": False,
-    }
-
-
-def _post_json(url: str, payload: dict[str, Any], timeout: int = 20) -> dict[str, Any]:
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = response.read().decode("utf-8")
-            return {"status": "ok", "payload": payload, "response": json.loads(body)}
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        return {"status": "http_error", "payload": payload, "code": exc.code, "detail": detail}
-    except Exception as exc:  # pragma: no cover - defensive fallback
-        return {"status": "error", "payload": payload, "detail": str(exc)}
 
 
 def _normalize_text(value: str) -> str:
@@ -201,10 +156,10 @@ def _merge_award_rows(searches: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def enrich_from_usaspending(search_text: str, title: str = "", summary: str = "", buyer: str = "") -> dict[str, Any]:
     search_terms = build_search_terms(search_text, title=title, summary=summary, buyer=buyer)
-    autocomplete = _post_json(RECIPIENT_AUTOCOMPLETE_URL, recipient_autocomplete_payload(search_text))
+    autocomplete = post_json(RECIPIENT_AUTOCOMPLETE_URL, recipient_autocomplete_payload(search_text))
     award_searches = []
     for query in search_terms:
-        result = _post_json(AWARD_SEARCH_URL, spending_by_award_payload(query))
+        result = post_json(AWARD_SEARCH_URL, build_spending_by_award_payload(query, limit=5))
         award_searches.append({"query": query, **result})
     merged_results = _merge_award_rows(award_searches)
     if any(item.get("status") == "ok" for item in award_searches):
