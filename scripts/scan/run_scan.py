@@ -13,7 +13,13 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from common.paths import load_json, today_local_str, utc_now_iso, write_json
-from common.source_registry import enabled_sources_summary, refresh_runtime_registry
+from common.source_registry import (
+    enabled_sources_summary,
+    filter_sources_for_policy,
+    get_enabled_sources,
+    refresh_runtime_registry,
+    sources_summary,
+)
 from scan.build_digest_entry_map import build_digest_entry_map
 from scan.render_digest import render_digest_and_report
 from scan.sam_hydrate import hydrate_sam_notice
@@ -1127,8 +1133,23 @@ def main() -> int:
     source_statuses: list[dict[str, Any]] = []
     records: list[dict[str, Any]] = []
 
-    enabled_sources = [source for source in registry.get("sources", []) if source.get("enabled", source.get("default_enabled", False))]
+    configured_enabled_sources = get_enabled_sources(registry)
+    enabled_sources = filter_sources_for_policy(configured_enabled_sources, federal_only=args.federal_only)
     enabled_ids = {source.get("id") for source in enabled_sources}
+    excluded_sources = [
+        source for source in configured_enabled_sources if source.get("id") not in enabled_ids
+    ]
+
+    if excluded_sources:
+        for source in excluded_sources:
+            source_statuses.append(
+                {
+                    "source_id": source.get("id"),
+                    "status": "excluded_by_federal_only_policy",
+                    "record_count": 0,
+                    "notes": ["Source is outside the federal-only v1 release scope."],
+                }
+            )
 
     if "sam_contract_opportunities" in enabled_ids:
         sam_result = search_sam_opportunities(naics_codes=naics_codes, today=today)
@@ -1252,7 +1273,8 @@ def main() -> int:
 
     _write_scan_outputs(opportunities_path, explanations_path, records, source_statuses)
     digest_entry_map = build_digest_entry_map(workspace, date_str)
-    enabled_summary = enabled_sources_summary(registry)
+    configured_enabled_summary = enabled_sources_summary(registry)
+    enabled_summary = sources_summary(enabled_sources)
     scan_period_label = (
         f"0-{timing['retrieval_max']} days retrieved | "
         f"0-14 action now | 15-45 worth a look | 46-{timing['watchlist_max']} watchlist / early shaping"
@@ -1265,7 +1287,8 @@ def main() -> int:
         run_notes=[
             f"Runtime source registry path: {registry_path.as_posix()}",
             f"Runtime source registry refreshed: {'yes' if refreshed else 'no'}",
-            f"Enabled sources: {enabled_summary}",
+            f"Configured enabled sources: {configured_enabled_summary}",
+            f"Active sources used this run: {enabled_summary}",
             f"Federal-only mode: {'yes' if args.federal_only else 'no'}",
             f"Vendor name: {vendor_name}",
             f"Vendor NAICS used for SAM search: {', '.join(naics_codes) if naics_codes else 'none'}",

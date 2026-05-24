@@ -6,6 +6,17 @@ from typing import Any
 from common.paths import load_json, procurement_dir, write_json
 
 
+FEDERAL_SOURCE_IDS = frozenset(
+    {
+        "sam_contract_opportunities",
+        "usaspending_award_history",
+        "sba_subnet_subcontracting",
+        "acquisition_gov_forecasts",
+        "gsa_ebuy_open",
+    }
+)
+
+
 def _source_map(sources: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {source["id"]: source for source in sources}
 
@@ -63,10 +74,26 @@ def refresh_runtime_registry(bundle_root: Path, workspace: Path) -> tuple[Path, 
     return runtime_path, merged, True, reasons
 
 
-def enabled_sources_summary(registry: dict[str, Any]) -> str:
+def get_enabled_sources(registry: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        source
+        for source in registry.get("sources", [])
+        if source.get("enabled", source.get("default_enabled", False))
+    ]
+
+
+def filter_sources_for_policy(sources: list[dict[str, Any]], federal_only: bool = False) -> list[dict[str, Any]]:
+    if not federal_only:
+        return list(sources)
+    return [source for source in sources if source.get("id") in FEDERAL_SOURCE_IDS]
+
+
+def sources_summary(sources: list[dict[str, Any]]) -> str:
     parts: list[str] = []
-    for source in registry.get("sources", []):
-        if source.get("enabled", source.get("default_enabled", False)):
-            parts.append(f'{source.get("name", source.get("id", "Unknown"))} (Tier {source.get("trust_tier", "N/A")})')
+    for source in sources:
+        parts.append(f'{source.get("name", source.get("id", "Unknown"))} (Tier {source.get("trust_tier", "N/A")})')
     return ", ".join(parts) if parts else "none enabled"
 
+
+def enabled_sources_summary(registry: dict[str, Any]) -> str:
+    return sources_summary(get_enabled_sources(registry))
