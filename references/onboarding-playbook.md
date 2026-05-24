@@ -2,6 +2,8 @@
 
 The goal is to let the user start in plain language and only introduce codes after the skill has already done most of the interpretation work.
 
+For this release, onboarding should prepare the workspace for federal opportunity scanning only. Do not steer the user toward state or local procurement portals.
+
 ## Stage 0: website or domain bootstrap
 
 If the user gives a company website or domain, start there.
@@ -43,7 +45,7 @@ Ask the user for:
 3. **What should never show up?**
    - bad-fit work
    - unwanted agencies
-   - unwanted states
+   - unwanted places of performance
    - bad contract sizes
    - bad opportunity classes
 
@@ -77,7 +79,7 @@ From the business description, infer:
 - keyword exclude list
 - candidate buyer list
 - candidate NAICS
-- candidate state commodity tags where relevant
+- candidate federal taxonomy tags where relevant
 - likely set-aside / certification relevance
 - opportunity classes to include by default
 

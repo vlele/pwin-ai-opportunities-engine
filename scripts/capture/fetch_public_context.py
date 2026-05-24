@@ -179,7 +179,19 @@ GENERIC_LABEL_TOKENS = {
     "us",
 }
 CATEGORY_URL_HINTS = {
-    "mission_context": ("strategic", "operating-plan", "modernization", "roadmap", "digital", "data", "about-irs", "mission", "about"),
+    "mission_context": (
+        "strategic-plan",
+        "it-modernization",
+        "digital-strategy",
+        "data-strategy",
+        "technology-roadmap",
+        "zero-trust",
+        "operating-plan",
+        "modernization",
+        "roadmap",
+        "digital",
+        "data",
+    ),
     "budget_funding": ("budget", "justification", "appropriation", "performance", "capital-investments", "operating-plan"),
     "acquisition_forecast": ("acquisition", "procurement", "forecast", "industry-day", "procurement-forecast", "forecasted-business-opportunities"),
     "oversight": ("oversight", "audit", "report", "management", "inspection", "watchdog", "tax-administration"),
@@ -188,7 +200,16 @@ CATEGORY_URL_HINTS = {
     "public_discourse": ("news", "newsroom", "press", "remarks", "testimony", "speech", "featured-stories"),
 }
 CATEGORY_TEXT_HINTS = {
-    "mission_context": ("strategic", "modernization", "mission", "taxpayer", "service", "volunteer", "research", "technology"),
+    "mission_context": (
+        "strategic plan",
+        "it modernization",
+        "digital strategy",
+        "data strategy",
+        "technology roadmap",
+        "zero trust",
+        "modernization",
+        "technology",
+    ),
     "budget_funding": ("budget", "appropriation", "performance", "funding", "investment", "justification"),
     "acquisition_forecast": ("forecast", "forecasted business opportunities", "industry day", "procurement", "acquisition"),
     "oversight": ("audit", "recommendation", "finding", "oversight", "inspector general", "watchdog"),
@@ -197,17 +218,16 @@ CATEGORY_TEXT_HINTS = {
     "public_discourse": ("news", "announcement", "remarks", "testimony", "press release", "speech"),
 }
 MISSION_CONTEXT_MARKERS = (
-    "strategic",
-    "mission",
+    "strategic plan",
+    "it modernization",
+    "digital strategy",
+    "data strategy",
+    "technology roadmap",
+    "zero trust",
     "modernization",
     "roadmap",
     "operating plan",
-    "about",
-    "bureau",
-    "office",
     "research and development",
-    "works to",
-    "reduces the impact",
 )
 BUDGET_FUNDING_MARKERS = (
     "budget",
@@ -268,6 +288,30 @@ AGENCY_DIRECT_URLS = {
             "https://www.erdc.usace.army.mil/Media/Images/igphoto/2003821542/",
         ],
     },
+}
+NON_REQUIREMENT_KEYWORDS = {
+    "support",
+    "service",
+    "services",
+    "program",
+    "system",
+    "task",
+    "order",
+    "contract",
+    "contracting",
+    "solicitation",
+    "proposal",
+    "offeror",
+    "notice",
+    "amendment",
+    "questions",
+    "response",
+    "responses",
+    "vendor",
+    "federal",
+    "agency",
+    "office",
+    "department",
 }
 POLICY_FALLBACK_DOMAINS = [
     "nist.gov",
@@ -390,8 +434,33 @@ def _signal_tokens(*values: object) -> list[str]:
     return [token for token, _ in sorted(counts.items(), key=lambda item: (-item[1], item[0]))]
 
 
-def _top_keywords(title: str, notice_text: str, limit: int = 5) -> list[str]:
-    return _signal_tokens(title, notice_text)[:limit]
+def _top_keywords(title: str, notice_text: str, limit: int = 8) -> list[str]:
+    title_tokens = [token for token in _signal_tokens(title) if token not in NON_REQUIREMENT_KEYWORDS]
+    notice_tokens = [token for token in _signal_tokens(notice_text) if token not in NON_REQUIREMENT_KEYWORDS]
+    combined: list[str] = []
+    seen: set[str] = set()
+    for token in title_tokens + notice_tokens:
+        if token in seen:
+            continue
+        seen.add(token)
+        combined.append(token)
+        if len(combined) >= limit:
+            break
+    return combined
+
+
+def _keyword_query_clause(keywords: list[str], limit: int = 3) -> str:
+    selected: list[str] = []
+    for keyword in keywords:
+        cleaned = _normalize_text(keyword).lower()
+        if not cleaned or cleaned in NON_REQUIREMENT_KEYWORDS:
+            continue
+        selected.append(cleaned)
+        if len(selected) >= limit:
+            break
+    if not selected:
+        return ""
+    return "(" + " OR ".join(f'"{keyword}"' for keyword in selected) + ")"
 
 
 def _clean_notice_seed(notice_text: str, max_chars: int = 2400) -> str:
@@ -709,6 +778,31 @@ def _candidate_url_rank(url: str, allowed_domains: list[str], url_hints: list[st
     return score
 
 
+def _category_marker_hit(category: str, combined: str, url: str, text_hints: list[str]) -> bool:
+    marker_groups = {
+        "mission_context": MISSION_CONTEXT_MARKERS,
+        "budget_funding": BUDGET_FUNDING_MARKERS,
+        "acquisition_forecast": FORECAST_MARKERS,
+        "oversight": ("audit", "recommendation", "finding", "inspector general", "watchdog", "oversight"),
+        "leadership": ("commissioner", "chief", "leadership", "officials", "organization", "biography", "remarks", "testimony"),
+        "public_discourse": ("news", "press release", "remarks", "testimony", "speech", "announcement"),
+    }
+    marker_values = marker_groups.get(category, tuple(text_hints))
+    compact_combined = combined.replace(" ", "")
+    compact_url = url.lower().replace("-", "").replace("_", "")
+    for marker in marker_values:
+        normalized = _normalize_text(marker).lower()
+        compact_marker = normalized.replace(" ", "")
+        if normalized and (
+            normalized in combined
+            or compact_marker in compact_combined
+            or normalized in url.lower()
+            or compact_marker in compact_url
+        ):
+            return True
+    return False
+
+
 def _source_quality_score(
     category: str,
     url: str,
@@ -720,7 +814,7 @@ def _source_quality_score(
     label_tokens: list[str],
     keyword_tokens: list[str],
     policy_refs: list[dict[str, Any]],
-) -> int:
+) -> dict[str, Any]:
     score = _candidate_url_rank(url, allowed_domains, url_hints, keyword_tokens)
     combined = _normalize_text(f"{title} {excerpt}").lower()
     if _looks_like_boilerplate(combined):
@@ -731,11 +825,24 @@ def _source_quality_score(
     score += min(4, entity_overlap)
     score += min(5, objective_overlap)
     compact_combined = combined.replace(" ", "")
+    marker_hit = _category_marker_hit(category, combined, url, text_hints)
     for hint in text_hints:
         normalized = _normalize_text(hint).lower()
         compact_hint = normalized.replace(" ", "")
         if normalized and (normalized in combined or compact_hint in compact_combined):
             score += 2
+    requirement_sensitive_categories = {
+        "mission_context",
+        "budget_funding",
+        "acquisition_forecast",
+        "oversight",
+        "leadership",
+        "public_discourse",
+    }
+    requirement_keywords_present = bool(keyword_tokens)
+    requirement_relevant = entity_overlap > 0 and (
+        objective_overlap > 0 or (category == "leadership" and not requirement_keywords_present)
+    )
     if category == "policy_compliance":
         policy_ref_hits = 0
         url_text = url.lower()
@@ -752,45 +859,103 @@ def _source_quality_score(
                     policy_ref_hits += 1
                     break
         if policy_refs and policy_ref_hits == 0:
-            return -10
+            return {
+                "quality_score": -10,
+                "entity_overlap": entity_overlap,
+                "objective_overlap": objective_overlap,
+                "marker_hit": marker_hit,
+                "requirement_relevant": False,
+            }
         else:
             score += min(6, policy_ref_hits * 3)
     if category == "acquisition_forecast":
-        forecast_markers = ("forecast", "procurement", "industry day", "industry-day")
-        if not any(marker in combined or marker in url.lower() for marker in forecast_markers):
-            return -10
+        if not marker_hit:
+            return {
+                "quality_score": -10,
+                "entity_overlap": entity_overlap,
+                "objective_overlap": objective_overlap,
+                "marker_hit": marker_hit,
+                "requirement_relevant": False,
+            }
     if category == "budget_funding":
-        if not any(marker in combined or marker in url.lower() for marker in BUDGET_FUNDING_MARKERS):
-            return -10
+        if not marker_hit:
+            return {
+                "quality_score": -10,
+                "entity_overlap": entity_overlap,
+                "objective_overlap": objective_overlap,
+                "marker_hit": marker_hit,
+                "requirement_relevant": False,
+            }
     if category == "mission_context":
-        if not any(marker in combined or marker in url.lower() for marker in MISSION_CONTEXT_MARKERS):
+        if not marker_hit:
             score -= 8
     if category == "leadership":
-        leadership_markers = ("commissioner", "chief", "leadership", "officials", "organization", "biography")
-        if not any(marker in combined or marker in url.lower() for marker in leadership_markers):
+        if not marker_hit:
             score -= 8
     if category != "policy_compliance" and entity_overlap == 0 and objective_overlap == 0:
         score -= 8
+    if category in {"mission_context", "oversight", "public_discourse"} and (entity_overlap == 0 or objective_overlap == 0):
+        return {
+            "quality_score": -10,
+            "entity_overlap": entity_overlap,
+            "objective_overlap": objective_overlap,
+            "marker_hit": marker_hit,
+            "requirement_relevant": False,
+        }
+    if category in {"budget_funding", "acquisition_forecast"} and objective_overlap == 0:
+        return {
+            "quality_score": -10,
+            "entity_overlap": entity_overlap,
+            "objective_overlap": objective_overlap,
+            "marker_hit": marker_hit,
+            "requirement_relevant": False,
+        }
+    if category == "leadership" and entity_overlap == 0:
+        return {
+            "quality_score": -10,
+            "entity_overlap": entity_overlap,
+            "objective_overlap": objective_overlap,
+            "marker_hit": marker_hit,
+            "requirement_relevant": False,
+        }
+    if category == "leadership" and requirement_keywords_present and objective_overlap == 0:
+        return {
+            "quality_score": -10,
+            "entity_overlap": entity_overlap,
+            "objective_overlap": objective_overlap,
+            "marker_hit": marker_hit,
+            "requirement_relevant": False,
+        }
     if category == "oversight" and entity_overlap == 0:
-        return -10
+        return {
+            "quality_score": -10,
+            "entity_overlap": entity_overlap,
+            "objective_overlap": objective_overlap,
+            "marker_hit": marker_hit,
+            "requirement_relevant": False,
+        }
     if category in {"mission_context", "budget_funding", "acquisition_forecast", "leadership", "public_discourse"} and entity_overlap == 0:
         score -= 5
-    return score
+    if category not in requirement_sensitive_categories:
+        requirement_relevant = requirement_relevant or (marker_hit and (entity_overlap > 0 or objective_overlap > 0))
+    return {
+        "quality_score": score,
+        "entity_overlap": entity_overlap,
+        "objective_overlap": objective_overlap,
+        "marker_hit": marker_hit,
+        "requirement_relevant": requirement_relevant,
+    }
 
 
 def _is_anchor_source(category: str, source: dict[str, Any]) -> bool:
     quality = int(source.get("quality_score", 0) or 0)
-    if quality < 8:
+    if quality < 10:
         return False
-    combined = _normalize_text(f"{source.get('title', '')} {source.get('excerpt', '')} {source.get('url', '')}").lower()
-    query = str(source.get("query", "") or "")
-    if category == "mission_context":
-        return query == "direct source seed" or any(marker in combined for marker in MISSION_CONTEXT_MARKERS)
-    if category == "budget_funding":
-        return any(marker in combined for marker in BUDGET_FUNDING_MARKERS)
-    if category == "acquisition_forecast":
-        return any(marker in combined for marker in FORECAST_MARKERS)
-    return quality >= 12
+    if not bool(source.get("requirement_relevant")):
+        return False
+    if not bool(source.get("marker_hit")):
+        return False
+    return True
 
 
 def _sitemap_candidates_for_policy_refs(policy_refs: list[dict[str, Any]], agency_domains: list[str]) -> list[str]:
@@ -1021,6 +1186,10 @@ def _build_source_record(
     published_date: str,
     confidence: int,
     quality_score: int,
+    entity_overlap: int,
+    objective_overlap: int,
+    marker_hit: bool,
+    requirement_relevant: bool,
 ) -> dict[str, Any]:
     host = _host(url)
     return {
@@ -1035,6 +1204,10 @@ def _build_source_record(
         "relevance": f"{category.replace('_', ' ')} source discovered for current capture research.",
         "confidence": confidence,
         "quality_score": quality_score,
+        "entity_overlap": entity_overlap,
+        "objective_overlap": objective_overlap,
+        "marker_hit": marker_hit,
+        "requirement_relevant": requirement_relevant,
         "snippet": _normalize_text(snippet),
         "excerpt": _normalize_text(excerpt),
     }
@@ -1068,7 +1241,7 @@ def _source_from_result(
             published_date = result.get("published_date", "N/A")
         title = fetched.get("title", "") or result.get("title", url) or url
         confidence = 3
-    quality_score = _source_quality_score(
+    quality_metrics = _source_quality_score(
         category,
         url,
         title,
@@ -1080,7 +1253,7 @@ def _source_from_result(
         keyword_tokens,
         policy_refs,
     )
-    if quality_score < 6:
+    if int(quality_metrics.get("quality_score", 0) or 0) < 8:
         return None
     return _build_source_record(
         category,
@@ -1091,7 +1264,11 @@ def _source_from_result(
         result.get("snippet", ""),
         published_date,
         confidence,
-        quality_score,
+        int(quality_metrics.get("quality_score", 0) or 0),
+        int(quality_metrics.get("entity_overlap", 0) or 0),
+        int(quality_metrics.get("objective_overlap", 0) or 0),
+        bool(quality_metrics.get("marker_hit")),
+        bool(quality_metrics.get("requirement_relevant")),
     )
 
 
@@ -1113,7 +1290,7 @@ def _source_from_candidate_url(
         return None
     title = fetched.get("title", "") or url
     excerpt = fetched.get("text_excerpt", "")
-    quality_score = _source_quality_score(
+    quality_metrics = _source_quality_score(
         category,
         url,
         title,
@@ -1125,8 +1302,8 @@ def _source_from_candidate_url(
         keyword_tokens,
         policy_refs,
     )
-    threshold = 3 if query == "direct source seed" else 8
-    if quality_score < threshold:
+    threshold = 6 if query == "direct source seed" else 10
+    if int(quality_metrics.get("quality_score", 0) or 0) < threshold:
         return None
     return _build_source_record(
         category,
@@ -1137,7 +1314,11 @@ def _source_from_candidate_url(
         excerpt[:240],
         fetched.get("published_date", "N/A"),
         3,
-        quality_score,
+        int(quality_metrics.get("quality_score", 0) or 0),
+        int(quality_metrics.get("entity_overlap", 0) or 0),
+        int(quality_metrics.get("objective_overlap", 0) or 0),
+        bool(quality_metrics.get("marker_hit")),
+        bool(quality_metrics.get("requirement_relevant")),
     )
 
 
@@ -1276,17 +1457,23 @@ def _discover_sources(
     return sources, gaps
 
 
-def _role_queries(labels: list[str], domains: list[str], contacts: list[dict[str, str]]) -> list[str]:
+def _role_queries(
+    labels: list[str],
+    domains: list[str],
+    contacts: list[dict[str, str]],
+    requirement_clause: str = "",
+) -> list[str]:
     queries: list[str] = []
     primary_label = labels[0] if labels else ""
     search_domain = domains[0] if domains else ""
+    requirement_suffix = f" {requirement_clause}" if requirement_clause else ""
     for contact in contacts[:2]:
         name = contact.get("name", "").strip()
         if name and search_domain:
-            queries.append(f'site:{search_domain} "{name}"')
+            queries.append(f'site:{search_domain} "{name}"{requirement_suffix}')
     for role in LEADERSHIP_ROLE_QUERIES:
         if search_domain and primary_label:
-            queries.append(f'site:{search_domain} "{role}" "{primary_label}"')
+            queries.append(f'site:{search_domain} "{role}" "{primary_label}"{requirement_suffix}')
     return _dedupe_strings(queries)
 
 
@@ -1300,7 +1487,7 @@ def fetch_public_research(
     labels = _agency_labels(buyer)
     domains = infer_official_domains(buyer, str(entry.get("url", "") or ""))
     keywords = _top_keywords(title, _clean_notice_seed(notice_text))
-    keyword_phrase = " ".join(keywords[:4]) or title
+    requirement_clause = _keyword_query_clause(keywords)
     contacts = stakeholder_contacts or []
     query_labels = _dedupe_strings(_label_acronyms(labels, domains) + labels)
     primary_label = query_labels[0] if query_labels else buyer or title
@@ -1310,51 +1497,50 @@ def fetch_public_research(
     policy_refs = extract_policy_references(title, notice_text)
 
     mission_queries = _query_list(
-        f'site:{search_domain} "{primary_label}" ("strategic plan" OR "digital strategy" OR "IT strategic plan" OR "IT modernization" OR "AI strategy" OR "data strategy" OR "zero trust") filetype:pdf'
+        f'site:{search_domain} "{primary_label}" {requirement_clause} ("strategic plan" OR "digital strategy" OR "IT strategic plan" OR "IT modernization" OR "AI strategy" OR "data strategy" OR "zero trust") filetype:pdf'
         if search_domain
         else "",
-        f'site:{search_domain} "{primary_label}" (mission OR "about" OR modernization OR technology)'
+        f'site:{search_domain} "{primary_label}" {requirement_clause} ("strategic plan" OR modernization OR "digital strategy" OR "technology roadmap")'
         if search_domain
         else "",
-        f'site:{secondary_domain} "{secondary_label}" ("strategic plan" OR roadmap OR "IT modernization") filetype:pdf'
+        f'site:{secondary_domain} "{secondary_label}" {requirement_clause} ("strategic plan" OR roadmap OR "IT modernization" OR "digital strategy") filetype:pdf'
         if secondary_domain and secondary_domain != search_domain
         else "",
-        f'site:.gov "{primary_label}" ("strategic plan" OR "IT modernization" OR "digital strategy") filetype:pdf',
+        f'site:.gov "{primary_label}" {requirement_clause} ("strategic plan" OR "IT modernization" OR "digital strategy") filetype:pdf',
     )
     budget_queries = _query_list(
-        f'site:{search_domain} "{primary_label}" ("budget in brief" OR "congressional budget justification" OR "budget justification") filetype:pdf'
+        f'site:{search_domain} "{primary_label}" {requirement_clause} ("budget in brief" OR "congressional budget justification" OR "budget justification") filetype:pdf'
         if search_domain
         else "",
-        f'site:{secondary_domain} "{secondary_label}" ("budget in brief" OR "congressional budget justification") filetype:pdf'
+        f'site:{secondary_domain} "{secondary_label}" {requirement_clause} ("budget in brief" OR "congressional budget justification") filetype:pdf'
         if secondary_domain and secondary_domain != search_domain
         else "",
-        f'site:{search_domain} "{primary_label}" ("performance budget" OR "budget request" OR "plans performance budget")'
+        f'site:{search_domain} "{primary_label}" {requirement_clause} ("performance budget" OR "budget request" OR "plans performance budget")'
         if search_domain
         else "",
-        f'site:.gov "{primary_label}" ("budget in brief" OR "congressional budget justification") filetype:pdf',
+        f'site:.gov "{primary_label}" {requirement_clause} ("budget in brief" OR "congressional budget justification") filetype:pdf',
     )
     forecast_queries = _query_list(
-        f'site:{search_domain} "{primary_label}" ("acquisition forecast" OR "procurement forecast" OR "forecasted business opportunities" OR "industry day")'
+        f'site:{search_domain} "{primary_label}" {requirement_clause} ("acquisition forecast" OR "procurement forecast" OR "forecasted business opportunities" OR "industry day")'
         if search_domain
         else "",
-        f'site:{secondary_domain} "{secondary_label}" ("acquisition forecast" OR "procurement forecast" OR "forecasted business opportunities" OR "industry day")'
+        f'site:{secondary_domain} "{secondary_label}" {requirement_clause} ("acquisition forecast" OR "procurement forecast" OR "forecasted business opportunities" OR "industry day")'
         if secondary_domain and secondary_domain != search_domain
         else "",
-        f'site:.gov "{primary_label}" ("acquisition forecast" OR "procurement forecast" OR "forecasted business opportunities" OR "industry day")',
+        f'site:.gov "{primary_label}" {requirement_clause} ("acquisition forecast" OR "procurement forecast" OR "forecasted business opportunities" OR "industry day")',
     )
+    oversight_requirement_clause = requirement_clause or '"information technology"'
     oversight_queries = _query_list(
-        f'site:gao.gov "{primary_label}" "{keyword_phrase}"',
-        f'site:oversight.gov "{primary_label}" "{keyword_phrase}"',
-        f'site:gao.gov "{primary_label}" information technology',
+        f'site:gao.gov "{primary_label}" {requirement_clause}',
+        f'site:oversight.gov "{primary_label}" {requirement_clause}',
+        f'site:gao.gov "{primary_label}" {oversight_requirement_clause}',
     )
-    leadership_queries = _role_queries(labels, domains, contacts)
+    leadership_queries = _role_queries(labels, domains, contacts, requirement_clause=requirement_clause)
     public_discourse_queries = _query_list(
-        f'site:{search_domain} "{primary_label}" ("press release" OR news OR blog OR testimony) "{keywords[0]}"'
-        if search_domain and keywords
+        f'site:{search_domain} "{primary_label}" {requirement_clause} ("press release" OR news OR blog OR testimony)'
+        if search_domain
         else "",
-        f'site:.gov "{primary_label}" ("press release" OR testimony OR hearing) "{keywords[0]}"'
-        if keywords
-        else "",
+        f'site:.gov "{primary_label}" {requirement_clause} ("press release" OR testimony OR hearing)',
     )
 
     policy_queries: list[str] = []

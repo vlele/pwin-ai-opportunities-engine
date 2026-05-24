@@ -26,6 +26,13 @@ GENERIC_TERMS = {
     "synopsis",
     "amendment",
     "notice",
+    "request",
+    "information",
+    "response",
+    "responses",
+    "available",
+    "please",
+    "row",
     "next",
     "generation",
     "acquisition",
@@ -169,7 +176,7 @@ def build_search_terms(search_text: str, title: str = "", summary: str = "", buy
         terms.append("ProTech")
 
     compact_search_text = _compact_query(search_text)
-    if compact_search_text:
+    if compact_search_text and not TITLE_PREFIX_RE.match(search_text) and not _all_generic_tokens(compact_search_text):
         terms.append(compact_search_text)
     return _dedupe_terms(terms)[:6]
 

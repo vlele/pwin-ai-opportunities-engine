@@ -86,6 +86,42 @@ OBJECTIVE_KEYWORDS = (
     "availability",
     "quality",
 )
+OBJECTIVE_BOILERPLATE_MARKERS = (
+    "request for information",
+    "responses are due",
+    "questions are due",
+    "proposal due",
+    "offeror",
+    "offerors",
+    "amendment",
+    "sam.gov",
+    "point of contact",
+    "contract specialist",
+    "standard form 30",
+    "questions and answers",
+    "vendor question",
+)
+OBJECTIVE_MIN_REQUIREMENT_OVERLAP = 2
+OBJECTIVE_ADMIN_TOKENS = {
+    "offeror",
+    "offerors",
+    "proposal",
+    "questions",
+    "question",
+    "amendment",
+    "contracting",
+    "notice",
+}
+OBJECTIVE_DECOMPOSITION_FALLBACK = "Objective decomposition incomplete from current artifacts; validate SOW/PWS task structure manually."
+NO_MISSION_DRIVER = "No corroborated mission driver found for this objective in current public research."
+NO_BUDGET_SIGNAL = "No objective-specific budget signal found in current evidence."
+NO_EVIDENCE_SNIPPET = "No corroborated evidence snippet found for this objective in this run."
+NO_WIN_THEMES = "Insufficient corroborated evidence to recommend win themes yet."
+NO_PROOF_POINTS = "Insufficient corroborated evidence to recommend proof points yet."
+NO_FUNDING_CORROBORATION = "No funding corroboration found in current run; validate with award history, budget docs, or priced attachments."
+INCUMBENT_UNVERIFIED = "Incumbent unverified in current evidence."
+NO_OBJECTIVE_KPIS = "No objective-specific KPI signal found in current evidence."
+NO_SOLUTION_IMPLICATIONS = "Do not infer solution implications until the SOW/PWS task structure is validated."
 
 
 def request_id_for(entry_value: str) -> str:
@@ -444,11 +480,65 @@ def _attachment_text_pool(attachment_bundle: dict[str, object], max_items: int =
     return _dedupe_strings(texts)
 
 
+def _objective_scope_texts(attachment_bundle: dict[str, object], max_items: int = 6) -> list[str]:
+    attachments = attachment_bundle.get("attachments", []) if isinstance(attachment_bundle, dict) else []
+    scope_categories = {"statement_of_work", "solicitation", "instructions_evaluation"}
+    priority = {
+        "statement_of_work": 0,
+        "solicitation": 1,
+        "instructions_evaluation": 2,
+    }
+    ordered = sorted(
+        [
+            item
+            for item in attachments
+            if isinstance(item, dict) and str(item.get("category", "other")) in scope_categories
+        ],
+        key=lambda item: priority.get(str(item.get("category", "other")), 9),
+    )
+    texts: list[str] = []
+    for item in ordered[:max_items]:
+        for snippet in item.get("snippets", []) or []:
+            cleaned = _clean_excerpt(snippet, max_chars=320)
+            if cleaned:
+                texts.append(cleaned)
+        text_excerpt = _clean_excerpt(item.get("text_excerpt", ""), max_chars=2200)
+        if text_excerpt:
+            texts.append(text_excerpt)
+    return _dedupe_strings(texts)
+
+
+def _objective_requirement_tokens(
+    title: str,
+    summary: str,
+    explanation_summary: str,
+    attachment_bundle: dict[str, object],
+) -> set[str]:
+    seed_values: list[str] = [*_objective_scope_texts(attachment_bundle, max_items=6), title, summary, explanation_summary]
+    tokens = _signal_tokens(*seed_values)
+    return {token for token in tokens if token not in OBJECTIVE_ADMIN_TOKENS}
+
+
+def _is_boilerplate_objective_sentence(sentence: str) -> bool:
+    lower = sentence.lower().strip()
+    if any(marker in lower for marker in OBJECTIVE_BOILERPLATE_MARKERS):
+        return True
+    if re.match(r"^\d{1,2}/\d{1,2}/\d{2,4}\b", lower):
+        return True
+    if re.match(r"^(submit|questions|responses|offers|proposal|amendment|contact)\b", lower):
+        return True
+    if lower.startswith(("response:", "would you ", "if any, please", "please describe", "please provide")):
+        return True
+    if "row #" in lower:
+        return True
+    return False
+
+
 def _signal_overlap_score(reference_tokens: set[str], text: str) -> int:
     return len(reference_tokens & _signal_tokens(text))
 
 
-def _matching_lines(reference_text: str, lines: list[str], max_items: int = 3) -> list[str]:
+def _matching_lines(reference_text: str, lines: list[str], max_items: int = 3, min_score: int = 1) -> list[str]:
     reference_tokens = _signal_tokens(reference_text)
     ranked = sorted(
         (
@@ -458,8 +548,8 @@ def _matching_lines(reference_text: str, lines: list[str], max_items: int = 3) -
         ),
         key=lambda item: (-item[0], item[1]),
     )
-    selected = [line for score, line in ranked if score > 0][:max_items]
-    return selected or _dedupe_strings(lines)[:max_items]
+    selected = [line for score, line in ranked if score >= min_score][:max_items]
+    return selected[:max_items]
 
 
 def _decompose_objectives(
@@ -469,33 +559,31 @@ def _decompose_objectives(
     attachment_bundle: dict[str, object],
 ) -> list[str]:
     candidates: list[str] = []
-    seed_values = [title, summary, explanation_summary, *_attachment_text_pool(attachment_bundle)]
+    attachment_texts = _objective_scope_texts(attachment_bundle, max_items=6)
+    requirement_tokens = _objective_requirement_tokens(title, summary, explanation_summary, attachment_bundle)
+    attachment_seed_text = " ".join(attachment_texts)
+    attachments_thin = len(attachment_texts) < 2 or len(attachment_seed_text) < 900
+    seed_values = [*attachment_texts]
+    if attachments_thin:
+        seed_values.extend([summary, explanation_summary, title])
+    elif title:
+        seed_values.append(title)
     for value in seed_values:
         for part in OBJECTIVE_SENTENCE_RE.split(_clean_excerpt(value, max_chars=8000)):
             sentence = SPACE_RE.sub(" ", part).strip(" -")
             lower = sentence.lower()
-            if len(sentence) < 60 or len(sentence) > 320:
+            if len(sentence) < 70 or len(sentence) > 260:
                 continue
             if sentence.endswith("?"):
                 continue
-            if re.match(r"^\d{1,2}/\d{1,2}/\d{4}", sentence):
-                continue
-            if any(
-                marker in lower
-                for marker in (
-                    "vendor question",
-                    "question answer",
-                    "questions and answers",
-                    "offers must acknowledge receipt of this amendment",
-                    "standard form 30",
-                )
-            ):
+            if _is_boilerplate_objective_sentence(sentence):
                 continue
             if not any(keyword in lower for keyword in OBJECTIVE_KEYWORDS):
                 continue
+            overlap_count = len(_signal_tokens(sentence) & requirement_tokens)
+            if overlap_count < OBJECTIVE_MIN_REQUIREMENT_OVERLAP:
+                continue
             candidates.append(sentence)
-    if title:
-        candidates.insert(0, _clean_excerpt(title, max_chars=240))
     deduped = _dedupe_strings(candidates)
     filtered: list[str] = []
     normalized_filtered: list[str] = []
@@ -515,10 +603,12 @@ def _decompose_objectives(
         if not replaced:
             filtered.append(sentence)
             normalized_filtered.append(normalized)
-    return filtered[:4] if filtered else [_clean_excerpt(title or summary or "Objective decomposition pending", max_chars=240)]
+    return filtered[:4] if len(filtered) >= 2 else [OBJECTIVE_DECOMPOSITION_FALLBACK]
 
 
 def _objective_kpis(objective_text: str) -> str:
+    if objective_text == OBJECTIVE_DECOMPOSITION_FALLBACK:
+        return NO_OBJECTIVE_KPIS
     lower = objective_text.lower()
     kpis: list[str] = []
     if any(term in lower for term in ("security", "privacy", "fisma", "nist", "compliance")):
@@ -533,6 +623,8 @@ def _objective_kpis(objective_text: str) -> str:
 
 
 def _objective_solution_implications(objective_text: str) -> str:
+    if objective_text == OBJECTIVE_DECOMPOSITION_FALLBACK:
+        return NO_SOLUTION_IMPLICATIONS
     lower = objective_text.lower()
     implications: list[str] = []
     if "cots" in lower or "commercial off" in lower:
@@ -549,6 +641,13 @@ def _objective_solution_implications(objective_text: str) -> str:
 
 
 def _objective_key_risks(objective_text: str, evidence_gaps: list[str]) -> str:
+    if objective_text == OBJECTIVE_DECOMPOSITION_FALLBACK:
+        fallback_risks = [
+            "Current artifacts do not support objective-level decomposition, so capture planning still depends on manual SOW/PWS review.",
+        ]
+        if evidence_gaps:
+            fallback_risks.append(evidence_gaps[0])
+        return " ".join(_dedupe_strings(fallback_risks))
     lower = objective_text.lower()
     risks: list[str] = []
     if any(term in lower for term in ("security", "privacy", "nist", "fisma")):
@@ -587,7 +686,8 @@ def _objective_evidence_snippets(
     ):
         lines.extend(public_research.get(key, []) or [])
     lines.extend(related_procurements[:3])
-    return _matching_lines(objective_text, _dedupe_strings(lines), max_items=max_items)
+    matches = _matching_lines(objective_text, _dedupe_strings(lines), max_items=max_items)
+    return matches if matches else [NO_EVIDENCE_SNIPPET]
 
 
 def _objective_evidence_links(primary_url: str, source_log: list[dict[str, object]], objective_text: str) -> str:
@@ -698,14 +798,21 @@ def _award_history_signals(
 ) -> dict[str, object]:
     response = ((usaspending_result.get("spending_by_award") or {}).get("response") or {}) if isinstance(usaspending_result, dict) else {}
     queries = list(response.get("query_terms", []) or usaspending_result.get("search_terms", []) or [])
+    weak_query_only = bool(queries) and all(bool(re.fullmatch(r"[A-Z0-9-]{2,5}", str(query or ""))) for query in queries)
     candidate_rows = _relevant_award_rows(usaspending_result, title, summary, buyer)
     agency_rows, adjacent_rows = _agency_anchor_award_rows(candidate_rows)
-    relevant_rows = agency_rows
-    amount_rows = agency_rows
+    strong_agency_rows = [
+        row
+        for row in agency_rows
+        if int(row.get("_overlap_count", 0) or 0) >= 2 or int(row.get("_relevance_score", 0) or 0) >= 6
+    ]
+    relevant_rows = strong_agency_rows
+    budget_usable_for_capture = bool(relevant_rows) and not weak_query_only
+    amount_rows = strong_agency_rows
     all_amounts = [amount for amount in (_safe_float(row.get("Award Amount")) for row in amount_rows) if amount is not None]
-    likely_rows = agency_rows
+    likely_rows = strong_agency_rows
     likely_incumbents = _dedupe_strings([str(row.get("Recipient Name", "") or "") for row in likely_rows])[:4]
-    competitive_rows = agency_rows
+    competitive_rows = strong_agency_rows
     frequent_primes = [
         name
         for name, _ in Counter(str(row.get("Recipient Name", "") or "") for row in competitive_rows if row.get("Recipient Name")).most_common(5)
@@ -724,22 +831,35 @@ def _award_history_signals(
     notes: list[str] = []
     evidence_gaps: list[str] = []
 
+    if agency_rows and not strong_agency_rows:
+        notes.append(
+            "Agency-matched USAspending rows were excluded because they only matched weak or generic requirement terms."
+        )
+    if weak_query_only and relevant_rows:
+        notes.append(
+            "USAspending rows were not accepted as funding proof because the surviving queries were acronym-only rather than requirement-specific."
+        )
+        evidence_gaps.append(
+            "USAspending surfaced acronym-level award matches only, so funding evidence remains uncorroborated in this run."
+        )
+
     if relevant_rows:
         queries_with_results = _dedupe_strings([term for row in relevant_rows for term in row.get("_query_terms", []) or []])
-        budget_signals.append(
-            f"USAspending surfaced {len(relevant_rows)} relevant related awards across query terms: {', '.join(queries_with_results or queries)}."
-        )
-        if all_amounts:
+        if budget_usable_for_capture:
             budget_signals.append(
-                f"Visible related award values range from {_currency(min(all_amounts))} to {_currency(max(all_amounts))}, totaling {_currency(sum(all_amounts))} across the matched records."
+                f"USAspending surfaced {len(relevant_rows)} relevant related awards across query terms: {', '.join(queries_with_results or queries)}."
             )
-        top_row = max(
-            amount_rows,
-            key=lambda item: (_safe_float(item.get("Award Amount")) or 0.0, int(item.get("_relevance_score", 0) or 0)),
-        )
-        budget_signals.append(
-            f"Top related award: {top_row.get('Award ID', 'N/A')} to {top_row.get('Recipient Name', 'Unknown')} for {_currency(top_row.get('Award Amount'))}."
-        )
+            if all_amounts:
+                budget_signals.append(
+                    f"Visible related award values range from {_currency(min(all_amounts))} to {_currency(max(all_amounts))}, totaling {_currency(sum(all_amounts))} across the matched records."
+                )
+            top_row = max(
+                amount_rows,
+                key=lambda item: (_safe_float(item.get("Award Amount")) or 0.0, int(item.get("_relevance_score", 0) or 0)),
+            )
+            budget_signals.append(
+                f"Top related award: {top_row.get('Award ID', 'N/A')} to {top_row.get('Recipient Name', 'Unknown')} for {_currency(top_row.get('Award Amount'))}."
+            )
         if agency_rows:
             matched_agencies = _dedupe_strings(
                 [
@@ -812,7 +932,8 @@ def _award_history_signals(
             "emerging_challengers": emerging_challengers,
             "notes": notes or ["Competitive posture remains thin because no related award history was parsed."],
         },
-        "objective_budget_signal": budget_signals[0] if budget_signals else "Award-history signal unavailable.",
+        "budget_usable_for_capture": budget_usable_for_capture,
+        "objective_budget_signal": budget_signals[0] if budget_usable_for_capture and budget_signals else "Award-history signal unavailable.",
         "objective_incumbents": ", ".join(likely_incumbents) if likely_incumbents else "No clearly relevant prior award recipients surfaced from USAspending.",
         "evidence_gaps": evidence_gaps,
         "source_log": source_log,
@@ -824,7 +945,7 @@ def _funding_assessment(
     public_research: dict[str, object],
     attachment_budget_signals: list[str],
 ) -> dict[str, object]:
-    useful_award_history = bool(award_signals.get("relevant_awards"))
+    useful_award_history = bool(award_signals.get("budget_usable_for_capture"))
     budget_anchor_count = int(((public_research.get("category_anchor_counts") or {}).get("budget_funding", 0)) or 0)
     useful_budget_documents = budget_anchor_count > 0
     useful_attachment_budget = bool(attachment_budget_signals)
@@ -1065,12 +1186,17 @@ def main() -> int:
         public_research,
         attachment_budget_signals,
     )
+    funding_gap_line = (
+        f'No funding corroboration found for "{resolved.get("title") or "this requirement"}" in current run; '
+        "validate with award history, budget docs, or priced attachments."
+    )
     budget_funding_signals = [
-        *award_signals.get("budget_signals", []),
+        *(award_signals.get("budget_signals", []) if award_signals.get("budget_usable_for_capture") else []),
         *public_research.get("budget_document_signals", []),
         *attachment_budget_signals,
-        f"USAspending search status this run: {usaspending_status}",
     ]
+    if not budget_funding_signals:
+        budget_funding_signals = [funding_gap_line]
     related_procurements = award_signals.get("related_procurements", []) + attachment_validation.get("supporting_snippets", [])
     evidence_gaps = _dedupe_strings(
         [
@@ -1088,6 +1214,11 @@ def main() -> int:
                 []
                 if attachment_validation.get("validated_incumbents") or attachment_validation.get("supporting_snippets")
                 else ["Attachment package did not directly validate the incumbent story, so award-history inference still needs manual confirmation."]
+            ),
+            *(
+                []
+                if award_signals.get("budget_usable_for_capture") or not award_signals.get("relevant_awards")
+                else ["USAspending returned acronym-only or weak-overlap award matches, so those rows were not used as funding evidence."]
             ),
             *award_signals.get("evidence_gaps", []),
             *public_research.get("evidence_gaps", []),
@@ -1112,38 +1243,62 @@ def main() -> int:
         attachment_validation.get("validated_incumbents", [])
         or award_signals.get("competitive_landscape", {}).get("likely_incumbents", [])
     )
+    scope_corroborated = bool(attachment_scope_snippets)
+    mission_corroborated = bool(public_research.get("mission_context_signals"))
+    policy_corroborated = bool(public_research.get("policy_compliance_signals"))
+    award_corroborated = bool(award_signals.get("relevant_awards"))
     executive_win_themes = _dedupe_strings(
         [
-            "Evidence-backed federal mission fit",
-            "Clear compliance and delivery readiness",
+            *(
+                ["Evidence-backed federal mission fit"]
+                if scope_corroborated and (mission_corroborated or award_corroborated)
+                else []
+            ),
+            *(
+                ["Clear compliance and delivery readiness"]
+                if scope_corroborated and policy_corroborated
+                else []
+            ),
             *(
                 ["Proven COTS capability with rapid IRS/NIST control alignment."]
-                if "cots" in attachment_text_blob or "commercial off" in attachment_text_blob
+                if scope_corroborated and policy_corroborated and ("cots" in attachment_text_blob or "commercial off" in attachment_text_blob)
                 else []
             ),
             *(
                 ["Predictable fixed-price delivery with disciplined staffing and reporting controls."]
-                if "firm fixed price" in attachment_text_blob or "ffp" in attachment_text_blob
+                if scope_corroborated and award_corroborated and ("firm fixed price" in attachment_text_blob or "ffp" in attachment_text_blob)
                 else []
             ),
         ]
     )
+    if not executive_win_themes:
+        executive_win_themes = [NO_WIN_THEMES]
     executive_proof_points = _dedupe_strings(
         [
-            "Recent relevant delivery examples",
-            "Federal program alignment",
+            *(
+                ["Recent relevant delivery examples"]
+                if award_corroborated
+                else []
+            ),
+            *(
+                ["Federal program alignment"]
+                if scope_corroborated and mission_corroborated
+                else []
+            ),
             *(
                 ["Documented security/privacy readiness tied to Publication 4812 and NIST requirements."]
-                if public_research.get("policy_compliance_signals")
+                if scope_corroborated and policy_corroborated
                 else []
             ),
             *(
                 ["Demonstrated staffing continuity and post-award mobilization discipline."]
-                if "staff" in attachment_text_blob or "workforce" in attachment_text_blob
+                if scope_corroborated and award_corroborated and ("staff" in attachment_text_blob or "workforce" in attachment_text_blob)
                 else []
             ),
         ]
     )
+    if not executive_proof_points:
+        executive_proof_points = [NO_PROOF_POINTS]
     objective_rows: list[dict[str, object]] = []
     for objective_text in decomposed_objectives:
         objective_rows.append(
@@ -1152,20 +1307,20 @@ def main() -> int:
                 "mission_driver": _objective_driver(
                     objective_text,
                     public_research.get("mission_context_signals", []),
-                    opportunity.get("buyer", resolved.get("buyer", "N/A")),
+                    NO_MISSION_DRIVER,
                 ),
                 "policy_driver": _objective_driver(
                     objective_text,
                     public_research.get("policy_compliance_signals", []),
-                    "Validate against agency policy and solicitation text",
+                    "No corroborated policy or compliance driver found for this objective in current evidence.",
                 ),
                 "budget_signal": _objective_driver(
                     objective_text,
                     budget_funding_signals,
-                    award_signals.get("objective_budget_signal") or "Use USAspending and budget documents to confirm funding reality.",
+                    award_signals.get("objective_budget_signal") or NO_BUDGET_SIGNAL,
                 ),
                 "stakeholders": _objective_stakeholder_text(resolved.get("buyer", ""), stakeholder_contacts),
-                "incumbents": ", ".join(incumbent_list) if incumbent_list else "To be validated with award-history enrichment",
+                "incumbents": ", ".join(incumbent_list) if incumbent_list else INCUMBENT_UNVERIFIED,
                 "key_risks": _objective_key_risks(objective_text, evidence_gaps),
                 "kpis": _objective_kpis(objective_text),
                 "solution_implications": _objective_solution_implications(objective_text),
@@ -1178,6 +1333,24 @@ def main() -> int:
                 ),
             }
         )
+    corroborated_objective_rows = sum(
+        1
+        for row in objective_rows
+        if any(snippet != NO_EVIDENCE_SNIPPET for snippet in row.get("evidence_snippets", []))
+    )
+    fallback_objective_rows = sum(
+        1
+        for row in objective_rows
+        if row.get("mission_driver") == NO_MISSION_DRIVER
+        or row.get("budget_signal") == NO_BUDGET_SIGNAL
+        or str(row.get("budget_signal", "")).startswith("No funding corroboration found")
+        or row.get("incumbents") == INCUMBENT_UNVERIFIED
+        or any(snippet == NO_EVIDENCE_SNIPPET for snippet in row.get("evidence_snippets", []))
+        or row.get("objective") == OBJECTIVE_DECOMPOSITION_FALLBACK
+    )
+    real_funding_signal_count = sum(
+        1 for signal in budget_funding_signals if not str(signal or "").startswith("No funding corroboration found")
+    )
     decision_sections = build_capture_decision_sections(
         vendor_profile=vendor_profile,
         resolved=resolved,
@@ -1333,6 +1506,13 @@ def main() -> int:
             "notice_excerpt_substantive": substantive_notice_excerpt,
             "attachment_package_parsed": bool(attachment_bundle.get("attachments")),
             "attachments_expected": bool(attachment_bundle.get("attachments_expected")),
+            "usaspending_search_status": usaspending_status,
+            "objective_validation_summary": {
+                "objective_row_count": len(objective_rows),
+                "corroborated_objective_rows": corroborated_objective_rows,
+                "fallback_objective_rows": fallback_objective_rows,
+                "real_funding_signal_count": real_funding_signal_count,
+            },
             "stub_stage_exited_before_response": True,
             "menu_only_fallback_used": False,
         },
