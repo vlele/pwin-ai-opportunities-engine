@@ -982,6 +982,8 @@ def _attachment_objective_evidence_snippets(
     max_items: int = 4,
     min_score: int = 2,
 ) -> list[str]:
+    if objective_text == OBJECTIVE_DECOMPOSITION_FALLBACK:
+        return []
     candidate_lines = _dedupe_strings(
         [
             *_preferred_objective_body_blocks(attachment_bundle, max_items=18, include_filename=True),
