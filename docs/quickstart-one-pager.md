@@ -8,9 +8,13 @@
 - `python3` available in your shell
 - A workspace folder where the skill can write artifacts
 - A `SAM.gov` API key exposed as `SAM_API_KEY`
-- Your host's normal LLM credential already configured
+- An OpenAI API key exposed as `OPENAI_API_KEY`
+- A reasoning-capable OpenAI model configured for your host
+- `o3-mini` is fine for this setup
 - Internet access
 - GitHub access to this repo
+
+This one-pager assumes an OpenAI-backed setup. If your host can talk to multiple model providers, use an OpenAI key for the steps below.
 
 If your GitHub setup uses HTTPS instead of SSH, swap the clone URLs below to the HTTPS form you normally use.
 
@@ -50,10 +54,12 @@ In the shell where your host runs, export your keys:
 
 ```bash
 export SAM_API_KEY="your-sam-gov-key"
-export OPENAI_API_KEY="your-llm-key"   # only if your host uses OpenAI-style credentials
+export OPENAI_API_KEY="your-openai-key"
 ```
 
-If your tool already works today, keep using the same LLM credential that tool already expects. The only skill-specific secret is `SAM_API_KEY`.
+This quick start assumes `OPENAI_API_KEY` and a reasoning model. If you need a safe default model choice, `o3-mini` is fine.
+
+The important part is that your host is configured to use a reasoning-capable OpenAI model rather than a non-reasoning default. `SAM_API_KEY` is the only skill-specific secret, but this guide assumes the LLM side is OpenAI.
 
 ## 3. Pick a Workspace
 
