@@ -50,10 +50,89 @@ SNIPPET_KEYWORDS = (
     "incumbent",
     "current contractor",
 )
+STRUCTURED_LINE_MARKERS = (
+    "clin ",
+    "subclin",
+    "task ",
+    "subtask",
+    "pws",
+    "performance work statement",
+    "statement of objectives",
+    "statement of work",
+    "deliverable",
+    "transition",
+    "period of performance",
+    "shall",
+    "must",
+    "provide",
+    "maintain",
+    "report",
+    "staff",
+)
+TOC_LINE_RE = re.compile(r"\.{5,}\s*\d+\s*$")
+SECTION_HEADING_RE = re.compile(r"^\s*\d+(?:\.\d+){0,3}\s+[A-Z][A-Za-z0-9/\-() ,]+$")
+PREFERRED_SECTION_STARTS = (
+    ("1.3 Scope", ("1.4", "1.5", "2.0")),
+    ("1.5 General Requirements", ("2.0",)),
+    ("2.0 Period of Performance", ("3.0", "4.0", "5.0")),
+    ("5.0 Deliverables", ("6.0",)),
+)
 
 
 def _normalize_text(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _normalize_preserve_lines(value: object, max_chars: int = 8000) -> str:
+    lines: list[str] = []
+    for raw_line in str(value or "").replace("\r", "\n").split("\n"):
+        cleaned = re.sub(r"[ \t]+", " ", raw_line).strip()
+        if cleaned:
+            lines.append(cleaned)
+    return "\n".join(lines)[:max_chars]
+
+
+def _is_toc_like_line(line: str) -> bool:
+    lowered = line.lower()
+    return "table of contents" in lowered or TOC_LINE_RE.search(line) is not None or line.count(".") >= 12
+
+
+def _page_is_toc_like(text: str) -> bool:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    if not lines:
+        return False
+    toc_like = sum(1 for line in lines if _is_toc_like_line(line))
+    return any("table of contents" in line.lower() for line in lines) or (toc_like >= 4 and toc_like >= max(2, len(lines) // 3))
+
+
+def _preferred_pdf_section_excerpt(text: str, max_chars: int = 12000) -> str:
+    lines = [line.strip() for line in _normalize_preserve_lines(text, max_chars=30000).splitlines() if line.strip()]
+    if not lines:
+        return ""
+    sections: list[str] = []
+    lowered_lines = [line.lower() for line in lines]
+    for start_label, stop_prefixes in PREFERRED_SECTION_STARTS:
+        start_lower = start_label.lower()
+        try:
+            start_index = next(index for index, line in enumerate(lowered_lines) if line.startswith(start_lower))
+        except StopIteration:
+            continue
+        captured: list[str] = [lines[start_index]]
+        for line in lines[start_index + 1:]:
+            lower = line.lower()
+            if _is_toc_like_line(line):
+                continue
+            if any(lower.startswith(prefix.lower()) for prefix in stop_prefixes):
+                break
+            if SECTION_HEADING_RE.match(line) and not any(token in lower for token in ("shall", "must", "provide", "deliver", "maintain", "report", "support")):
+                break
+            captured.append(line)
+            if len(" ".join(captured)) >= 1800:
+                break
+        block = "\n".join(captured).strip()
+        if len(block) >= 80:
+            sections.append(block)
+    return "\n\n".join(sections)[:max_chars]
 
 
 def _filename_from_headers(url: str, headers: Any) -> str:
@@ -69,9 +148,17 @@ def _filename_from_headers(url: str, headers: Any) -> str:
 
 def _attachment_category(filename: str) -> str:
     lowered = filename.lower()
-    if "sow" in lowered or "statement of work" in lowered or "pws" in lowered:
+    if (
+        "sow" in lowered
+        or "statement of work" in lowered
+        or "performance work statement" in lowered
+        or "draft pws" in lowered
+        or "pws" in lowered
+        or "soo" in lowered
+        or "statement of objectives" in lowered
+    ):
         return "statement_of_work"
-    if "rftop" in lowered or "evaluation" in lowered or "instruction" in lowered:
+    if "rftop" in lowered or "evaluation" in lowered or "instruction" in lowered or "section l" in lowered or "section m" in lowered:
         return "instructions_evaluation"
     if "question" in lowered or "q&a" in lowered or "qanda" in lowered:
         return "questions_answers"
@@ -88,14 +175,19 @@ def _attachment_category(filename: str) -> str:
     return "other"
 
 
-def _extract_pdf_text(data: bytes, max_pages: int = 8) -> str:
+def _extract_pdf_text(data: bytes, max_pages: int = 18) -> str:
     if PdfReader is None:
         raise RuntimeError("PyPDF2 unavailable")
     reader = PdfReader(io.BytesIO(data))
-    pages: list[str] = []
+    page_texts: list[str] = []
     for page in reader.pages[:max_pages]:
-        pages.append(page.extract_text() or "")
-    return "\n".join(pages)
+        page_texts.append(page.extract_text() or "")
+    filtered_pages = [page for page in page_texts if not _page_is_toc_like(page)]
+    combined = "\n".join(filtered_pages or page_texts)
+    preferred = _preferred_pdf_section_excerpt(combined, max_chars=12000)
+    if preferred:
+        return f"{preferred}\n\n{combined}"
+    return combined
 
 
 def _extract_docx_text(data: bytes) -> str:
@@ -155,7 +247,20 @@ def _extract_attachment_text(filename: str, content_type: str, data: bytes) -> t
     return "", "unsupported"
 
 
-def _attachment_snippets(text: str, max_snippets: int = 4) -> list[str]:
+def _attachment_snippets(text: str, max_snippets: int = 6) -> list[str]:
+    structured_lines = _normalize_preserve_lines(text, max_chars=12000).splitlines()
+    ranked_structured: list[str] = []
+    for line in structured_lines:
+        lower = line.lower()
+        if len(line) < 40:
+            continue
+        if _is_toc_like_line(line):
+            continue
+        if any(marker in lower for marker in STRUCTURED_LINE_MARKERS):
+            ranked_structured.append(line[:360])
+    if ranked_structured:
+        return ranked_structured[:max_snippets]
+
     cleaned = _normalize_text(text)
     if not cleaned:
         return []
@@ -189,6 +294,7 @@ def _download_attachment(
         filename = filename_hint or _filename_from_headers(url, response.headers)
         content_type = content_type_hint or response.headers.get("Content-Type", "application/octet-stream")
     text, parser_status = _extract_attachment_text(filename, content_type, data)
+    structured_excerpt = _normalize_preserve_lines(text, max_chars=24000)
     return {
         "url": url,
         "filename": filename,
@@ -197,7 +303,8 @@ def _download_attachment(
         "truncated": truncated,
         "category": _attachment_category(filename),
         "parser_status": parser_status,
-        "text_excerpt": _normalize_text(text)[:6000],
+        "text_excerpt": structured_excerpt[:12000],
+        "structured_text_excerpt": structured_excerpt,
         "snippets": _attachment_snippets(text),
     }
 

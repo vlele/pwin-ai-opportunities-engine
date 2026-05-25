@@ -11,6 +11,7 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from common.jsonl import append_jsonl
+from common.openai_reasoning import interpret_feedback
 from common.paths import load_json, standard_procurement_paths, today_local_str, utc_now_iso, write_json
 from capture.resolve_entry import resolve_entry
 from feedback.learning import recompute_learning_preferences
@@ -146,6 +147,16 @@ def _resolved_record_payload(full_record: dict, resolved: dict) -> dict:
     }
 
 
+def _feedback_hydrated_text(full_record: dict, resolved: dict) -> str:
+    return str(
+        full_record.get("solicitation_text")
+        or full_record.get("notice_text")
+        or full_record.get("summary")
+        or resolved.get("summary")
+        or ""
+    ).strip()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", required=True)
@@ -167,11 +178,34 @@ def main() -> int:
     report_bucket = str(resolved.get("bucket", "") or "")
     digest_date = resolved.get("digest_date") or digest_map.get("digest_date", today_local_str())
     vendor_profile = load_json(workspace / "procurement" / "vendor-profile.json", default={})
+    hydrated_text = _feedback_hydrated_text(full_record, resolved)
+    prior_scan_fit = full_record.get("semantic_fit", {}) if isinstance(full_record.get("semantic_fit"), dict) else {}
+    learning_block = load_json(workspace / "procurement" / "preferences.json", default={}).get("learning", {})
+    learned_semantic_preferences = (
+        learning_block.get("semantic_applied_preferences", {})
+        if isinstance(learning_block, dict) and isinstance(learning_block.get("semantic_applied_preferences"), dict)
+        else {}
+    )
     matched_naics = []
     if isinstance(resolved_record.get("naics"), list):
         matched_naics = [str(item).strip() for item in resolved_record.get("naics", []) if str(item).strip()]
     opportunity_class = str(resolved_record.get("opportunity_class", "") or "").strip()
     matched_keywords = _matched_keywords(full_record, vendor_profile) if full_record else []
+    semantic_feedback = interpret_feedback(
+        user_text=user_text,
+        feedback_kind=feedback_kind,
+        reward=reward,
+        record=full_record or resolved_record,
+        hydrated_text=hydrated_text,
+        vendor_profile=vendor_profile,
+        prior_scan_fit=prior_scan_fit,
+        learned_semantic_preferences=learned_semantic_preferences,
+    )
+    semantic_entities = (
+        semantic_feedback.get("resolved_entities", {})
+        if isinstance(semantic_feedback, dict) and isinstance(semantic_feedback.get("resolved_entities"), dict)
+        else {}
+    )
     event = {
         "timestamp": utc_now_iso(),
         "digest_date": digest_date,
@@ -194,7 +228,17 @@ def main() -> int:
             "matched_award_size_band": [],
             "matched_location_preferences": [],
             "matched_teaming_or_vehicle_signals": [],
+            "semantic_positive_facets": semantic_entities.get("semantic_positive_facets", []),
+            "semantic_negative_facets": semantic_entities.get("semantic_negative_facets", []),
+            "mission_domains": semantic_entities.get("mission_domains", []),
+            "delivery_models": semantic_entities.get("delivery_models", []),
+            "contract_postures": semantic_entities.get("contract_postures", []),
+            "competitive_shapes": semantic_entities.get("competitive_shapes", []),
+            "set_aside_signals": semantic_entities.get("set_aside_signals", []),
+            "vehicle_signals": semantic_entities.get("vehicle_signals", []),
+            "teaming_postures": semantic_entities.get("teaming_postures", []),
         },
+        "semantic_feedback": semantic_feedback or {},
         "effect": {
             "hard_filters_added": ["grants"] if "never show grants" in user_text.lower() else [],
             "hard_filters_removed": [],
@@ -229,6 +273,11 @@ def main() -> int:
         "resolved": is_resolved,
         "reason_codes": reason_codes,
         "learning_summary": learning_summary,
+        "semantic_feedback_summary": (
+            semantic_feedback.get("reasoning_summary", "")
+            if isinstance(semantic_feedback, dict)
+            else ""
+        ),
     }
     print(json.dumps(result, ensure_ascii=True))
     return 0

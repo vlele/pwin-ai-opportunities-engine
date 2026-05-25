@@ -276,6 +276,7 @@ def _fit_block(section: dict[str, Any]) -> str:
         [
             f"**Company Summary:** {_md_cell(section.get('company_summary'))}",
             f"**Recommended Prime / Team Posture:** {_md_cell(section.get('recommended_prime_team_posture'))}",
+            f"**Semantic Fit Summary:** {_md_cell(section.get('semantic_fit_summary'))}",
             "",
             "### Capability Matches",
             _markdown_list(section.get("capability_hits", [])),
@@ -291,6 +292,12 @@ def _fit_block(section: dict[str, Any]) -> str:
             "",
             "### Negative Fit Signals",
             _markdown_list(section.get("negative_hits", [])),
+            "",
+            "### Historical Preference Support",
+            _markdown_list(section.get("historical_preference_support", [])),
+            "",
+            "### Historical Preference Cautions",
+            _markdown_list(section.get("historical_preference_cautions", [])),
             "",
             "### Missing Proof / Gaps",
             _markdown_list(section.get("missing_proof", [])),
@@ -430,12 +437,15 @@ def _assumptions_block(section: dict[str, Any]) -> str:
             "### Evidence-Backed Inferences",
             _markdown_list(section.get("evidence_backed_inferences", [])),
             "",
-            "### Hypotheses Requiring Validation",
-            _markdown_list(section.get("hypotheses", [])),
-            "",
-            "### Unknowns",
-            _markdown_list(section.get("unknowns", [])),
-        ]
+          "### Hypotheses Requiring Validation",
+          _markdown_list(section.get("hypotheses", [])),
+          "",
+          "### Historical Learning Context",
+          _markdown_list(section.get("historical_learning_context", [])),
+          "",
+          "### Unknowns",
+          _markdown_list(section.get("unknowns", [])),
+      ]
     )
     return "\n".join(blocks)
 
@@ -460,12 +470,15 @@ def _executive_judgment_block(section: dict[str, Any]) -> str:
             "### Who Already Has Advantage?",
             _markdown_list(section.get("advantaged_players", [])),
             "",
-            "### What Does the Customer Appear to Care About?",
-            _markdown_list(section.get("customer_cares_about", [])),
-            "",
-            "### What Should the Capture Team Do Next?",
-            _markdown_list(section.get("next_best_actions", [])),
-        ]
+          "### What Does the Customer Appear to Care About?",
+          _markdown_list(section.get("customer_cares_about", [])),
+          "",
+          "### What Past Feedback Suggests",
+          _markdown_list(section.get("historical_fit_context", [])),
+          "",
+          "### What Should the Capture Team Do Next?",
+          _markdown_list(section.get("next_best_actions", [])),
+      ]
     )
     if section.get("honesty_drivers"):
         blocks.extend(

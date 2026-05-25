@@ -12,6 +12,7 @@ SCRIPT_ROOT = Path(__file__).resolve().parents[1]
 if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
+from common.openai_reasoning import assess_scan_fit
 from common.paths import load_json, today_local_str, utc_now_iso, write_json
 from common.runtime import NOT_IMPLEMENTED_IN_BUNDLE_STATUS
 from common.source_registry import (
@@ -157,6 +158,9 @@ GENERIC_LOW_SIGNAL_FIT_TERMS = {
     "systems",
 }
 
+SEMANTIC_REASONING_MAX_RECORDS_PER_RUN = 12
+SEMANTIC_REASONING_MIN_SCORE = 55
+
 
 def parse_horizon(raw: str) -> tuple[int, int]:
     cleaned = raw.lower().replace("days", "").replace("day", "").replace("to", "-").replace(" ", "")
@@ -252,6 +256,12 @@ def _applied_preferences(preferences: dict[str, Any]) -> dict[str, Any]:
     return applied if isinstance(applied, dict) else {}
 
 
+def _semantic_applied_preferences(preferences: dict[str, Any]) -> dict[str, Any]:
+    learning = preferences.get("learning", {}) if isinstance(preferences.get("learning"), dict) else {}
+    applied = learning.get("semantic_applied_preferences", {})
+    return applied if isinstance(applied, dict) else {}
+
+
 def _merged_preference_values(preferences: dict[str, Any], section: str, key: str) -> list[str]:
     values: list[Any] = []
     base_section = preferences.get(section, {}) if isinstance(preferences.get(section), dict) else {}
@@ -278,6 +288,136 @@ def _learning_signal_scores(preferences: dict[str, Any], dimension: str) -> dict
         except (TypeError, ValueError):
             continue
     return result
+
+
+def _should_run_semantic_reasoning(
+    *,
+    match_score: int,
+    bucket_override: str | None,
+    timing_band: str,
+    fit_context: dict[str, Any],
+    hydrated_text: str | None,
+) -> bool:
+    if bucket_override == "suppressed":
+        return False
+    if match_score < SEMANTIC_REASONING_MIN_SCORE:
+        return False
+    if timing_band not in {"urgent", "active", "watchlist"}:
+        return False
+    if not (hydrated_text or fit_context.get("fit_narrative_positive_hits") or fit_context.get("keyword_hit_count", 0) >= 2):
+        return False
+    return True
+
+
+def _semantic_feedback_adjustment(semantic_fit: dict[str, Any] | None, preferences: dict[str, Any]) -> tuple[int, list[str]]:
+    if not isinstance(semantic_fit, dict):
+        return 0, []
+
+    points = 0
+    reasons: list[str] = []
+    applied = _semantic_applied_preferences(preferences)
+
+    fit_assessment = str(semantic_fit.get("fit_assessment", "")).strip().lower()
+    posture = str(semantic_fit.get("credible_posture", "")).strip().lower()
+    reasoning_summary = str(semantic_fit.get("reasoning_summary", "") or "").strip()
+    semantic_facets = semantic_fit.get("semantic_facets", {}) if isinstance(semantic_fit.get("semantic_facets"), dict) else {}
+
+    if fit_assessment == "strong_fit":
+        points += 4
+    elif fit_assessment == "adjacent_fit":
+        points += 1
+    elif fit_assessment == "weak_fit":
+        points -= 3
+    elif fit_assessment == "misleading_keyword_match":
+        points -= 6
+
+    if posture == "prime":
+        points += 2
+    elif posture == "team":
+        points += 0
+    elif posture == "monitor":
+        points -= 1
+    elif posture == "suppress":
+        points -= 4
+
+    mission_domains = set(str(item).strip() for item in semantic_facets.get("mission_domains", []) if str(item).strip())
+    delivery_models = set(str(item).strip() for item in semantic_facets.get("delivery_models", []) if str(item).strip())
+    positive_facets = set(str(item).strip() for item in semantic_facets.get("positive_fit_facets", []) if str(item).strip())
+    negative_facets = set(str(item).strip() for item in semantic_facets.get("negative_fit_facets", []) if str(item).strip())
+    competitive_shapes = set(str(item).strip() for item in semantic_fit.get("risk_flags", []) if str(item).strip())
+
+    mission_prefer = mission_domains & set(applied.get("prefer_mission_domains", []))
+    mission_avoid = mission_domains & set(applied.get("avoid_mission_domains", []))
+    delivery_prefer = delivery_models & set(applied.get("prefer_delivery_models", []))
+    delivery_avoid = delivery_models & set(applied.get("avoid_delivery_models", []))
+    facet_prefer = positive_facets & set(applied.get("prefer_semantic_facets", []))
+    facet_avoid = negative_facets & set(applied.get("avoid_semantic_facets", []))
+    competitive_avoid = competitive_shapes & {"vehicle_access_unknown", "incumbent_continuity_risk"} & set(applied.get("avoid_competitive_shapes", []))
+
+    if mission_prefer:
+        points += 3
+        reasons.append(f"Learned mission-domain preference supports this fit: {', '.join(sorted(mission_prefer)[:2])}.")
+    if mission_avoid:
+        points -= 4
+        reasons.append(f"Learned mission-domain caution applies here: {', '.join(sorted(mission_avoid)[:2])}.")
+    if delivery_prefer:
+        points += 3
+        reasons.append(f"Learned delivery-model preference supports this fit: {', '.join(sorted(delivery_prefer)[:2])}.")
+    if delivery_avoid:
+        points -= 5
+        reasons.append(f"Learned delivery-model caution applies here: {', '.join(sorted(delivery_avoid)[:2])}.")
+    if facet_prefer:
+        points += 2
+        reasons.append(f"Learned work-pattern preference supports this fit: {', '.join(sorted(facet_prefer)[:2])}.")
+    if facet_avoid:
+        points -= 5
+        reasons.append(f"Learned work-pattern caution applies here: {', '.join(sorted(facet_avoid)[:2])}.")
+    if competitive_avoid:
+        points -= 2
+        reasons.append(f"Learned competitive caution applies here: {', '.join(sorted(competitive_avoid)[:2])}.")
+
+    if reasoning_summary:
+        if points >= 2:
+            reasons.insert(0, f"Semantic fit check: {reasoning_summary}")
+        elif points <= -2:
+            reasons.insert(0, f"Semantic fit caution: {reasoning_summary}")
+
+    return max(-10, min(10, points)), reasons[:3]
+
+
+def _semantic_audit_record(
+    *,
+    semantic_fit: dict[str, Any] | None,
+    score_before: int,
+    score_after: int,
+    bucket_before: str,
+    bucket_after: str,
+    guidance_bucket: str | None,
+    reasoning_attempted: bool,
+) -> dict[str, Any]:
+    fit = semantic_fit if isinstance(semantic_fit, dict) else {}
+    fit_assessment = str(fit.get("fit_assessment", "") or "").strip()
+    posture = str(fit.get("credible_posture", "") or "").strip()
+    reasoning_source = str(fit.get("reasoning_source", "") or "").strip()
+    model_name = str(fit.get("model_name", "") or "").strip()
+    score_delta = int(score_after) - int(score_before)
+    return {
+        "reasoning_attempted": reasoning_attempted,
+        "reasoning_source": reasoning_source or ("not_run" if not reasoning_attempted else "heuristic_fallback"),
+        "model_name": model_name,
+        "score_before_semantic": score_before,
+        "score_after_semantic": score_after,
+        "score_delta": score_delta,
+        "bucket_before_semantic": bucket_before,
+        "bucket_after_semantic": bucket_after,
+        "guidance_bucket": guidance_bucket or "",
+        "fit_assessment": fit_assessment,
+        "credible_posture": posture,
+        "ranking_or_posture_changed": bool(score_delta or bucket_before != bucket_after or posture),
+        "semantic_reasons_for": fit.get("why_it_fits", []) if isinstance(fit.get("why_it_fits"), list) else [],
+        "semantic_reasons_against": fit.get("why_it_does_not_fit", []) if isinstance(fit.get("why_it_does_not_fit"), list) else [],
+        "reasoning_summary": str(fit.get("reasoning_summary", "") or "").strip(),
+    }
 
 
 def _vendor_keywords(profile: dict[str, Any], preferences: dict[str, Any] | None = None) -> list[str]:
@@ -1167,6 +1307,7 @@ def main() -> int:
         source_issues.extend(sam_result.get("errors", []))
 
         candidate_records = []
+        semantic_reasoning_remaining = SEMANTIC_REASONING_MAX_RECORDS_PER_RUN
         for record in sam_result.get("records", []):
             due_date = _parse_any_date(record.get("due_date"))
             timing_band, days_until_due = _timing_band(due_date, today, preferences)
@@ -1204,9 +1345,54 @@ def main() -> int:
             if preference_bucket == "suppressed":
                 guidance_bucket = "suppressed"
                 guidance_note = preference_note
+            semantic_score_before = match_score
+            semantic_bucket_before = _bucket_for_record(match_score, timing_band, preferences, guidance_bucket, fit_context)
+            semantic_reasoning_attempted = False
+            if (
+                semantic_reasoning_remaining > 0
+                and _should_run_semantic_reasoning(
+                    match_score=match_score,
+                    bucket_override=guidance_bucket,
+                    timing_band=timing_band,
+                    fit_context=fit_context,
+                    hydrated_text=hydrated_text,
+                )
+            ):
+                semantic_reasoning_attempted = True
+                semantic_fit = assess_scan_fit(
+                    record=record,
+                    hydrated_text=hydrated_text or str(record.get("summary", "") or ""),
+                    vendor_profile=vendor_profile,
+                    deterministic_fit_context=fit_context,
+                    learned_semantic_preferences=_semantic_applied_preferences(preferences),
+                )
+                semantic_reasoning_remaining -= 1
+                semantic_points, semantic_reasons = _semantic_feedback_adjustment(semantic_fit, preferences)
+                match_score = max(0, min(match_score + semantic_points, 100))
+                if semantic_reasons:
+                    reasons = [*semantic_reasons, *reasons][:4]
+                fit_context["semantic_fit"] = semantic_fit or {}
+                fit_context["semantic_fit_assessment"] = (
+                    str((semantic_fit or {}).get("fit_assessment", "")).strip()
+                    if isinstance(semantic_fit, dict)
+                    else ""
+                )
+            else:
+                semantic_fit = None
             record["match_score"] = match_score
             record["confidence_score"] = confidence_score
+            record["semantic_fit"] = semantic_fit or {}
             record["bucket"] = _bucket_for_record(match_score, timing_band, preferences, guidance_bucket, fit_context)
+            record["semantic_audit"] = _semantic_audit_record(
+                semantic_fit=semantic_fit,
+                score_before=semantic_score_before,
+                score_after=match_score,
+                bucket_before=semantic_bucket_before,
+                bucket_after=record["bucket"],
+                guidance_bucket=guidance_bucket,
+                reasoning_attempted=semantic_reasoning_attempted,
+            )
+            fit_context["semantic_audit"] = record["semantic_audit"]
             record["timing_window"] = timing_band
             if days_until_due is not None:
                 record["days_until_due"] = days_until_due

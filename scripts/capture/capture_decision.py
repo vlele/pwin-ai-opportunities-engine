@@ -214,6 +214,85 @@ def _dedupe_strings(values: list[str]) -> list[str]:
     return deduped
 
 
+def _semantic_capture_context(opportunity: dict[str, Any], learned_semantic_preferences: dict[str, Any]) -> dict[str, Any]:
+    semantic_fit = opportunity.get("semantic_fit", {}) if isinstance(opportunity.get("semantic_fit"), dict) else {}
+    semantic_facets = semantic_fit.get("semantic_facets", {}) if isinstance(semantic_fit.get("semantic_facets"), dict) else {}
+    if not semantic_fit and not learned_semantic_preferences:
+        return {
+            "summary": "",
+            "support": [],
+            "cautions": [],
+            "historical_pattern_summary": "",
+            "fit_assessment": "",
+            "credible_posture": "",
+            "reasoning_summary": "",
+        }
+
+    mission_domains = set(_string_list(semantic_facets.get("mission_domains", [])))
+    delivery_models = set(_string_list(semantic_facets.get("delivery_models", [])))
+    positive_facets = set(_string_list(semantic_facets.get("positive_fit_facets", [])))
+    negative_facets = set(_string_list(semantic_facets.get("negative_fit_facets", [])))
+    risk_flags = set(_string_list(semantic_fit.get("risk_flags", [])))
+    fit_assessment = str(semantic_fit.get("fit_assessment", "") or "").strip()
+    credible_posture = str(semantic_fit.get("credible_posture", "") or "").strip()
+    reasoning_summary = str(semantic_fit.get("reasoning_summary", "") or "").strip()
+
+    prefer_mission = mission_domains & set(_string_list(learned_semantic_preferences.get("prefer_mission_domains", [])))
+    avoid_mission = mission_domains & set(_string_list(learned_semantic_preferences.get("avoid_mission_domains", [])))
+    prefer_delivery = delivery_models & set(_string_list(learned_semantic_preferences.get("prefer_delivery_models", [])))
+    avoid_delivery = delivery_models & set(_string_list(learned_semantic_preferences.get("avoid_delivery_models", [])))
+    prefer_facets = positive_facets & set(_string_list(learned_semantic_preferences.get("prefer_semantic_facets", [])))
+    avoid_facets = negative_facets & set(_string_list(learned_semantic_preferences.get("avoid_semantic_facets", [])))
+    avoid_shapes = risk_flags & set(_string_list(learned_semantic_preferences.get("avoid_competitive_shapes", [])))
+    prefer_teaming = set()
+    if credible_posture == "team":
+        prefer_teaming = {"team_not_prime"} & set(_string_list(learned_semantic_preferences.get("prefer_teaming_postures", [])))
+
+    support = _dedupe_strings(
+        [
+            *([f"Historical preference supports this mission domain: {', '.join(sorted(prefer_mission)[:2])}."] if prefer_mission else []),
+            *([f"Historical preference supports this delivery model: {', '.join(sorted(prefer_delivery)[:2])}."] if prefer_delivery else []),
+            *([f"Historical preference supports this work pattern: {', '.join(sorted(prefer_facets)[:2])}."] if prefer_facets else []),
+            *([f"Historical teaming preference is consistent with the scan semantic posture ({credible_posture})."] if prefer_teaming else []),
+        ]
+    )
+    cautions = _dedupe_strings(
+        [
+            *([f"Historical caution applies to this mission domain: {', '.join(sorted(avoid_mission)[:2])}."] if avoid_mission else []),
+            *([f"Historical caution applies to this delivery model: {', '.join(sorted(avoid_delivery)[:2])}."] if avoid_delivery else []),
+            *([f"Historical caution applies to this work pattern: {', '.join(sorted(avoid_facets)[:2])}."] if avoid_facets else []),
+            *([f"Historical caution applies to the current competitive shape: {', '.join(sorted(avoid_shapes)[:2])}."] if avoid_shapes else []),
+        ]
+    )
+
+    summary_parts = []
+    if reasoning_summary:
+        summary_parts.append(reasoning_summary)
+    if fit_assessment:
+        summary_parts.append(f"Scan semantic fit assessed this as {fit_assessment.replace('_', ' ')}.")
+    if credible_posture:
+        summary_parts.append(f"Scan semantic posture was {credible_posture}.")
+    summary = " ".join(summary_parts).strip()
+
+    historical_pattern_summary = ""
+    if cautions:
+        historical_pattern_summary = cautions[0]
+    elif support:
+        historical_pattern_summary = support[0]
+    elif summary:
+        historical_pattern_summary = summary
+
+    return {
+        "summary": summary,
+        "support": support,
+        "cautions": cautions,
+        "historical_pattern_summary": historical_pattern_summary,
+        "fit_assessment": fit_assessment,
+        "credible_posture": credible_posture,
+        "reasoning_summary": reasoning_summary,
+    }
+
+
 def _stringify_item(item: object) -> str:
     if isinstance(item, dict):
         parts: list[str] = []
@@ -1613,6 +1692,7 @@ def build_capture_decision_sections(
     evidence_gaps: list[str],
     stakeholder_contacts: list[dict[str, str]],
     vehicle_signals: list[str],
+    learned_semantic_preferences: dict[str, Any],
 ) -> dict[str, Any]:
     vendor_name = _profile_company_name(vendor_profile)
     notice_text = " ".join(
@@ -1635,6 +1715,7 @@ def build_capture_decision_sections(
     set_aside_text = str(opportunity.get("set_aside", "") or "Not stated")
     set_aside_statement, set_aside_access_ok = _set_aside_access(set_aside_text, _profile_set_asides(vendor_profile))
     qualification_gaps = _required_qualification_gaps(vendor_profile, notice_text)
+    semantic_context = _semantic_capture_context(opportunity, learned_semantic_preferences)
     customer_priorities = _priority_analysis(notice_text, public_research, attachment_bundle, award_basis, contract_type)
     funding_analysis = _funding_analysis(funding_assessment, award_signals, public_research, attachment_bundle, evidence_gaps)
     incumbent = _incumbent_analysis(notice_text, award_signals, attachment_validation, attachment_bundle)
@@ -1650,6 +1731,19 @@ def build_capture_decision_sections(
         set_aside_access_ok,
         qualification_gaps,
     )
+    if semantic_context.get("support"):
+        capability_fit["proof_points"] = _dedupe_strings(
+            capability_fit.get("proof_points", []) + semantic_context.get("support", [])
+        )
+    if semantic_context.get("cautions"):
+        capability_fit["negative_hits"] = _dedupe_strings(
+            capability_fit.get("negative_hits", []) + semantic_context.get("cautions", [])
+        )
+    if semantic_context.get("historical_pattern_summary"):
+        capability_fit["credibility_requirements"] = _dedupe_strings(
+            capability_fit.get("credibility_requirements", [])
+            + [f"Address the learned historical-fit pattern directly: {semantic_context.get('historical_pattern_summary')}"]
+        )
     partner_analysis = _partner_analysis(
         vendor_profile,
         capability_fit,
@@ -1673,6 +1767,14 @@ def build_capture_decision_sections(
         competitive_gate_open,
         gate_reasons,
     )
+    if semantic_context.get("support"):
+        recommendation["rationale"] = _dedupe_strings(
+            recommendation.get("rationale", []) + semantic_context.get("support", [])[:2]
+        )
+    if semantic_context.get("cautions"):
+        recommendation["rationale"] = _dedupe_strings(
+            recommendation.get("rationale", []) + semantic_context.get("cautions", [])[:2]
+        )
     document_inventory = _document_inventory(attachment_bundle, source_log, evidence_gaps)
     competitive_analysis = _competitive_analysis(award_signals, incumbent.get("incumbent_name", ""))
     subtle_signals = _subtle_signals(
@@ -1691,6 +1793,15 @@ def build_capture_decision_sections(
         incumbent,
         _string_list(public_research.get("policy_compliance_signals", []), max_items=4),
     )
+    if semantic_context.get("cautions"):
+        win_strategy["win_themes"] = _dedupe_strings(
+            win_strategy.get("win_themes", [])
+            + [f"Do not ignore the historical caution surfaced in prior feedback: {semantic_context.get('cautions', [])[0]}"]
+        )
+        win_strategy["ghosting_strategy"] = _dedupe_strings(
+            win_strategy.get("ghosting_strategy", [])
+            + ["Ghost prior disliked patterns by proving this bid is not just another commodity or continuity-heavy support play."]
+        )
     questions = _questions_to_ask(customer_priorities, capability_fit, partner_analysis, funding_analysis, document_inventory)
     action_plan = _action_plan(document_inventory, funding_analysis, partner_analysis, capability_fit, recommendation.get("recommendation", ""))
 
@@ -1810,11 +1921,17 @@ def build_capture_decision_sections(
         "hypotheses": _dedupe_strings(
             incumbent.get("prior_selection_hypotheses", [])[:3]
             + [f"Recommended posture is {partner_analysis.get('recommended_posture', 'undetermined')} until missing proof is closed."]
+            + ([semantic_context.get("historical_pattern_summary", "")] if semantic_context.get("historical_pattern_summary") else [])
         ),
         "unknowns": _dedupe_strings(
             customer_priorities.get("unknowns", [])[:3]
             + funding_analysis.get("open_questions", [])[:2]
             + document_inventory.get("missing", [])[:2]
+        ),
+        "historical_learning_context": _dedupe_strings(
+            semantic_context.get("support", [])[:2]
+            + semantic_context.get("cautions", [])[:2]
+            + ([semantic_context.get("summary", "")] if semantic_context.get("summary") else [])
         ),
         "overall_confidence": recommendation.get("confidence", "Medium"),
     }
@@ -1823,6 +1940,7 @@ def build_capture_decision_sections(
         [
             f"Recommendation: {recommendation.get('recommendation', 'Undetermined')} ({recommendation.get('score_total', 0)}/100, confidence {recommendation.get('confidence', 'Medium')}).",
             *recommendation.get("rationale", [])[:3],
+            *(["Historical fit context: " + semantic_context.get("historical_pattern_summary", "")] if semantic_context.get("historical_pattern_summary") else []),
         ]
     )
     if recommendation.get("conditions"):
@@ -1850,6 +1968,9 @@ def build_capture_decision_sections(
             "next_best_actions": _dedupe_strings(
                 [item.get("action", "") for item in action_plan.get("immediate", [])[:3]]
             ),
+            "historical_fit_context": _dedupe_strings(
+                semantic_context.get("support", [])[:2] + semantic_context.get("cautions", [])[:2]
+            ),
         },
         "opportunity_snapshot": snapshot,
         "pursuit_recommendation": recommendation,
@@ -1872,6 +1993,9 @@ def build_capture_decision_sections(
             "missing_proof": capability_fit.get("missing_proof", []),
             "credibility_requirements": capability_fit.get("credibility_requirements", []),
             "recommended_prime_team_posture": partner_analysis.get("recommended_posture", "Undetermined"),
+            "semantic_fit_summary": semantic_context.get("summary", ""),
+            "historical_preference_support": semantic_context.get("support", []),
+            "historical_preference_cautions": semantic_context.get("cautions", []),
         },
         "subtle_signals": subtle_signals,
         "win_strategy": win_strategy,

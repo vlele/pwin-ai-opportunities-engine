@@ -90,6 +90,14 @@ OBJECTIVE_KEYWORDS = (
     "availability",
     "quality",
 )
+OBJECTIVE_ROW_PREFIX_RE = re.compile(
+    r"^\s*(?:CLIN\s+\d{3,4}[A-Z]?|SubCLIN\s+\d{3,4}[A-Z]?|Task\s+\d+(?:\.\d+)?|Subtask\s+\d+(?:\.\d+)?|PWS(?:\s+Section)?\s+\d+(?:\.\d+)?|Section\s+\d+(?:\.\d+)?|Performance Objective(?:\s+\d+)?|Deliverable(?:s)?|Transition(?:\s+Plan)?|Period of Performance)\b",
+    re.IGNORECASE,
+)
+OBJECTIVE_SECTION_HEADING_RE = re.compile(r"^\s*\d+(?:\.\d+){0,3}\s+[A-Z][A-Za-z0-9/\-() ,]+$")
+OBJECTIVE_TOC_LINE_RE = re.compile(r"\.{5,}\s*\d+\s*$")
+OBJECTIVE_TABLE_CELL_SPLIT_RE = re.compile(r"\s*(?:\||\t| {2,})\s*")
+OBJECTIVE_HEADING_PREFIX_RE = re.compile(r"^\s*(\d+(?:\.\d+){0,3})\s+(.+?)\s*$")
 OBJECTIVE_BOILERPLATE_MARKERS = (
     "request for information",
     "responses are due",
@@ -116,6 +124,33 @@ OBJECTIVE_ADMIN_TOKENS = {
     "contracting",
     "notice",
 }
+OBJECTIVE_PREFERRED_SECTION_HINTS = (
+    "scope",
+    "general requirements",
+    "deliverables",
+    "tasks",
+    "task requirements",
+    "specific tasks",
+    "services required",
+    "performance objectives",
+    "requirements",
+)
+OBJECTIVE_DEMOTED_SECTION_HINTS = (
+    "introduction",
+    "background",
+    "general information",
+    "purpose",
+    "authority",
+    "key personnel",
+)
+OBJECTIVE_EXTRA_ACTION_VERBS = (
+    "perform",
+    "operate",
+    "manage",
+    "execute",
+    "sustain",
+    "administer",
+)
 OBJECTIVE_DECOMPOSITION_FALLBACK = "Objective decomposition incomplete from current artifacts; validate SOW/PWS task structure manually."
 NO_MISSION_DRIVER = "No corroborated mission driver found for this objective in current public research."
 NO_BUDGET_SIGNAL = "No objective-specific budget signal found in current evidence."
@@ -158,8 +193,98 @@ def _clean_excerpt(value: object, max_chars: int = 4000) -> str:
     return text[:max_chars]
 
 
+def _attachment_structured_rows(attachment_bundle: dict[str, object], max_items: int = 16) -> list[str]:
+    candidate_categories = {"statement_of_work", "solicitation", "instructions_evaluation", "questions_answers", "amendment"}
+    ordered = _ordered_attachment_items(
+        attachment_bundle,
+        allowed_categories=candidate_categories,
+        max_items=6,
+    )
+    rows: list[str] = []
+    for item in ordered:
+        values = [*(item.get("snippets", []) or []), item.get("text_excerpt", "")]
+        for value in values:
+            raw = str(value or "")
+            if not raw.strip():
+                continue
+            source_lines = [line.strip() for line in raw.replace("\r", "\n").split("\n") if line.strip()]
+            if not source_lines:
+                continue
+            index = 0
+            while index < len(source_lines):
+                current = _clean_excerpt(OBJECTIVE_TABLE_CELL_SPLIT_RE.sub("; ", source_lines[index]), max_chars=420).strip(" ;:-")
+                if not current:
+                    index += 1
+                    continue
+                lower_current = current.lower()
+                if _is_toc_like_objective_line(current) or re.fullmatch(r"\d+", current):
+                    index += 1
+                    continue
+                if OBJECTIVE_ROW_PREFIX_RE.match(current):
+                    combined = current
+                    lookahead = index + 1
+                    while lookahead < len(source_lines) and len(combined) < 320:
+                        next_line = _clean_excerpt(
+                            OBJECTIVE_TABLE_CELL_SPLIT_RE.sub("; ", source_lines[lookahead]),
+                            max_chars=240,
+                        ).strip(" ;:-")
+                        if not next_line or OBJECTIVE_ROW_PREFIX_RE.match(next_line):
+                            break
+                        if next_line.lower().startswith(("question", "answer", "note", "instruction")):
+                            break
+                        combined = f"{combined}; {next_line}"
+                        lookahead += 1
+                        if any(term in combined.lower() for term in ("shall", "must", "provide", "deliver", "maintain", "transition", "report", "staff")):
+                            break
+                    rows.append(combined[:360])
+                    index = lookahead
+                    if len(rows) >= max_items:
+                        return _dedupe_strings(rows)[:max_items]
+                    continue
+                if OBJECTIVE_SECTION_HEADING_RE.match(current):
+                    combined = current
+                    lookahead = index + 1
+                    while lookahead < len(source_lines) and len(combined) < 340:
+                        next_line = _clean_excerpt(
+                            OBJECTIVE_TABLE_CELL_SPLIT_RE.sub("; ", source_lines[lookahead]),
+                            max_chars=260,
+                        ).strip(" ;:-")
+                        if not next_line:
+                            lookahead += 1
+                            continue
+                        if _is_toc_like_objective_line(next_line) or re.fullmatch(r"\d+", next_line):
+                            lookahead += 1
+                            continue
+                        if OBJECTIVE_SECTION_HEADING_RE.match(next_line) or OBJECTIVE_ROW_PREFIX_RE.match(next_line):
+                            break
+                        combined = f"{combined}; {next_line}"
+                        lookahead += 1
+                        if any(term in combined.lower() for term in ("shall", "must", "provide", "deliver", "maintain", "transition", "report", "staff", "support")):
+                            rows.append(combined[:360])
+                            break
+                    index = lookahead
+                    if len(rows) >= max_items:
+                        return _dedupe_strings(rows)[:max_items]
+                    continue
+                if ("|" in raw or "\t" in raw or re.search(r" {2,}", source_lines[index])) and len(current) >= 60:
+                    rows.append(current[:360])
+                    if len(rows) >= max_items:
+                        return _dedupe_strings(rows)[:max_items]
+                index += 1
+    return _dedupe_strings(rows)[:max_items]
+
+
 def _normalize_signal_text(value: object) -> str:
     return re.sub(r"[^a-z0-9]+", " ", _clean_excerpt(value, max_chars=12000).lower()).strip()
+
+
+def _attachment_text_value(item: dict[str, object], *, max_chars: int = 12000) -> str:
+    return _clean_excerpt(item.get("structured_text_excerpt") or item.get("text_excerpt", ""), max_chars=max_chars)
+
+
+def _is_toc_like_objective_line(text: str) -> bool:
+    lower = text.lower()
+    return "table of contents" in lower or OBJECTIVE_TOC_LINE_RE.search(text) is not None or text.count(".") >= 12
 
 
 def _signal_tokens(*values: object) -> set[str]:
@@ -363,7 +488,7 @@ def _attachment_contract_reference_lines(attachment_bundle: dict[str, object], m
     for item in attachments:
         if not isinstance(item, dict):
             continue
-        text = str(item.get("text_excerpt", "") or "")
+        text = _attachment_text_value(item)
         filename = str(item.get("filename", "attachment") or "attachment")
         for match in pattern.finditer(text):
             references.append(f"{filename}: {_clean_excerpt(match.group(1), max_chars=260)}")
@@ -380,7 +505,7 @@ def _attachment_incumbent_validation(
     notes: list[str] = []
     supporting_snippets = _attachment_contract_reference_lines(attachment_bundle)
     searchable = [
-        (str(item.get("filename", "attachment") or "attachment"), _normalize_signal_text(item.get("text_excerpt", "")))
+        (str(item.get("filename", "attachment") or "attachment"), _normalize_signal_text(_attachment_text_value(item)))
         for item in attachments
         if isinstance(item, dict)
     ]
@@ -487,7 +612,7 @@ def _attachment_text_pool(attachment_bundle: dict[str, object], max_items: int =
     ordered = _ordered_attachment_items(attachment_bundle, max_items=max_items)
     texts: list[str] = []
     for item in ordered:
-        text_excerpt = _clean_excerpt(item.get("text_excerpt", ""), max_chars=5000)
+        text_excerpt = _attachment_text_value(item, max_chars=5000)
         if text_excerpt:
             texts.append(text_excerpt)
         for snippet in item.get("snippets", []) or []:
@@ -497,6 +622,96 @@ def _attachment_text_pool(attachment_bundle: dict[str, object], max_items: int =
     return _dedupe_strings(texts)
 
 
+def _objective_heading_title(text: str) -> str:
+    match = OBJECTIVE_HEADING_PREFIX_RE.match(str(text or "").strip())
+    if not match:
+        return str(text or "").strip().lower()
+    return match.group(2).strip().lower()
+
+
+def _objective_heading_kind(text: str) -> str:
+    title = _objective_heading_title(text)
+    if any(hint in title for hint in OBJECTIVE_PREFERRED_SECTION_HINTS):
+        return "preferred"
+    if any(hint in title for hint in OBJECTIVE_DEMOTED_SECTION_HINTS):
+        return "demoted"
+    return "neutral"
+
+
+def _preferred_objective_body_blocks(
+    attachment_bundle: dict[str, object],
+    max_items: int = 10,
+    *,
+    include_filename: bool = False,
+) -> list[str]:
+    scope_categories = {"statement_of_work", "solicitation", "instructions_evaluation"}
+    ordered = _ordered_attachment_items(
+        attachment_bundle,
+        allowed_categories=scope_categories,
+        max_items=6,
+    )
+    blocks: list[str] = []
+    action_terms = set(OBJECTIVE_KEYWORDS) | set(OBJECTIVE_EXTRA_ACTION_VERBS)
+    for item in ordered:
+        filename = str(item.get("filename", "attachment") or "attachment")
+        text = _attachment_text_value(item, max_chars=24000)
+        if not text:
+            continue
+        lines = [line.strip() for line in text.replace("\r", "\n").split("\n") if line.strip()]
+        index = 0
+        while index < len(lines):
+            heading = _clean_excerpt(lines[index], max_chars=240).strip(" ;:-")
+            if not OBJECTIVE_SECTION_HEADING_RE.match(heading):
+                index += 1
+                continue
+            heading_kind = _objective_heading_kind(heading)
+            if heading_kind == "demoted":
+                index += 1
+                continue
+            if heading_kind != "preferred" and not any(
+                marker in _objective_heading_title(heading)
+                for marker in ("task", "service", "support", "performance", "requirement", "deliverable")
+            ):
+                index += 1
+                continue
+            paragraph_lines: list[str] = []
+            lookahead = index + 1
+            while lookahead < len(lines):
+                next_line = _clean_excerpt(lines[lookahead], max_chars=320).strip(" ;:-")
+                if not next_line or _is_toc_like_objective_line(next_line) or re.fullmatch(r"\d+", next_line):
+                    lookahead += 1
+                    continue
+                if OBJECTIVE_SECTION_HEADING_RE.match(next_line):
+                    break
+                paragraph_lines.append(next_line)
+                if len(" ".join(paragraph_lines)) >= 1400:
+                    break
+                lookahead += 1
+            if paragraph_lines:
+                paragraph = SPACE_RE.sub(" ", " ".join(paragraph_lines)).strip()
+                sentence_parts = [
+                    part.strip(" -;:")
+                    for part in re.split(r"(?<=[.!?;])\s+|(?<=\))\s+(?=[A-Z])", paragraph)
+                    if part.strip()
+                ]
+                if not sentence_parts:
+                    sentence_parts = [paragraph]
+                for part in sentence_parts:
+                    lower = part.lower()
+                    if len(part) < 90 or len(part) > 520:
+                        continue
+                    if not any(term in lower for term in action_terms):
+                        continue
+                    snippet = f"{heading}; {part}"[:520]
+                    if include_filename:
+                        snippet = f"{filename}: {snippet}"[:640]
+                    blocks.append(snippet)
+                    if len(blocks) >= max_items:
+                        return _dedupe_strings(blocks)[:max_items]
+            index = lookahead if lookahead > index else index + 1
+    return _dedupe_strings(blocks)[:max_items]
+
+
 def _objective_scope_texts(attachment_bundle: dict[str, object], max_items: int = 6) -> list[str]:
     scope_categories = {"statement_of_work", "solicitation", "instructions_evaluation"}
     ordered = _ordered_attachment_items(
@@ -504,13 +719,13 @@ def _objective_scope_texts(attachment_bundle: dict[str, object], max_items: int 
         allowed_categories=scope_categories,
         max_items=max_items,
     )
-    texts: list[str] = []
+    texts: list[str] = [*_preferred_objective_body_blocks(attachment_bundle, max_items=max_items)]
     for item in ordered:
         for snippet in item.get("snippets", []) or []:
             cleaned = _clean_excerpt(snippet, max_chars=320)
             if cleaned:
                 texts.append(cleaned)
-        text_excerpt = _clean_excerpt(item.get("text_excerpt", ""), max_chars=2200)
+        text_excerpt = _attachment_text_value(item, max_chars=2200)
         if text_excerpt:
             texts.append(text_excerpt)
     return _dedupe_strings(texts)
@@ -523,7 +738,10 @@ def _attachment_objective_candidates(attachment_bundle: dict[str, object], max_i
         allowed_categories=candidate_categories,
         max_items=6,
     )
-    candidates: list[str] = []
+    candidates: list[str] = [
+        *_preferred_objective_body_blocks(attachment_bundle, max_items=max_items),
+        *_attachment_structured_rows(attachment_bundle, max_items=max_items),
+    ]
     marker_keywords = (
         "clin ",
         "subclin",
@@ -542,7 +760,7 @@ def _attachment_objective_candidates(attachment_bundle: dict[str, object], max_i
         "staff",
     )
     for item in ordered:
-        values = [*(item.get("snippets", []) or []), item.get("text_excerpt", "")]
+        values = [*(item.get("snippets", []) or []), item.get("structured_text_excerpt") or item.get("text_excerpt", "")]
         for value in values:
             cleaned = _clean_excerpt(value, max_chars=7000)
             if not cleaned:
@@ -584,6 +802,13 @@ def _is_boilerplate_objective_sentence(sentence: str) -> bool:
     lower = sentence.lower().strip()
     if any(marker in lower for marker in OBJECTIVE_BOILERPLATE_MARKERS):
         return True
+    if _is_toc_like_objective_line(sentence):
+        return True
+    heading_title = _objective_heading_title(sentence)
+    if any(hint in heading_title for hint in OBJECTIVE_DEMOTED_SECTION_HINTS) and not any(
+        keyword in lower for keyword in (*OBJECTIVE_KEYWORDS, *OBJECTIVE_EXTRA_ACTION_VERBS)
+    ):
+        return True
     if re.match(r"^\d{1,2}/\d{1,2}/\d{2,4}\b", lower):
         return True
     if re.match(r"^(submit|questions|responses|offers|proposal|amendment|contact)\b", lower):
@@ -597,6 +822,18 @@ def _is_boilerplate_objective_sentence(sentence: str) -> bool:
 
 def _signal_overlap_score(reference_tokens: set[str], text: str) -> int:
     return len(reference_tokens & _signal_tokens(text))
+
+
+def _objective_candidate_score(sentence: str, requirement_tokens: set[str], structured_candidates: set[str]) -> tuple[int, int, int, int]:
+    lower = sentence.lower()
+    overlap_count = len(_signal_tokens(sentence) & requirement_tokens)
+    verb_count = sum(1 for keyword in (*OBJECTIVE_KEYWORDS, *OBJECTIVE_EXTRA_ACTION_VERBS) if keyword in lower)
+    structured_bonus = 3 if OBJECTIVE_ROW_PREFIX_RE.match(sentence) else 2 if sentence in structured_candidates else 0
+    density_bonus = 1 if any(token in lower for token in ("clin ", "task ", "pws", "deliverable", "transition")) else 0
+    section_kind = _objective_heading_kind(sentence)
+    section_bonus = 3 if section_kind == "preferred" else -3 if section_kind == "demoted" else 0
+    body_bonus = 1 if ";" in sentence and len(sentence.split(";", 1)[-1].split()) >= 12 else 0
+    return (section_bonus + structured_bonus + density_bonus + body_bonus, overlap_count, verb_count, len(sentence))
 
 
 def _matching_lines(reference_text: str, lines: list[str], max_items: int = 3, min_score: int = 1) -> list[str]:
@@ -620,22 +857,24 @@ def _decompose_objectives(
     attachment_bundle: dict[str, object],
 ) -> list[str]:
     candidates: list[str] = []
+    structured_rows = _attachment_structured_rows(attachment_bundle, max_items=18)
     attachment_candidates = _attachment_objective_candidates(attachment_bundle, max_items=20)
     attachment_texts = _objective_scope_texts(attachment_bundle, max_items=6)
     requirement_tokens = _objective_requirement_tokens(title, summary, explanation_summary, attachment_bundle)
     attachment_seed_text = " ".join(attachment_texts)
-    attachments_thin = (len(attachment_candidates) < 2 and len(attachment_texts) < 2) or len(attachment_seed_text) < 900
-    seed_values = [*attachment_candidates, *attachment_texts]
+    attachments_thin = (len(structured_rows) < 1 and len(attachment_candidates) < 2 and len(attachment_texts) < 2) or len(attachment_seed_text) < 900
+    seed_values = [*structured_rows, *attachment_candidates, *attachment_texts]
     if attachments_thin:
         seed_values.extend([summary, explanation_summary])
     elif not attachment_candidates and title:
         seed_values.append(title)
+    structured_candidate_set = set(_dedupe_strings(structured_rows))
     for value in seed_values:
-        parts = [value] if value in attachment_candidates else OBJECTIVE_SENTENCE_RE.split(_clean_excerpt(value, max_chars=8000))
+        parts = [value] if value in attachment_candidates or value in structured_candidate_set else OBJECTIVE_SENTENCE_RE.split(_clean_excerpt(value, max_chars=8000))
         for part in parts:
             sentence = SPACE_RE.sub(" ", part).strip(" -")
             lower = sentence.lower()
-            if len(sentence) < 70 or len(sentence) > 340:
+            if len(sentence) < 70 or len(sentence) > 520:
                 continue
             if sentence.endswith("?"):
                 continue
@@ -648,6 +887,10 @@ def _decompose_objectives(
                 continue
             candidates.append(sentence)
     deduped = _dedupe_strings(candidates)
+    deduped.sort(
+        key=lambda sentence: _objective_candidate_score(sentence, requirement_tokens, structured_candidate_set),
+        reverse=True,
+    )
     filtered: list[str] = []
     normalized_filtered: list[str] = []
     for sentence in deduped:
@@ -666,7 +909,11 @@ def _decompose_objectives(
         if not replaced:
             filtered.append(sentence)
             normalized_filtered.append(normalized)
-    return filtered[:4] if len(filtered) >= 2 else [OBJECTIVE_DECOMPOSITION_FALLBACK]
+    if filtered and any(OBJECTIVE_ROW_PREFIX_RE.match(sentence) or sentence in structured_candidate_set for sentence in filtered[:3]):
+        return filtered[:3]
+    if len(filtered) >= 2:
+        return filtered[:4]
+    return [OBJECTIVE_DECOMPOSITION_FALLBACK]
 
 
 def _objective_kpis(objective_text: str) -> str:
@@ -729,15 +976,35 @@ def _objective_driver(reference_text: str, signals: list[str], fallback: str) ->
     return matches[0] if matches else fallback
 
 
+def _attachment_objective_evidence_snippets(
+    objective_text: str,
+    attachment_bundle: dict[str, object],
+    max_items: int = 4,
+    min_score: int = 2,
+) -> list[str]:
+    candidate_lines = _dedupe_strings(
+        [
+            *_preferred_objective_body_blocks(attachment_bundle, max_items=18, include_filename=True),
+            *_attachment_scope_snippets(attachment_bundle, max_snippets=12),
+            *(
+                f"Attachment body: {line}"
+                for line in _attachment_structured_rows(attachment_bundle, max_items=12)
+            ),
+        ]
+    )
+    matches = _matching_lines(objective_text, candidate_lines, max_items=max_items, min_score=min_score)
+    return matches[:max_items]
+
+
 def _objective_evidence_snippets(
     objective_text: str,
-    attachment_snippets: list[str],
+    attachment_evidence_snippets: list[str],
     public_research: dict[str, object],
     related_procurements: list[str],
     max_items: int = 6,
 ) -> list[str]:
     lines: list[str] = []
-    lines.extend(attachment_snippets)
+    lines.extend(attachment_evidence_snippets)
     for key in (
         "mission_context_signals",
         "policy_compliance_signals",
@@ -1034,6 +1301,64 @@ def _funding_assessment(
     }
 
 
+def _public_research_assessment(public_research: dict[str, object]) -> dict[str, object]:
+    category_anchor_counts = public_research.get("category_anchor_counts", {})
+    if not isinstance(category_anchor_counts, dict):
+        category_anchor_counts = {}
+    mission_anchor_count = int(category_anchor_counts.get("mission_context", 0) or 0)
+    budget_anchor_count = int(category_anchor_counts.get("budget_funding", 0) or 0)
+    forecast_anchor_count = int(category_anchor_counts.get("acquisition_forecast", 0) or 0)
+    oversight_anchor_count = int(category_anchor_counts.get("oversight", 0) or 0)
+    leadership_anchor_count = int(category_anchor_counts.get("leadership", 0) or 0)
+    public_discourse_anchor_count = int(category_anchor_counts.get("public_discourse", 0) or 0)
+    requirement_relevant_ratio = float(public_research.get("requirement_relevant_ratio", 0.0) or 0.0)
+    core_requirement_anchor_count = mission_anchor_count + budget_anchor_count + forecast_anchor_count
+    return {
+        "mission_anchor_count": mission_anchor_count,
+        "budget_anchor_count": budget_anchor_count,
+        "forecast_anchor_count": forecast_anchor_count,
+        "oversight_anchor_count": oversight_anchor_count,
+        "leadership_anchor_count": leadership_anchor_count,
+        "public_discourse_anchor_count": public_discourse_anchor_count,
+        "core_requirement_anchor_count": core_requirement_anchor_count,
+        "funding_or_buying_anchor_count": int(public_research.get("funding_or_buying_anchor_count", 0) or 0),
+        "requirement_relevant_ratio": requirement_relevant_ratio,
+        "requirement_bearing_core_anchor_present": core_requirement_anchor_count > 0,
+    }
+
+
+def _is_fallback_objective_row(row: dict[str, object]) -> bool:
+    objective_text = str(row.get("objective", "") or "").strip()
+    if objective_text == OBJECTIVE_DECOMPOSITION_FALLBACK:
+        return True
+    if bool(row.get("attachment_native_corroborated")):
+        return False
+    evidence_snippets = row.get("evidence_snippets", [])
+    if not isinstance(evidence_snippets, list):
+        evidence_snippets = []
+    has_real_snippet = any(str(snippet or "").strip() and str(snippet or "").strip() != NO_EVIDENCE_SNIPPET for snippet in evidence_snippets)
+    if not has_real_snippet:
+        return True
+    mission_driver = str(row.get("mission_driver", "") or "").strip()
+    budget_signal = str(row.get("budget_signal", "") or "").strip()
+    if mission_driver == NO_MISSION_DRIVER:
+        return True
+    if budget_signal == NO_BUDGET_SIGNAL or budget_signal.startswith(NO_FUNDING_CORROBORATION.split(";")[0]):
+        return True
+    return False
+
+
+def _is_corroborated_objective_row(row: dict[str, object]) -> bool:
+    if bool(row.get("attachment_native_corroborated")):
+        return True
+    if _is_fallback_objective_row(row):
+        return False
+    evidence_snippets = row.get("evidence_snippets", [])
+    if not isinstance(evidence_snippets, list):
+        return False
+    return any(str(snippet or "").strip() and str(snippet or "").strip() != NO_EVIDENCE_SNIPPET for snippet in evidence_snippets)
+
+
 def _memo_honesty_assessment(
     public_research: dict[str, object],
     objective_row_count: int,
@@ -1131,6 +1456,13 @@ def main() -> int:
     workspace = Path(args.workspace)
     bundle_root = Path(__file__).resolve().parents[2]
     vendor_profile = load_json(workspace / "procurement" / "vendor-profile.json", default={})
+    preferences = load_json(workspace / "procurement" / "preferences.json", default={})
+    learning = preferences.get("learning", {}) if isinstance(preferences.get("learning"), dict) else {}
+    learned_semantic_preferences = (
+        learning.get("semantic_applied_preferences", {})
+        if isinstance(learning.get("semantic_applied_preferences"), dict)
+        else {}
+    )
     resolved = resolve_entry(workspace, args.entry)
     digest_date = resolved.get("digest_date") or today_local_str()
     display_entry = resolved.get("report_entry_id") or "direct"
@@ -1190,7 +1522,7 @@ def main() -> int:
             opportunity.get("summary", ""),
             notice_excerpt,
             " ".join(
-                str(item.get("text_excerpt", "") or "")
+                _attachment_text_value(item)
                 for item in (attachment_bundle.get("attachments", []) or [])[:3]
                 if isinstance(item, dict)
             ),
@@ -1417,6 +1749,17 @@ def main() -> int:
         executive_proof_points = [NO_PROOF_POINTS]
     objective_rows: list[dict[str, object]] = []
     for objective_text in decomposed_objectives:
+        attachment_native_evidence = _attachment_objective_evidence_snippets(
+            objective_text,
+            attachment_bundle,
+            max_items=4,
+        )
+        evidence_snippets = _objective_evidence_snippets(
+            objective_text,
+            attachment_native_evidence or attachment_scope_or_notice_snippets,
+            public_research,
+            related_procurements,
+        )
         objective_rows.append(
             {
                 "objective": objective_text,
@@ -1441,32 +1784,18 @@ def main() -> int:
                 "kpis": _objective_kpis(objective_text),
                 "solution_implications": _objective_solution_implications(objective_text),
                 "evidence_links": _objective_evidence_links(resolved.get("url", ""), public_sources, objective_text),
-                "evidence_snippets": _objective_evidence_snippets(
-                    objective_text,
-                    attachment_scope_or_notice_snippets,
-                    public_research,
-                    related_procurements,
-                ),
+                "attachment_native_corroborated": bool(attachment_native_evidence),
+                "attachment_native_evidence_snippets": attachment_native_evidence,
+                "evidence_snippets": evidence_snippets,
             }
         )
-    corroborated_objective_rows = sum(
-        1
-        for row in objective_rows
-        if any(snippet != NO_EVIDENCE_SNIPPET for snippet in row.get("evidence_snippets", []))
-    )
-    fallback_objective_rows = sum(
-        1
-        for row in objective_rows
-        if row.get("mission_driver") == NO_MISSION_DRIVER
-        or row.get("budget_signal") == NO_BUDGET_SIGNAL
-        or str(row.get("budget_signal", "")).startswith("No funding corroboration found")
-        or row.get("incumbents") == INCUMBENT_UNVERIFIED
-        or any(snippet == NO_EVIDENCE_SNIPPET for snippet in row.get("evidence_snippets", []))
-        or row.get("objective") == OBJECTIVE_DECOMPOSITION_FALLBACK
-    )
+    corroborated_objective_rows = sum(1 for row in objective_rows if _is_corroborated_objective_row(row))
+    fallback_objective_rows = sum(1 for row in objective_rows if _is_fallback_objective_row(row))
+    attachment_native_corroborated_rows = sum(1 for row in objective_rows if bool(row.get("attachment_native_corroborated")))
     real_funding_signal_count = sum(
         1 for signal in budget_funding_signals if not str(signal or "").startswith("No funding corroboration found")
     )
+    public_research_assessment = _public_research_assessment(public_research)
     memo_honesty = _memo_honesty_assessment(
         public_research,
         len(objective_rows),
@@ -1490,6 +1819,7 @@ def main() -> int:
         evidence_gaps=evidence_gaps,
         stakeholder_contacts=stakeholder_contacts,
         vehicle_signals=vehicle_signals,
+        learned_semantic_preferences=learned_semantic_preferences,
     )
     decision_sections.setdefault("capture_judgment", {}).update(
         {
@@ -1590,6 +1920,7 @@ def main() -> int:
             "incumbent_validation": attachment_validation,
         },
         "public_discourse_signals": public_research.get("public_discourse_signals", []),
+        "public_research_assessment": public_research_assessment,
         "recommended_next_research_moves": _dedupe_strings(
             [
                 *(
@@ -1636,6 +1967,10 @@ def main() -> int:
             ),
         ],
         "evidence_gaps": evidence_gaps,
+        "semantic_preference_signals": {
+            "scan_semantic_fit": opportunity.get("semantic_fit", {}) if isinstance(opportunity.get("semantic_fit"), dict) else {},
+            "learned_semantic_preferences": learned_semantic_preferences,
+        },
         "source_log": public_sources,
         "memo_honesty_assessment": memo_honesty,
         "validation": {
@@ -1651,8 +1986,10 @@ def main() -> int:
                 "objective_row_count": len(objective_rows),
                 "corroborated_objective_rows": corroborated_objective_rows,
                 "fallback_objective_rows": fallback_objective_rows,
+                "attachment_native_corroborated_rows": attachment_native_corroborated_rows,
                 "real_funding_signal_count": real_funding_signal_count,
             },
+            "public_research_assessment": public_research_assessment,
             "memo_honesty": memo_honesty,
             "stub_stage_exited_before_response": True,
             "menu_only_fallback_used": False,

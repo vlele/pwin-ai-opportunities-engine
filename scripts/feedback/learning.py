@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from common.jsonl import read_jsonl
+from common.openai_reasoning import aggregate_semantic_feedback
 from common.paths import load_json, utc_now_iso, write_json
 
 
@@ -219,6 +220,12 @@ def recompute_learning_preferences(workspace: Path) -> dict[str, Any]:
     if not events:
         notes.append("No feedback events logged yet.")
 
+    semantic_summary = aggregate_semantic_feedback(
+        events=events,
+        decay_rate_monthly=decay_rate,
+        promotion_threshold=threshold,
+    )
+
     learning["signal_scores"] = {
         dimension: {value: round(score, 3) for value, score in values.items()}
         for dimension, values in score_maps.items()
@@ -237,6 +244,22 @@ def recompute_learning_preferences(workspace: Path) -> dict[str, Any]:
         "soft_preferences": applied_soft_preferences,
         "notes": notes,
     }
+    learning["semantic_signal_scores"] = {
+        dimension: {
+            row["value"]: float(row["score"])
+            for row in rows
+        }
+        for dimension, rows in semantic_summary.get("semantic_aggregates", {}).items()
+    }
+    learning["semantic_signal_event_counts"] = {
+        dimension: {
+            row["value"]: int(row["event_count"])
+            for row in rows
+        }
+        for dimension, rows in semantic_summary.get("semantic_aggregates", {}).items()
+    }
+    learning["semantic_aggregates"] = semantic_summary.get("semantic_aggregates", {})
+    learning["semantic_applied_preferences"] = semantic_summary.get("semantic_applied_preferences", {})
     learning["last_learning_update"] = utc_now_iso()
 
     write_json(preferences_path, preferences)
@@ -244,4 +267,5 @@ def recompute_learning_preferences(workspace: Path) -> dict[str, Any]:
         "feedback_event_count": len(events),
         "threshold": threshold,
         "applied_preferences": learning["applied_preferences"],
+        "semantic_applied_preferences": learning.get("semantic_applied_preferences", {}),
     }
