@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>pWin.ai Opportunities Quick Start</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    span.underline{text-decoration: underline;}
+    div.column{display: inline-block; vertical-align: top; width: 50%;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    ul.task-list{list-style: none;}
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="quickstart-one-pager-styled.css" />
+</head>
+<body>
+<h1 id="pwinai-opportunities-quick-start">pWin.ai Opportunities Quick Start</h1>
+<p><code>pWin.ai Opportunities</code> helps you bootstrap a workspace from a company website, scan federal opportunities, turn promising items into capture briefs, and improve future matching with plain-English feedback.</p>
+<h2 id="minimum-requirements">Minimum Requirements</h2>
+<ul>
+<li>One working host: <code>OpenAI Codex</code>, <code>OpenClaw</code>, or <code>Claude Code</code></li>
+<li><code>python3</code> available in your shell</li>
+<li>A workspace folder where the skill can write artifacts</li>
+<li>A <code>SAM.gov</code> API key exposed as <code>SAM_API_KEY</code></li>
+<li>An OpenAI API key exposed as <code>OPENAI_API_KEY</code></li>
+<li>A reasoning-capable OpenAI model configured for your host</li>
+<li><code>o3-mini</code> is fine for this setup</li>
+<li>Internet access</li>
+<li>GitHub access to this repo</li>
+</ul>
+<p>This one-pager assumes an OpenAI-backed setup. If your host can talk to multiple model providers, use an OpenAI key for the steps below.</p>
+<p>If your GitHub setup uses HTTPS instead of SSH, swap the clone URLs below to the HTTPS form you normally use.</p>
+<h2 id="1-install-the-skill">1. Install the Skill</h2>
+<h3 id="openai-codex">OpenAI Codex</h3>
+<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true"></a><span class="fu">git</span> clone git@github.com:vlele/pwin-ai-opportunities-engine.git <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/.codex/skills/pwin-ai-opportunities&quot;</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true"></a><span class="bu">export</span> <span class="va">PWIN_AI_OPPS_ROOT=</span><span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/.codex/skills/pwin-ai-opportunities&quot;</span></span></code></pre></div>
+<p>If Codex does not pick it up immediately, restart Codex or refresh skill discovery.</p>
+<h3 id="openclaw">OpenClaw</h3>
+<div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true"></a><span class="fu">git</span> clone git@github.com:vlele/pwin-ai-opportunities-engine.git <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/.openclaw/skills/pwin-ai-opportunities&quot;</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true"></a><span class="bu">export</span> <span class="va">PWIN_AI_OPPS_ROOT=</span><span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/.openclaw/skills/pwin-ai-opportunities&quot;</span></span></code></pre></div>
+<h3 id="claude-code">Claude Code</h3>
+<div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true"></a><span class="fu">git</span> clone git@github.com:vlele/pwin-ai-opportunities-engine.git <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/src/pwin-ai-opportunities&quot;</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true"></a><span class="bu">export</span> <span class="va">PWIN_AI_OPPS_ROOT=</span><span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/src/pwin-ai-opportunities&quot;</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true"></a><span class="fu">mkdir</span> -p <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/.claude/commands/pwin-ai-opportunities&quot;</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true"></a><span class="fu">cp</span> -R <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/claude-code/.claude/commands/.&quot;</span> <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/.claude/commands/pwin-ai-opportunities/&quot;</span></span></code></pre></div>
+<p>Then copy or merge <code>claude-code/CLAUDE.md</code> into the Claude Code project context you normally use. After that, Claude Code users can call the command pack with prompts such as <code>/pwin-bootstrap</code>, <code>/pwin-scan</code>, <code>/pwin-research</code>, <code>/pwin-feedback</code>, and <code>/pwin-show-digest</code>.</p>
+<h2 id="2-add-your-keys">2. Add Your Keys</h2>
+<p>In the shell where your host runs, export your keys:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true"></a><span class="bu">export</span> <span class="va">SAM_API_KEY=</span><span class="st">&quot;your-sam-gov-key&quot;</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true"></a><span class="bu">export</span> <span class="va">OPENAI_API_KEY=</span><span class="st">&quot;your-openai-key&quot;</span></span></code></pre></div>
+<p>This quick start assumes <code>OPENAI_API_KEY</code> and a reasoning model. If you need a safe default model choice, <code>o3-mini</code> is fine.</p>
+<p>The important part is that your host is configured to use a reasoning-capable OpenAI model rather than a non-reasoning default. <code>SAM_API_KEY</code> is the only skill-specific secret, but this guide assumes the LLM side is OpenAI.</p>
+<h2 id="3-pick-a-workspace">3. Pick a Workspace</h2>
+<p>Create or open one folder per company:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true"></a><span class="fu">mkdir</span> -p <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/work/acme-capture&quot;</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true"></a><span class="bu">cd</span> <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/work/acme-capture&quot;</span></span></code></pre></div>
+<p>This skill writes its outputs into <code>procurement/</code> inside that workspace.</p>
+<h2 id="4-bootstrap-the-workspace-from-the-company-url">4. Bootstrap the Workspace from the Company URL</h2>
+<p>In OpenClaw or Codex, ask:</p>
+<pre class="text"><code>Use pwin-ai-opportunities and bootstrap this workspace from https://example.com.
+</code></pre>
+<p>If you already know the NAICS codes, say:</p>
+<pre class="text"><code>Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
+with confirmed NAICS 541511 and 541512.
+</code></pre>
+<p>If those NAICS are still tentative, say:</p>
+<pre class="text"><code>Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
+and treat NAICS 541511 and 541512 as candidates.
+</code></pre>
+<p>In Claude Code, use the command pack:</p>
+<pre class="text"><code>/pwin-bootstrap workspace path $PWD and company URL https://example.com
+/pwin-bootstrap workspace path $PWD and company URL https://example.com with confirmed NAICS 541511 and 541512
+/pwin-bootstrap workspace path $PWD and company URL https://example.com with candidate NAICS 541511 and 541512
+</code></pre>
+<p>That creates or updates:</p>
+<ul>
+<li><code>procurement/vendor-profile.json</code></li>
+<li><code>procurement/preferences.json</code></li>
+<li><code>procurement/source-registry.json</code></li>
+<li><code>procurement/STARTER_PROFILE.md</code></li>
+<li><code>MEMORY.md</code></li>
+</ul>
+<p>Bootstrap does more than create empty files. It immediately pre-populates <code>procurement/vendor-profile.json</code> with:</p>
+<ul>
+<li>bootstrap metadata and a <code>needs_user_confirmation</code> status</li>
+<li><code>company.website</code> plus an inferred company name and summary</li>
+<li>inferred <code>core_competencies</code>, <code>other_taxonomy_tags.keywords</code>, and a starter <code>fit_narrative</code></li>
+<li>confirmed <code>naics.confirmed</code> values when you provide confirmed codes</li>
+<li>candidate <code>naics.candidates</code> values from tentative input plus website inference</li>
+<li>candidate buyer notes, provenance facts, and a reminder that website-derived facts are still provisional</li>
+</ul>
+<p>It also seeds <code>procurement/preferences.json</code> to exclude <code>grants</code> by default, prefer <code>contracts</code>, <code>subcontracts</code>, and <code>forecasts</code>, and reuse the inferred capability keywords. If <code>procurement/vendor-profile.json</code> already exists, bootstrap merges into it instead of resetting the file.</p>
+<p>Then review <code>procurement/STARTER_PROFILE.md</code> and confirm or correct the provisional fields before the first real scan.</p>
+<h2 id="5-run-the-first-scan">5. Run the First Scan</h2>
+<p>Once the workspace is bootstrapped, ask:</p>
+<pre class="text"><code>Use pwin-ai-opportunities and run a federal opportunity scan for the next 30 to 45 days in this workspace.
+</code></pre>
+<p>In Claude Code, use:</p>
+<pre class="text"><code>/pwin-scan workspace path $PWD and horizon 30-45
+</code></pre>
+<p>Expected first-run behavior:</p>
+<ul>
+<li>if <code>SAM_API_KEY</code> is missing, the scan reports <code>missing_api_key</code></li>
+<li>if the workspace still has no usable NAICS, the scan reports <code>no_naics</code></li>
+<li>if the scan finds matches, you will get a dated digest with stable IDs like <code>A1</code>, <code>W2</code>, or <code>E1</code></li>
+</ul>
+<h2 id="6-read-the-digest">6. Read the Digest</h2>
+<p>Ask:</p>
+<pre class="text"><code>Use pwin-ai-opportunities and show the latest digest.
+</code></pre>
+<p>In Claude Code, use:</p>
+<pre class="text"><code>/pwin-show-digest workspace path $PWD and date latest
+</code></pre>
+<h2 id="7-run-capture-research">7. Run Capture Research</h2>
+<p>Pick a stable ID from the digest and ask:</p>
+<pre class="text"><code>Use pwin-ai-opportunities and research A1 with full capture depth.
+</code></pre>
+<p>In Claude Code, use:</p>
+<pre class="text"><code>/pwin-research workspace path $PWD and entry A1 with full capture depth
+</code></pre>
+<p>That produces a fresh capture brief and evidence file under <code>procurement/capture-briefs/</code> and <code>procurement/capture-evidence/</code>.</p>
+<h2 id="8-give-feedback">8. Give Feedback</h2>
+<p>Use plain-English feedback such as:</p>
+<pre class="text"><code>never show grants
+like A1
+dislike W2 because too small
+more like A1
+</code></pre>
+<p>In Claude Code, the command-pack equivalent is:</p>
+<pre class="text"><code>/pwin-feedback workspace path $PWD and text never show grants
+/pwin-feedback workspace path $PWD and text like A1
+</code></pre>
+<p>That feedback is logged to <code>procurement/feedback-events.jsonl</code> and applied to future scans.</p>
+<h2 id="what-gets-created-in-your-workspace">What Gets Created in Your Workspace</h2>
+<ul>
+<li><code>procurement/vendor-profile.json</code></li>
+<li><code>procurement/preferences.json</code></li>
+<li><code>procurement/source-registry.json</code></li>
+<li><code>procurement/STARTER_PROFILE.md</code></li>
+<li><code>procurement/digests/YYYY-MM-DD.md</code></li>
+<li><code>procurement/digest-entry-map/YYYY-MM-DD.json</code></li>
+<li><code>procurement/capture-briefs/...</code></li>
+<li><code>procurement/capture-evidence/...</code></li>
+<li><code>procurement/feedback-events.jsonl</code></li>
+<li><code>MEMORY.md</code></li>
+</ul>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<ul>
+<li><code>missing_api_key</code> <code>SAM_API_KEY</code> is not exported in the shell running the scan.</li>
+<li><code>no_naics</code> The workspace still does not have confirmed or candidate <code>NAICS</code> after bootstrap or manual edits.</li>
+<li><code>HTTP 429</code> from <code>SAM.gov</code> Your key is wired correctly, but the API quota is throttled. Wait until the <code>nextAccessTime</code> returned by <code>SAM.gov</code> and rerun.</li>
+</ul>
+<h2 id="short-version">Short Version</h2>
+<ol>
+<li>Clone the repo with your normal authenticated GitHub method.</li>
+<li>Export <code>SAM_API_KEY</code>.</li>
+<li>Create a workspace.</li>
+<li>Bootstrap it from the company website.</li>
+<li>Review the starter profile and the populated <code>vendor-profile.json</code>.</li>
+<li>Run the federal-only scan.</li>
+<li>Read the digest, research a stable ID, and give feedback.</li>
+</ol>
+<h2 id="direct-script-equivalents">Direct Script Equivalents</h2>
+<p>These are helpful for debugging or CI. In normal OpenClaw and Codex usage, prefer the chat prompts above. In Claude Code, prefer the <code>/pwin-*</code> command pack shown above.</p>
+<div class="sourceCode" id="cb18"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/bootstrap/bootstrap_workspace.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --company-url <span class="st">&quot;https://example.com&quot;</span></span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/scan/run_scan.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --horizon <span class="st">&quot;30-45&quot;</span> --federal-only</span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/show/show_digest.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --date latest</span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --entry <span class="st">&quot;A1&quot;</span> --depth full_360</span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/feedback/apply_feedback.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --text <span class="st">&quot;never show grants&quot;</span></span></code></pre></div>
+</body>
+</html>

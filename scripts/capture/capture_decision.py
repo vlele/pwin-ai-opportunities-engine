@@ -199,6 +199,17 @@ def _clamp(value: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
 
+def _join_sentence_parts(parts: list[str]) -> str:
+    cleaned = [str(part).strip().rstrip(".") for part in parts if str(part).strip()]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return f"{cleaned[0]}."
+    if len(cleaned) == 2:
+        return f"{cleaned[0]}, and {cleaned[1]}."
+    return f"{', '.join(cleaned[:-1])}, and {cleaned[-1]}."
+
+
 def _dedupe_strings(values: list[str]) -> list[str]:
     seen: set[str] = set()
     deduped: list[str] = []
@@ -799,8 +810,18 @@ def _incumbent_analysis(
 
     lower = notice_text.lower()
     if _contains_any(lower, list(CONTINUITY_MARKERS)):
-        strength_signals.append("Continuity language suggests the customer is sensitive to transition risk, which usually helps an incumbent or deeply embedded performer.")
-        prior_selection_hypotheses.append("A likely prior discriminator was low transition risk and legacy environment familiarity.")
+        if incumbent_name == "No confirmed incumbent":
+            strength_signals.append(
+                "Continuity language suggests the customer is sensitive to transition risk, but the current evidence does not confirm which performer benefits most from that posture."
+            )
+            prior_selection_hypotheses.append(
+                "If this is a true follow-on, low transition risk and legacy environment familiarity were likely meaningful selection factors."
+            )
+        else:
+            strength_signals.append(
+                "Continuity language suggests the customer is sensitive to transition risk, which can favor an incumbent or other deeply embedded performer."
+            )
+            prior_selection_hypotheses.append("A likely prior discriminator was low transition risk and legacy environment familiarity.")
     if incumbent_award:
         strength_signals.append(
             f"Related award history points to {incumbent_award.get('Recipient Name', 'the likely performer')} under award {incumbent_award.get('Award ID', 'N/A')} for {_currency(incumbent_award.get('Award Amount'))}."
@@ -933,8 +954,8 @@ def _subtle_signals(
         signals.append(
             {
                 "signal": "Continuity / legacy protection language",
-                "why_it_matters": "This often indicates incumbent advantage, short tolerance for transition risk, and a bias toward proven delivery rather than innovation theater.",
-                "effect": "Hurts us unless we can neutralize transition risk.",
+                "why_it_matters": "This often signals low tolerance for transition risk and a bias toward teams that can prove stable, low-disruption delivery.",
+                "effect": "Hurts teams that cannot show a concrete transition and staffing story.",
                 "confidence": "High",
                 "source": "SAM notice and parsed attachment text",
             }
@@ -1116,20 +1137,65 @@ def _capability_fit(
     if not set_aside_access_ok:
         missing_proof.append("Socioeconomic eligibility is not yet proven for the visible set-aside posture.")
     missing_proof.extend(qualification_gaps.get("missing", []))
+    eligibility_gaps: list[str] = []
+    if vehicle_access_required and not vehicle_access_ok:
+        eligibility_gaps.append("Vehicle access is not yet proven from the vendor profile.")
+    if not set_aside_access_ok:
+        eligibility_gaps.append("Socioeconomic eligibility is not yet proven for the visible set-aside posture.")
+    eligibility_gaps.extend(qualification_gaps.get("missing", []))
 
     credibility_requirements: list[str] = []
+    lower = notice_text.lower()
     if customer_priorities.get("evidence_backed_priorities"):
-        credibility_requirements.append("Map past performance and proof points directly to the evidence-backed customer priorities.")
-    if _contains_any(notice_text.lower(), list(CONTINUITY_MARKERS)):
-        credibility_requirements.append("Show a transition plan, mobilization timeline, and low-disruption staffing approach strong enough to counter continuity bias.")
-    if customer_priorities.get("likely_priorities"):
-        credibility_requirements.append("Back claims with specific delivery examples, not generic capability statements.")
-    if _contains_any(notice_text.lower(), list(POLICY_MARKERS)):
+        credibility_requirements.append(
+            "Map each proof point to the specific priorities surfaced in this notice, especially continuity, compliance, reporting, and best-value credibility."
+        )
+    surfaced_qualifications = qualification_gaps.get("surfaced", [])
+    missing_qualifications = qualification_gaps.get("missing_labels", [])
+    proven_qualifications = [label for label in surfaced_qualifications if label not in missing_qualifications]
+    if surfaced_qualifications:
+        qualification_parts: list[str] = []
+        if proven_qualifications:
+            qualification_parts.append(f"Lead with documented proof of {', '.join(proven_qualifications)}")
+        if missing_qualifications:
+            qualification_parts.append(
+                f"explain how {', '.join(missing_qualifications)} will be satisfied before controlled technical documents or award access are required"
+                if any(marker in lower for marker in ("distribution d", "controlled technical", "jcp"))
+                else f"explain how {', '.join(missing_qualifications)} will be satisfied before award"
+            )
+        qualification_bullet = _join_sentence_parts(qualification_parts)
+        if qualification_bullet:
+            credibility_requirements.append(qualification_bullet)
+    if _contains_any(lower, list(CONTINUITY_MARKERS)):
+        if any(marker in lower for marker in ("high performance computing", "supercomputer", "dsrc", "dren", "sdren", "classified")):
+            credibility_requirements.append(
+                "Show a transition and staffing plan for cleared, low-disruption operations across classified and unclassified environments, including named mobilization steps and cutover controls."
+            )
+        else:
+            credibility_requirements.append(
+                "Show a transition plan, mobilization timeline, and low-disruption staffing approach because the notice signals transition sensitivity."
+            )
+    if any(marker in lower for marker in ("cmmc", "jcp", "distribution d", "controlled technical")):
+        credibility_requirements.append(
+            "Bring compliance evidence that matches this notice: CMMC control coverage, controlled-document handling, and any clearance-dependent delivery controls."
+        )
+    elif _contains_any(lower, list(POLICY_MARKERS)):
         credibility_requirements.append("Produce compliance artifacts, control mappings, or policy-ready delivery evidence.")
+    if capability_hits:
+        credibility_requirements.append(
+            f"Anchor the solution story in the overlap already visible in the record: {', '.join(capability_hits[:3])}."
+        )
     if not past_performance:
-        credibility_requirements.append("Bring partner or subcontractor past performance if in-house proof is thin.")
-    if qualification_gaps.get("surfaced"):
-        credibility_requirements.append(f"Close hard qualification gaps: {', '.join(qualification_gaps.get('surfaced', []))}.")
+        if any(marker in lower for marker in ("high performance computing", "supercomputer", "dsrc", "dren", "sdren")):
+            credibility_requirements.append(
+                "Use teammate or referenceable past performance that proves secure DoD or mission-platform operations at comparable scale, ideally including HPC, networking, or 24x7 support."
+            )
+        elif any(marker in lower for marker in ("classified", "top secret", "secret clearance", "facility clearance")):
+            credibility_requirements.append(
+                "Use teammate or referenceable past performance that proves cleared delivery in classified or controlled environments, not just general cloud modernization."
+            )
+        else:
+            credibility_requirements.append("Bring partner or subcontractor past performance if in-house proof is thin.")
 
     return {
         "capability_hits": capability_hits,
@@ -1140,6 +1206,7 @@ def _capability_fit(
         "naics_match": naics_match,
         "proof_points": proof_points,
         "missing_proof": _dedupe_strings(missing_proof),
+        "eligibility_gaps": _dedupe_strings(eligibility_gaps),
         "credibility_requirements": _dedupe_strings(credibility_requirements),
         "past_performance_inventory": past_performance,
         "qualification_gates": qualification_gaps.get("surfaced", []),
@@ -1224,6 +1291,7 @@ def _score_and_recommendation(
     gate_reasons: list[str],
 ) -> dict[str, Any]:
     days_until_due = opportunity.get("days_until_due")
+    qualification_gap_count = len(capability_fit.get("missing_qualification_gates", []))
     customer_alignment = _clamp(
         5
         + min(6, len(customer_priorities.get("evidence_backed_priorities", [])) * 2)
@@ -1239,6 +1307,7 @@ def _score_and_recommendation(
         0,
         15,
     )
+    requirement_fit = _clamp(requirement_fit - min(3, qualification_gap_count), 0, 15)
     past_perf_fit = _clamp(
         2
         + (6 if len(capability_fit.get("past_performance_inventory", [])) >= 3 else 4 if capability_fit.get("past_performance_inventory") else 0)
@@ -1247,10 +1316,7 @@ def _score_and_recommendation(
         15,
     )
     funding_confidence = {"High": 9, "Medium": 6, "Low": 3}.get(str(funding_analysis.get("funding_confidence", "Low")), 3)
-    qualification_gap_count = len(capability_fit.get("missing_qualification_gates", []))
     vehicle_access = 8 if vehicle_access_ok and set_aside_access_ok else 5 if vehicle_access_ok or set_aside_access_ok else 2
-    if qualification_gap_count:
-        vehicle_access = max(1, vehicle_access - min(6, qualification_gap_count * 2))
     incumbent_vulnerability = 5
     if any("continuity" in item.lower() or "low transition" in item.lower() for item in incumbent_analysis.get("strength_signals", [])):
         incumbent_vulnerability = 3
@@ -1286,14 +1352,14 @@ def _score_and_recommendation(
     else:
         timing = 2
 
-    if qualification_gap_count:
-        access_rationale = "Driven by hard qualification gates surfaced in the notice, such as clearances or required certifications, plus any set-aside or vehicle access issues."
-    elif vehicle_access_required:
+    if vehicle_access_required and not vehicle_access_ok:
         access_rationale = "Driven by whether the opportunity appears to require a pre-existing contract vehicle and whether the profile shows access."
     elif not set_aside_access_ok:
         access_rationale = "Driven mainly by socioeconomic eligibility because no pre-existing vehicle gate is clearly visible."
     else:
-        access_rationale = "No pre-existing vehicle gate or socioeconomic barrier is visible in current evidence, so this score stays stronger unless other access blockers surface."
+        access_rationale = "No pre-existing vehicle gate or socioeconomic barrier is visible in current evidence."
+    if qualification_gap_count:
+        access_rationale = f"{access_rationale} Mandatory qualifications are tracked separately and still need proof."
 
     breakdown = [
         {
@@ -1575,7 +1641,7 @@ def _action_plan(
         {
             "owner_role": "Capture Manager",
             "action": "Retrieve and validate the full solicitation document set, especially SOW/PWS, amendments, Q&A, and pricing files.",
-            "why": "Missing or partial documents are the fastest way to misjudge evaluation drivers, transition scope, and incumbent advantage.",
+            "why": "Missing or partial documents are the fastest way to misjudge evaluation drivers, transition scope, and the real competitive posture.",
             "dependency": "Notice workspace access and manual download if links are controlled or expired.",
             "priority": "High",
             "capture_value": "Improves bid/no-bid confidence and clarifies customer hot buttons.",
@@ -1897,8 +1963,7 @@ def build_capture_decision_sections(
             ]
         ),
         "vehicle_or_eligibility_gaps": _dedupe_strings(
-            capability_fit.get("missing_proof", [])[:4]
-            + ([] if set_aside_access_ok else [set_aside_statement])
+            capability_fit.get("eligibility_gaps", [])[:4]
         ),
         "price_to_win_implications": win_strategy.get("price_to_win_considerations", []),
     }
