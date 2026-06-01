@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import mimetypes
 import os
 from pathlib import Path
 import re
@@ -293,9 +294,27 @@ def _download_attachment(
             data = data[:max_bytes]
         filename = filename_hint or _filename_from_headers(url, response.headers)
         content_type = content_type_hint or response.headers.get("Content-Type", "application/octet-stream")
+    return _attachment_record_from_bytes(
+        url=url,
+        filename=filename,
+        content_type=content_type,
+        data=data,
+        truncated=truncated,
+    )
+
+
+def _attachment_record_from_bytes(
+    *,
+    url: str,
+    filename: str,
+    content_type: str,
+    data: bytes,
+    truncated: bool,
+    local_path: str = "",
+) -> dict[str, Any]:
     text, parser_status = _extract_attachment_text(filename, content_type, data)
     structured_excerpt = _normalize_preserve_lines(text, max_chars=24000)
-    return {
+    record = {
         "url": url,
         "filename": filename,
         "content_type": content_type,
@@ -306,6 +325,67 @@ def _download_attachment(
         "text_excerpt": structured_excerpt[:12000],
         "structured_text_excerpt": structured_excerpt,
         "snippets": _attachment_snippets(text),
+    }
+    if local_path:
+        record["local_path"] = local_path
+    return record
+
+
+def load_local_attachments(
+    file_paths: list[str] | None,
+    *,
+    max_attachments: int = 20,
+    max_bytes: int = 8_000_000,
+) -> dict[str, Any]:
+    attachments: list[dict[str, Any]] = []
+    errors: list[str] = []
+    normalized_paths: list[Path] = []
+    for raw_path in file_paths or []:
+        candidate = str(raw_path or "").strip()
+        if not candidate:
+            continue
+        path = Path(candidate).expanduser()
+        if not path.exists():
+            errors.append(f"{path.as_posix()}: file_not_found")
+            continue
+        if not path.is_file():
+            errors.append(f"{path.as_posix()}: not_a_file")
+            continue
+        normalized_paths.append(path)
+
+    for path in normalized_paths[:max_attachments]:
+        try:
+            data = path.read_bytes()
+            truncated = len(data) > max_bytes
+            if truncated:
+                data = data[:max_bytes]
+            content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            attachments.append(
+                _attachment_record_from_bytes(
+                    url=path.resolve().as_uri(),
+                    filename=path.name,
+                    content_type=content_type,
+                    data=data,
+                    truncated=truncated,
+                    local_path=path.resolve().as_posix(),
+                )
+            )
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            errors.append(f"{path.as_posix()}: {exc}")
+
+    attachments.sort(key=lambda item: (CATEGORY_PRIORITY.get(item.get("category", "other"), 99), item.get("filename", "")))
+    status = "ok" if attachments else ("error" if errors else "empty")
+    return {
+        "status": status,
+        "record": {},
+        "point_of_contact": [],
+        "attachments": attachments,
+        "attachments_expected": bool(normalized_paths),
+        "record_lookup_status": "local_files",
+        "resource_listing_status": "local_files",
+        "seeded_resource_links": False,
+        "resource_link_count": len(normalized_paths),
+        "errors": errors,
     }
 
 

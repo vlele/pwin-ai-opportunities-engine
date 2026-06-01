@@ -173,6 +173,21 @@ In Claude Code, use:
 
 That produces a fresh capture brief and evidence file under `procurement/capture-briefs/` and `procurement/capture-evidence/`.
 
+If you already have local solicitation files, you can run direct capture without a prior stable ID:
+
+```bash
+python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" \
+  --workspace "$PWD" \
+  --file "/absolute/path/to/PWS.pdf" \
+  --file "/absolute/path/to/QA.docx" \
+  --title "Example opportunity" \
+  --buyer "Department of Example" \
+  --solicitation-number "ABC123" \
+  --depth full_360
+```
+
+You can also add local files to a tracked capture run when you want to augment a stable ID with extra documents.
+
 ## 8. Give Feedback
 
 Use plain-English feedback such as:
@@ -234,5 +249,6 @@ python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" --workspac
 python3 "$PWIN_AI_OPPS_ROOT/scripts/scan/run_scan.py" --workspace "$PWD" --horizon "30-45" --federal-only
 python3 "$PWIN_AI_OPPS_ROOT/scripts/show/show_digest.py" --workspace "$PWD" --date latest
 python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth full_360
+python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" --workspace "$PWD" --file "/absolute/path/to/PWS.pdf" --file "/absolute/path/to/QA.docx" --title "Example opportunity" --buyer "Department of Example" --solicitation-number "ABC123" --depth full_360
 python3 "$PWIN_AI_OPPS_ROOT/scripts/feedback/apply_feedback.py" --workspace "$PWD" --text "never show grants"
 ```

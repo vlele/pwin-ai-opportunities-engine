@@ -163,6 +163,7 @@ Use when the user says:
 - `research W2`
 - `research 0231571d...`
 - `capture deep dive on A1`
+- `run capture on these local files`
 
 Run:
 
@@ -171,6 +172,29 @@ python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" --workspace "$PWD
 ```
 
 Replace `A1` with the provided entry or identifier.
+
+For direct local-file capture, provide one or more files plus enough metadata to label the opportunity:
+
+```bash
+python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" \
+  --workspace "$PWD" \
+  --file "/absolute/path/to/PWS.pdf" \
+  --file "/absolute/path/to/QA.docx" \
+  --title "Example opportunity" \
+  --buyer "Department of Example" \
+  --solicitation-number "ABC123" \
+  --depth full_360
+```
+
+You can also combine tracked capture with extra local files:
+
+```bash
+python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" \
+  --workspace "$PWD" \
+  --entry "A1" \
+  --file "/absolute/path/to/amendment.pdf" \
+  --depth full_360
+```
 
 The capture orchestrator is responsible for:
 

@@ -16,7 +16,7 @@ from common.jsonl import append_jsonl
 from common.paths import load_json, safe_slug, standard_procurement_paths, today_local_str, utc_now_iso, write_json, write_text
 from common.validation import validate_capture_brief_text
 from capture.capture_decision import build_capture_decision_sections
-from capture.fetch_notice_attachments import fetch_notice_attachments
+from capture.fetch_notice_attachments import fetch_notice_attachments, load_local_attachments
 from capture.fetch_notice_context import load_notice_context
 from capture.fetch_public_context import fetch_public_research, fetch_url_excerpt
 from capture.render_capture_brief import render_capture_brief
@@ -184,6 +184,120 @@ def build_request_paths(workspace: Path, digest_date: str, display_entry: str, c
         "request_capture_evidence_path": specific_evidence.as_posix(),
         "latest_alias_capture_brief_path": alias_brief.as_posix(),
         "latest_alias_capture_evidence_path": alias_evidence.as_posix(),
+    }
+
+
+def _normalize_local_file_inputs(workspace: Path, raw_paths: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    for raw_path in raw_paths or []:
+        candidate = str(raw_path or "").strip()
+        if not candidate:
+            continue
+        path = Path(candidate).expanduser()
+        if not path.is_absolute():
+            workspace_relative = workspace / path
+            if workspace_relative.exists():
+                path = workspace_relative
+            else:
+                path = (Path.cwd() / path)
+        normalized.append(path.resolve().as_posix())
+    return normalized
+
+
+def _build_direct_local_resolution(
+    *,
+    local_file_paths: list[str],
+    title: str,
+    buyer: str,
+    summary: str,
+    url: str,
+    notice_id: str,
+    solicitation_number: str,
+) -> dict[str, object]:
+    first_file = Path(local_file_paths[0]) if local_file_paths else Path("local-file-bundle")
+    inferred_title = title.strip() or solicitation_number.strip() or first_file.stem.replace("-", " ").replace("_", " ").strip()
+    canonical_seed = notice_id.strip() or solicitation_number.strip() or inferred_title or first_file.stem or "local-file-bundle"
+    return {
+        "status": "resolved",
+        "entry_resolution_mode": "local_files",
+        "report_entry_id": "",
+        "digest_date": today_local_str(),
+        "opportunity_id": "",
+        "canonical_record_id": canonical_seed,
+        "canonical_record_id_type": "local_file_bundle",
+        "notice_id": notice_id.strip(),
+        "title": inferred_title,
+        "buyer": buyer.strip(),
+        "summary": summary.strip(),
+        "solicitation_number": solicitation_number.strip(),
+        "source_id": f"local-files:{safe_slug(canonical_seed, 24)}",
+        "source_name": "Local files",
+        "source_tier": 1,
+        "url": url.strip(),
+        "local_files": local_file_paths,
+    }
+
+
+def _build_direct_local_context(resolved: dict[str, object]) -> dict[str, object]:
+    summary = str(resolved.get("summary", "") or "").strip()
+    title = str(resolved.get("title", "") or "").strip()
+    buyer = str(resolved.get("buyer", "") or "").strip()
+    solicitation_number = str(resolved.get("solicitation_number", "") or "").strip()
+    if not summary:
+        file_count = len(resolved.get("local_files", []) or [])
+        summary = (
+            f"Direct capture assembled from {file_count} local file(s) for {title or 'this opportunity'}."
+            if file_count
+            else "Direct capture assembled from local files."
+        )
+    opportunity_record = {
+        "title": title,
+        "buyer": buyer,
+        "summary": summary,
+        "notice_id": str(resolved.get("notice_id", "") or ""),
+        "solicitation_number": solicitation_number,
+        "resource_links": [],
+        "point_of_contact": [],
+        "semantic_fit": {},
+    }
+    return {
+        "opportunity_record": opportunity_record,
+        "explanation_record": {"summary": summary},
+        "report_text": "",
+        "digest_text": "",
+    }
+
+
+def _merge_attachment_bundles(primary: dict[str, object], supplemental: dict[str, object]) -> dict[str, object]:
+    merged_contacts = [
+        item
+        for item in [*(primary.get("point_of_contact", []) or []), *(supplemental.get("point_of_contact", []) or [])]
+        if isinstance(item, dict)
+    ]
+    merged_attachments: list[dict[str, object]] = []
+    seen_keys: set[str] = set()
+    for item in [*(primary.get("attachments", []) or []), *(supplemental.get("attachments", []) or [])]:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("local_path") or item.get("url") or item.get("filename") or "")
+        if key and key in seen_keys:
+            continue
+        if key:
+            seen_keys.add(key)
+        merged_attachments.append(item)
+    errors = [str(item) for item in [*(primary.get("errors", []) or []), *(supplemental.get("errors", []) or [])] if str(item or "").strip()]
+    status = "ok" if merged_attachments else ("error" if errors else str(primary.get("status", supplemental.get("status", "empty"))))
+    return {
+        "status": status,
+        "record": primary.get("record") or supplemental.get("record") or {},
+        "point_of_contact": merged_contacts,
+        "attachments": merged_attachments,
+        "attachments_expected": bool(primary.get("attachments_expected") or supplemental.get("attachments_expected")),
+        "record_lookup_status": str(primary.get("record_lookup_status") or supplemental.get("record_lookup_status") or "unknown"),
+        "resource_listing_status": str(primary.get("resource_listing_status") or supplemental.get("resource_listing_status") or "unknown"),
+        "seeded_resource_links": bool(primary.get("seeded_resource_links") or supplemental.get("seeded_resource_links")),
+        "resource_link_count": int(primary.get("resource_link_count", 0) or 0) + int(supplemental.get("resource_link_count", 0) or 0),
+        "errors": errors,
     }
 
 
@@ -1451,9 +1565,18 @@ def _best_notice_excerpt(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", required=True)
-    parser.add_argument("--entry", required=True)
+    parser.add_argument("--entry")
+    parser.add_argument("--file", action="append", default=[])
+    parser.add_argument("--title", default="")
+    parser.add_argument("--buyer", default="")
+    parser.add_argument("--summary", default="")
+    parser.add_argument("--url", default="")
+    parser.add_argument("--notice-id", default="")
+    parser.add_argument("--solicitation-number", default="")
     parser.add_argument("--depth", default="full_360")
     args = parser.parse_args()
+    if not args.entry and not args.file:
+        parser.error("Provide --entry for tracked capture or at least one --file for direct local-file capture.")
 
     workspace = Path(args.workspace)
     bundle_root = Path(__file__).resolve().parents[2]
@@ -1465,18 +1588,39 @@ def main() -> int:
         if isinstance(learning.get("semantic_applied_preferences"), dict)
         else {}
     )
-    resolved = resolve_entry(workspace, args.entry)
+    local_file_paths = _normalize_local_file_inputs(workspace, args.file)
+    capture_mode = "tracked"
+    if args.entry:
+        resolved = resolve_entry(workspace, args.entry)
+        if local_file_paths:
+            resolved = dict(resolved)
+            resolved["entry_resolution_mode"] = "entry_plus_local_files"
+            resolved["local_files"] = local_file_paths
+            capture_mode = "tracked_plus_local_files"
+    else:
+        resolved = _build_direct_local_resolution(
+            local_file_paths=local_file_paths,
+            title=args.title,
+            buyer=args.buyer,
+            summary=args.summary,
+            url=args.url,
+            notice_id=args.notice_id,
+            solicitation_number=args.solicitation_number,
+        )
+        capture_mode = "direct_local_files"
     digest_date = resolved.get("digest_date") or today_local_str()
     display_entry = resolved.get("report_entry_id") or "direct"
-    canonical_id = resolved.get("canonical_record_id") or resolved.get("notice_id") or args.entry
-    request_id = request_id_for(display_entry or canonical_id)
+    entry_value = args.entry or str(resolved.get("title") or resolved.get("solicitation_number") or resolved.get("canonical_record_id") or "direct")
+    canonical_id = resolved.get("canonical_record_id") or resolved.get("notice_id") or entry_value
+    request_id = request_id_for(display_entry or str(canonical_id))
     artifacts = build_request_paths(workspace, digest_date, display_entry, canonical_id, request_id)
 
     request_log_event = {
         "request_id": request_id,
         "timestamp": utc_now_iso(),
-        "entry": args.entry,
+        "entry": entry_value,
         "entry_resolution_mode": resolved.get("entry_resolution_mode", "unresolved"),
+        "capture_mode": capture_mode,
         "request_depth": "full_360_capture_brief",
         "status": "logged",
         "resolved": {
@@ -1486,6 +1630,7 @@ def main() -> int:
             "canonical_record_id": canonical_id,
             "canonical_record_id_type": resolved.get("canonical_record_id_type", "other"),
             "notice_id": resolved.get("notice_id", ""),
+            "solicitation_number": resolved.get("solicitation_number", ""),
             "title": resolved.get("title", ""),
             "buyer": resolved.get("buyer", ""),
             "source_id": resolved.get("source_id", ""),
@@ -1494,23 +1639,52 @@ def main() -> int:
             "url": resolved.get("url", ""),
         },
         "artifacts": artifacts,
+        "local_files": local_file_paths,
         "notes": ["Fresh request-specific artifacts must be created for this request."],
     }
     append_jsonl(Path(artifacts["request_log_path"]), request_log_event)
 
-    local_context = load_notice_context(workspace, resolved)
+    local_context = load_notice_context(workspace, resolved) if args.entry else _build_direct_local_context(resolved)
     explanation = local_context.get("explanation_record", {})
     opportunity = local_context.get("opportunity_record", {})
     public_context = fetch_url_excerpt(resolved.get("url", ""))
     notice_excerpt, substantive_notice_excerpt = _best_notice_excerpt(public_context, opportunity, explanation)
     snapshot_resource_links = opportunity.get("resource_links", []) if isinstance(opportunity.get("resource_links"), list) else []
     snapshot_point_of_contact = opportunity.get("point_of_contact", []) if isinstance(opportunity.get("point_of_contact"), list) else []
-    attachment_bundle = fetch_notice_attachments(
-        resolved.get("notice_id", "") or opportunity.get("notice_id", "") or canonical_id,
-        solicitation_number=str(opportunity.get("solicitation_number", "") or ""),
-        resource_links=snapshot_resource_links,
-        point_of_contact=snapshot_point_of_contact,
+    tracked_attachment_bundle = (
+        fetch_notice_attachments(
+            resolved.get("notice_id", "") or opportunity.get("notice_id", "") or canonical_id,
+            solicitation_number=str(opportunity.get("solicitation_number", "") or resolved.get("solicitation_number", "") or ""),
+            resource_links=snapshot_resource_links,
+            point_of_contact=snapshot_point_of_contact,
+        )
+        if args.entry
+        else {
+            "status": "skipped",
+            "record": {},
+            "point_of_contact": [],
+            "attachments": [],
+            "attachments_expected": False,
+            "record_lookup_status": "skipped",
+            "resource_listing_status": "skipped",
+            "seeded_resource_links": False,
+            "resource_link_count": 0,
+            "errors": [],
+        }
     )
+    local_attachment_bundle = load_local_attachments(local_file_paths) if local_file_paths else {
+        "status": "skipped",
+        "record": {},
+        "point_of_contact": [],
+        "attachments": [],
+        "attachments_expected": False,
+        "record_lookup_status": "skipped",
+        "resource_listing_status": "skipped",
+        "seeded_resource_links": False,
+        "resource_link_count": 0,
+        "errors": [],
+    }
+    attachment_bundle = _merge_attachment_bundles(tracked_attachment_bundle, local_attachment_bundle)
     attachment_scope_snippets = _attachment_scope_snippets(attachment_bundle)
     attachment_text_pool = _attachment_text_pool(attachment_bundle, max_items=6)
     attachment_context_text = " ".join(attachment_scope_snippets)
@@ -1850,6 +2024,7 @@ def main() -> int:
             "canonical_record_id": canonical_id,
             "canonical_record_id_type": resolved.get("canonical_record_id_type", "other"),
             "notice_id": resolved.get("notice_id", ""),
+            "solicitation_number": resolved.get("solicitation_number", ""),
             "title": resolved.get("title", ""),
             "buyer": resolved.get("buyer", ""),
             "source_id": resolved.get("source_id", ""),
@@ -2057,11 +2232,12 @@ def main() -> int:
         "request_id": request_id,
         "brief_path": artifacts["request_capture_brief_path"],
         "evidence_path": artifacts["request_capture_evidence_path"],
+        "capture_mode": capture_mode,
         "browser_attempted": False,
         "browser_succeeded": False,
         "usaspending_attempted": True,
         "usaspending_succeeded": usaspending_status == "ok",
-        "attachments_attempted": bool(snapshot_resource_links or resolved.get("notice_id")),
+        "attachments_attempted": bool(snapshot_resource_links or resolved.get("notice_id") or local_file_paths),
         "attachments_expected": bool(attachment_bundle.get("attachments_expected")),
         "attachments_succeeded": bool(attachment_bundle.get("attachments")),
         "expanded_public_research_attempted": True,
