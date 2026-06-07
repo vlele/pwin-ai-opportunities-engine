@@ -159,7 +159,13 @@ In Claude Code, use:
 
 ## 7. Run Capture Research
 
-Pick a stable ID from the digest and ask:
+You now have three supported capture paths:
+
+- tracked capture from a digest stable ID such as `A1`
+- direct local-file capture with one or more `--file` inputs plus metadata
+- hybrid capture that starts from a stable ID and adds local files
+
+If you already have a stable ID from the digest, ask:
 
 ```text
 Use pwin-ai-opportunities and research A1 with full capture depth.
@@ -171,9 +177,7 @@ In Claude Code, use:
 /pwin-research workspace path $PWD and entry A1 with full capture depth
 ```
 
-That produces a fresh capture brief and evidence file under `procurement/capture-briefs/` and `procurement/capture-evidence/`.
-
-If you already have local solicitation files, you can run direct capture without a prior stable ID:
+If you already have local solicitation files and do not want to wait for a prior stable ID, run direct capture like this:
 
 ```bash
 python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" \
@@ -182,11 +186,24 @@ python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" \
   --file "/absolute/path/to/QA.docx" \
   --title "Example opportunity" \
   --buyer "Department of Example" \
+  --summary "Direct local-file capture from downloaded solicitation artifacts." \
   --solicitation-number "ABC123" \
   --depth full_360
 ```
 
-You can also add local files to a tracked capture run when you want to augment a stable ID with extra documents.
+Optional metadata for direct local-file capture includes `--url` and `--notice-id` when you have them.
+
+If you want to augment a tracked opportunity with extra local documents, use hybrid capture:
+
+```bash
+python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" \
+  --workspace "$PWD" \
+  --entry "A1" \
+  --file "/absolute/path/to/amendment.pdf" \
+  --depth full_360
+```
+
+All three capture modes write the same fresh brief and evidence artifacts under `procurement/capture-briefs/` and `procurement/capture-evidence/`.
 
 ## 8. Give Feedback
 
@@ -238,7 +255,8 @@ That feedback is logged to `procurement/feedback-events.jsonl` and applied to fu
 4. Bootstrap it from the company website.
 5. Review the starter profile and the populated `vendor-profile.json`.
 6. Run the federal-only scan.
-7. Read the digest, research a stable ID, and give feedback.
+7. Read the digest.
+8. Research a stable ID or run direct local-file capture, then give feedback.
 
 ## Direct Script Equivalents
 
@@ -249,6 +267,7 @@ python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" --workspac
 python3 "$PWIN_AI_OPPS_ROOT/scripts/scan/run_scan.py" --workspace "$PWD" --horizon "30-45" --federal-only
 python3 "$PWIN_AI_OPPS_ROOT/scripts/show/show_digest.py" --workspace "$PWD" --date latest
 python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth full_360
-python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" --workspace "$PWD" --file "/absolute/path/to/PWS.pdf" --file "/absolute/path/to/QA.docx" --title "Example opportunity" --buyer "Department of Example" --solicitation-number "ABC123" --depth full_360
+python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" --workspace "$PWD" --file "/absolute/path/to/PWS.pdf" --file "/absolute/path/to/QA.docx" --title "Example opportunity" --buyer "Department of Example" --summary "Direct local-file capture from downloaded solicitation artifacts." --solicitation-number "ABC123" --depth full_360
+python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --file "/absolute/path/to/amendment.pdf" --depth full_360
 python3 "$PWIN_AI_OPPS_ROOT/scripts/feedback/apply_feedback.py" --workspace "$PWD" --text "never show grants"
 ```
