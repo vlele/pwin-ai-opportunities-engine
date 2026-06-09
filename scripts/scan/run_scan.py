@@ -15,6 +15,7 @@ if str(SCRIPT_ROOT) not in sys.path:
 from common.openai_reasoning import assess_scan_fit
 from common.paths import load_json, today_local_str, utc_now_iso, write_json
 from common.runtime import NOT_IMPLEMENTED_IN_BUNDLE_STATUS
+from common.commercial_intel import COMMERCIAL_INTEL_SOURCE_IDS, enrich_scan_records
 from common.source_registry import (
     enabled_sources_summary,
     filter_sources_for_policy,
@@ -1210,6 +1211,7 @@ def _normalize_explanations(records: list[dict[str, Any]]) -> list[dict[str, Any
                 "summary": record.get("summary", "N/A"),
                 "reasons": record.get("explanation_reasons", []),
                 "main_caveat": record.get("main_caveat", "N/A"),
+                "commercial_intel_notes": record.get("commercial_intel_notes", []),
             }
         )
     return items
@@ -1447,9 +1449,22 @@ def main() -> int:
                 }
             )
 
+    commercial_enrichment = enrich_scan_records(
+        enabled_sources=enabled_sources,
+        records=records,
+        vendor_profile=vendor_profile,
+        preferences=preferences,
+    )
+    source_statuses.extend(commercial_enrichment.get("source_statuses", []))
+    source_issues.extend(commercial_enrichment.get("source_issues", []))
+
     for source in enabled_sources:
         source_id = source.get("id")
-        if source_id not in {"sam_contract_opportunities", "usaspending_award_history"}:
+        if source_id not in {
+            "sam_contract_opportunities",
+            "usaspending_award_history",
+            *COMMERCIAL_INTEL_SOURCE_IDS,
+        }:
             source_statuses.append(
                 {
                     "source_id": source_id,

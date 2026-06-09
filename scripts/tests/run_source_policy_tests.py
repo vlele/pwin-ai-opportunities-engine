@@ -19,30 +19,42 @@ def main() -> int:
                 "id": "sam_contract_opportunities",
                 "name": "SAM.gov Contract Opportunities",
                 "enabled": True,
+                "federal_only_eligible": True,
                 "trust_tier": 1,
             },
             {
                 "id": "usaspending_award_history",
                 "name": "USAspending.gov Award History",
                 "default_enabled": True,
+                "federal_only_eligible": True,
                 "trust_tier": 1,
             },
             {
                 "id": "virginia_eva_vbo",
                 "name": "Virginia eVA / VBO",
                 "enabled": True,
+                "federal_only_eligible": False,
                 "trust_tier": 2,
             },
             {
-                "id": "govtribe_commercial_intel",
-                "name": "GovTribe",
+                "id": "govtribe_mcp_commercial_intel",
+                "name": "GovTribe MCP Commercial Intelligence",
                 "enabled": True,
+                "federal_only_eligible": True,
+                "trust_tier": 4,
+            },
+            {
+                "id": "govwin_iq_commercial_intel",
+                "name": "GovWin IQ Commercial Intelligence",
+                "enabled": True,
+                "federal_only_eligible": True,
                 "trust_tier": 4,
             },
             {
                 "id": "disabled_source",
                 "name": "Disabled Source",
                 "enabled": False,
+                "federal_only_eligible": True,
                 "trust_tier": 2,
             },
         ]
@@ -60,13 +72,16 @@ def main() -> int:
         "sam_contract_opportunities",
         "usaspending_award_history",
         "virginia_eva_vbo",
-        "govtribe_commercial_intel",
+        "govtribe_mcp_commercial_intel",
+        "govwin_iq_commercial_intel",
     ]:
         failures.append("enabled_source_selection")
 
     if federal_only_ids != [
         "sam_contract_opportunities",
         "usaspending_award_history",
+        "govtribe_mcp_commercial_intel",
+        "govwin_iq_commercial_intel",
     ]:
         failures.append("federal_only_filter")
 
@@ -74,8 +89,11 @@ def main() -> int:
         failures.append("non_federal_mode_preserves_enabled_sources")
 
     summary = sources_summary(federal_only_sources)
-    if "Virginia" in summary or "GovTribe" in summary:
-        failures.append("federal_summary_excludes_filtered_sources")
+    if "Virginia" in summary:
+        failures.append("federal_summary_excludes_non_federal_sources")
+
+    if "GovTribe" not in summary or "GovWin" not in summary:
+        failures.append("federal_summary_includes_federal_commercial_sources")
 
     output = {
         "status": "OK" if not failures else "FAILED",

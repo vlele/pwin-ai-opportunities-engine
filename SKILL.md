@@ -93,7 +93,7 @@ Notes:
 
 - Replace `30-45` with the horizon inferred from the user message.
 - The scan script refreshes the runtime source registry, writes dated snapshots, builds stable entry IDs, and renders the report and digest.
-- The shipped source set is federal-only and currently implemented for `SAM.gov` plus `USAspending.gov` enrichment.
+- The shipped source set is federal-only and currently implemented for `SAM.gov`, `USAspending.gov` enrichment, plus optional commercial-intel sidecars for `GovTribe MCP` and a `GovWin IQ` credential scaffold when those sources are enabled and configured.
 
 After the script runs:
 

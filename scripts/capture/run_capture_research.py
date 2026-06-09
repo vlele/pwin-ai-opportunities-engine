@@ -13,7 +13,9 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from common.jsonl import append_jsonl
+from common.commercial_intel import enrich_capture_context
 from common.paths import load_json, safe_slug, standard_procurement_paths, today_local_str, utc_now_iso, write_json, write_text
+from common.source_registry import get_enabled_sources
 from common.validation import validate_capture_brief_text
 from capture.capture_decision import build_capture_decision_sections
 from capture.fetch_notice_attachments import fetch_notice_attachments, load_local_attachments
@@ -1766,13 +1768,23 @@ def main() -> int:
                 "published_date": "N/A",
                 "accessed_date": today_local_str(),
                 "tier": 1,
-                "relevance": f"Contract award enrichment status: {usaspending_status}; queries: {', '.join(usaspending_result.get('search_terms', [])) or 'none'}",
-                "confidence": 2 if usaspending_status == "ok" else 1,
-            }
-        )
+            "relevance": f"Contract award enrichment status: {usaspending_status}; queries: {', '.join(usaspending_result.get('search_terms', [])) or 'none'}",
+            "confidence": 2 if usaspending_status == "ok" else 1,
+        }
+    )
+    registry = load_json(workspace / "procurement" / "source-registry.json", default={})
+    commercial_intel = enrich_capture_context(
+        enabled_sources=get_enabled_sources(registry),
+        resolved=resolved,
+        notice_context_text=notice_context_text,
+        attachment_bundle=attachment_bundle,
+        vendor_profile=vendor_profile,
+        preferences=preferences,
+    )
     public_sources.extend(award_signals.get("source_log", []))
     public_sources.extend(_attachment_source_log(attachment_bundle))
     public_sources.extend(public_research.get("source_log", []))
+    public_sources.extend(commercial_intel.get("source_log", []))
 
     status = "PARTIAL_CAPTURE_RESEARCH"
     attachment_categories = Counter(
@@ -1800,10 +1812,12 @@ def main() -> int:
         vehicle_signals.append("Attachment text references a SATOC / task-order contract structure that should be validated against the solicitation package.")
     if not vehicle_signals:
         vehicle_signals.append("Likely vehicle path remains unconfirmed from the current public package; validate open-market versus existing-vehicle assumptions.")
+    vehicle_signals = _dedupe_strings(vehicle_signals + commercial_intel.get("vehicle_signals", []))
     attachment_competitive_notes = _dedupe_strings(
         attachment_validation.get("notes", [])
         + attachment_validation.get("direct_mentions", [])
         + attachment_validation.get("supporting_snippets", [])
+        + commercial_intel.get("competitive_landscape", [])
     )
     funding_assessment = _funding_assessment(
         award_signals,
@@ -1821,7 +1835,11 @@ def main() -> int:
     ]
     if not budget_funding_signals:
         budget_funding_signals = [funding_gap_line]
-    related_procurements = award_signals.get("related_procurements", []) + attachment_validation.get("supporting_snippets", [])
+    related_procurements = (
+        award_signals.get("related_procurements", [])
+        + attachment_validation.get("supporting_snippets", [])
+        + commercial_intel.get("related_procurements", [])
+    )
     evidence_gaps = _dedupe_strings(
         [
             *(
@@ -2069,6 +2087,14 @@ def main() -> int:
         "funding_assessment": funding_assessment,
         "related_procurements": related_procurements,
         "vehicle_signals": vehicle_signals,
+        "commercial_intel": {
+            "source_statuses": commercial_intel.get("source_statuses", []),
+            "matches": commercial_intel.get("matches", []),
+            "related_procurements": commercial_intel.get("related_procurements", []),
+            "vehicle_signals": commercial_intel.get("vehicle_signals", []),
+            "competitive_landscape": commercial_intel.get("competitive_landscape", []),
+            "next_questions": commercial_intel.get("next_questions", []),
+        },
         "competitive_landscape": {
             **award_signals.get("competitive_landscape", {}),
             "likely_incumbents": (
@@ -2120,6 +2146,7 @@ def main() -> int:
                     if not public_research.get("budget_document_signals") or not public_research.get("acquisition_forecast_signals")
                     else []
                 ),
+                *commercial_intel.get("next_questions", []),
             ]
         ),
         "action_items_next_10_days": _dedupe_strings(
@@ -2149,6 +2176,7 @@ def main() -> int:
             "learned_semantic_preferences": learned_semantic_preferences,
         },
         "source_log": public_sources,
+        "source_statuses": commercial_intel.get("source_statuses", []),
         "memo_honesty_assessment": memo_honesty,
         "validation": {
             "all_required_sections_present": False,

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "template_version": "2026-05-24-shipped-sources-v1",
+  "template_version": "2026-06-09-commercial-intel-phase1-v1",
   "default_timezone": "America/New_York",
   "refresh_policy": {
     "refresh_runtime_registry_when_template_changes": true,
@@ -19,6 +19,8 @@
       "opportunity_class": "contracts",
       "trust_tier": 1,
       "access_mode": "official_api",
+      "federal_only_eligible": true,
+      "license_scope": "public",
       "auth": {
         "type": "api_key",
         "env_var": "SAM_API_KEY",
@@ -27,6 +29,10 @@
       "taxonomy": [
         "naics",
         "set_aside"
+      ],
+      "capabilities": [
+        "scan_retrieval",
+        "notice_hydration"
       ],
       "homepage": "https://sam.gov/content/opportunities",
       "api_docs": "https://open.gsa.gov/api/get-opportunities-public-api/"
@@ -39,6 +45,8 @@
       "opportunity_class": "award_history",
       "trust_tier": 1,
       "access_mode": "official_api",
+      "federal_only_eligible": true,
+      "license_scope": "public",
       "auth": {
         "type": "none",
         "required": false
@@ -50,8 +58,84 @@
         "uei",
         "award_type"
       ],
+      "capabilities": [
+        "scan_enrichment",
+        "capture_enrichment"
+      ],
       "homepage": "https://www.usaspending.gov/",
       "api_docs": "https://api.usaspending.gov/docs/endpoints"
+    },
+    {
+      "id": "govtribe_mcp_commercial_intel",
+      "name": "GovTribe MCP Commercial Intelligence",
+      "enabled": false,
+      "default_enabled": false,
+      "opportunity_class": "commercial_enrichment",
+      "trust_tier": 4,
+      "access_mode": "remote_mcp",
+      "federal_only_eligible": true,
+      "license_scope": "customer_subscription_required",
+      "auth": {
+        "type": "api_key",
+        "env_var": "GOVTRIBE_MCP_API_KEY",
+        "required": false,
+        "supporting_env_vars": [
+          "OPENAI_API_KEY",
+          "GOVTRIBE_MCP_URL",
+          "GOVTRIBE_MCP_TIMEOUT_SECONDS",
+          "PWIN_COMMERCIAL_INTEL_MODEL",
+          "PWIN_COMMERCIAL_SCAN_MAX_RECORDS"
+        ]
+      },
+      "taxonomy": [
+        "agency",
+        "vehicle",
+        "incumbent",
+        "related_procurement"
+      ],
+      "capabilities": [
+        "scan_enrichment",
+        "capture_enrichment"
+      ],
+      "homepage": "https://govtribe.com/mcp",
+      "api_docs": "https://govtribe.com/docs/govtribe-user-guide/govtribe-mcp/govtribe-mcp-for-developers/"
+    },
+    {
+      "id": "govwin_iq_commercial_intel",
+      "name": "GovWin IQ Commercial Intelligence",
+      "enabled": false,
+      "default_enabled": false,
+      "opportunity_class": "commercial_enrichment",
+      "trust_tier": 4,
+      "access_mode": "vendor_web_service",
+      "federal_only_eligible": true,
+      "license_scope": "customer_subscription_required",
+      "auth": {
+        "type": "credential_set",
+        "env_vars": [
+          "GOVWIN_CLIENT_ID",
+          "GOVWIN_CLIENT_SECRET",
+          "GOVWIN_USERNAME",
+          "GOVWIN_PASSWORD"
+        ],
+        "required": false,
+        "supporting_env_vars": [
+          "GOVWIN_API_BASE_URL",
+          "GOVWIN_TIMEOUT_SECONDS"
+        ]
+      },
+      "taxonomy": [
+        "agency",
+        "vehicle",
+        "incumbent",
+        "related_procurement"
+      ],
+      "capabilities": [
+        "scan_enrichment",
+        "capture_enrichment"
+      ],
+      "homepage": "https://www.deltek.com/en/products/project-based-businesses/govwin-iq",
+      "api_docs": "https://help.deltek.com/Product/GovWinIQ/Configuring/API_v2_Configuration.htm"
     }
   ]
 }

@@ -6,7 +6,7 @@ from typing import Any
 from common.paths import load_json, procurement_dir, write_json
 
 
-FEDERAL_SOURCE_IDS = frozenset(
+LEGACY_FEDERAL_SOURCE_IDS = frozenset(
     {
         "sam_contract_opportunities",
         "usaspending_award_history",
@@ -82,10 +82,16 @@ def get_enabled_sources(registry: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def is_federal_only_eligible(source: dict[str, Any]) -> bool:
+    if "federal_only_eligible" in source:
+        return bool(source.get("federal_only_eligible"))
+    return source.get("id") in LEGACY_FEDERAL_SOURCE_IDS
+
+
 def filter_sources_for_policy(sources: list[dict[str, Any]], federal_only: bool = False) -> list[dict[str, Any]]:
     if not federal_only:
         return list(sources)
-    return [source for source in sources if source.get("id") in FEDERAL_SOURCE_IDS]
+    return [source for source in sources if is_federal_only_eligible(source)]
 
 
 def sources_summary(sources: list[dict[str, Any]]) -> str:
