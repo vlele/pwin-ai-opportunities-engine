@@ -1,0 +1,131 @@
+{
+  "models": [
+    {
+      "source_id": "sam_contract_opportunities",
+      "source_name": "SAM.gov Contract Opportunities",
+      "summary": "SAM notice for identity modernization support.",
+      "incumbent": {
+        "name": "",
+        "status": "unknown",
+        "confidence": "unknown",
+        "evidence": []
+      },
+      "vehicle": {
+        "name": "CIO-SP3",
+        "contract_type": "Firm-fixed-price",
+        "set_aside": "Total Small Business Set-Aside",
+        "confidence": "high",
+        "evidence": [
+          "SAM notice states a total small business set-aside."
+        ]
+      },
+      "recompete_clues": [],
+      "related_procurements": [
+        {
+          "title": "Identity Services Support Task Order",
+          "identifier": "GS00Q17GWD1234",
+          "relationship": "Likely predecessor task order",
+          "contract_value": "$24,500,000",
+          "confidence": "medium",
+          "source_id": "sam_contract_opportunities",
+          "source_name": "SAM.gov Contract Opportunities",
+          "url": "https://sam.gov/fake-opportunity",
+          "notes": [
+            "SAM description references a follow-on effort."
+          ]
+        }
+      ],
+      "contract_value_or_ceiling": {
+        "amount": "",
+        "label": "",
+        "confidence": "unknown",
+        "evidence": []
+      },
+      "teaming_posture": {
+        "recommended_posture": "",
+        "confidence": "unknown",
+        "rationale": [],
+        "partner_signals": [],
+        "risks": []
+      },
+      "next_questions": [
+        "Validate whether the procurement remains set aside at final release."
+      ],
+      "evidence_gaps": []
+    },
+    {
+      "source_id": "govtribe_mcp_commercial_intel",
+      "source_name": "GovTribe MCP Commercial Intelligence",
+      "summary": "GovTribe points to a similar predecessor task order.",
+      "incumbent": {
+        "name": "Alpha Systems",
+        "status": "likely",
+        "confidence": "medium",
+        "evidence": [
+          "GovTribe predecessor signal points to Alpha Systems."
+        ],
+        "notes": []
+      },
+      "vehicle": {
+        "name": "CIO-SP3",
+        "contract_type": "Firm-fixed-price",
+        "set_aside": "Full and Open",
+        "confidence": "medium",
+        "evidence": [
+          "GovTribe related procurement appears to have been competed full and open."
+        ]
+      },
+      "recompete_clues": [
+        {
+          "signal": "follow-on task order",
+          "why_it_matters": "Signals predecessor contract history.",
+          "confidence": "medium",
+          "source_id": "govtribe_mcp_commercial_intel",
+          "source_name": "GovTribe MCP Commercial Intelligence"
+        }
+      ],
+      "related_procurements": [
+        {
+          "title": "Identity Services Support Task Order",
+          "identifier": "GS00Q17GWD1234",
+          "relationship": "Likely predecessor task order",
+          "contract_value": "$24,500,000",
+          "confidence": "high",
+          "source_id": "govtribe_mcp_commercial_intel",
+          "source_name": "GovTribe MCP Commercial Intelligence",
+          "url": "https://govtribe.com/fake-related-task-order",
+          "notes": [
+            "GovTribe also ties this task order to Alpha Systems."
+          ]
+        }
+      ],
+      "contract_value_or_ceiling": {
+        "amount": "$24,500,000",
+        "label": "Prior related task order value",
+        "confidence": "medium",
+        "evidence": [
+          "GovTribe lists the prior task-order value."
+        ]
+      },
+      "teaming_posture": {
+        "recommended_posture": "Team, do not prime",
+        "confidence": "medium",
+        "rationale": [
+          "Vehicle position appears to matter."
+        ],
+        "partner_signals": [
+          "Look for a CIO-SP3 holder."
+        ],
+        "risks": [
+          "Vehicle access is still unproven."
+        ]
+      },
+      "next_questions": [
+        "Confirm whether CIO-SP3 still governs the current procurement."
+      ],
+      "evidence_gaps": [
+        "Need the final RFP to confirm the true set-aside posture."
+      ]
+    }
+  ]
+}

@@ -3,6 +3,14 @@ from __future__ import annotations
 import os
 from typing import Any, Protocol
 
+from common.evidence_model import (
+    empty_evidence_model,
+    evidence_model_competitive_notes,
+    evidence_model_next_questions,
+    evidence_model_related_procurement_lines,
+    evidence_model_vehicle_signals,
+    normalize_provider_evidence_model,
+)
 from common.openai_mcp import call_openai_mcp_json
 from common.paths import today_local_str
 
@@ -229,8 +237,24 @@ def _default_result(source_id: str, source_name: str, status: str, notes: list[s
             "vehicle_signals": [],
             "related_procurements": [],
             "next_questions": [],
+            "evidence_model": empty_evidence_model(source_id=source_id, source_name=source_name),
         },
     }
+
+
+def _govtribe_prompt(mode: str) -> str:
+    return (
+        "You are a federal capture analyst using the GovTribe MCP server as a read-only commercial-intelligence source. "
+        "Use the GovTribe MCP tools before answering. For exact identifiers, solicitation numbers, notice IDs, vendor names, "
+        "and exact titles, prefer keyword search. For adjacent procurements, incumbent discovery, or conceptually similar work, "
+        "use semantic search. Keep agencies, vendors, dates, categories, and structured constraints in tool arguments instead of "
+        "field:value query text. Return only compact JSON with fields matched, matched_by, confidence, external_record_id, "
+        "source_url, notes, source_log, and enrichment. The enrichment object must include summary, evidence_model, "
+        "competitive_landscape, vehicle_signals, related_procurements, and next_questions. The evidence_model object must include "
+        "incumbent, vehicle, recompete_clues, related_procurements, contract_value_or_ceiling, teaming_posture, next_questions, "
+        "and evidence_gaps. "
+        + mode
+    )
 
 
 def _normalize_govtribe_result(source_config: dict[str, Any], lookup_result: dict[str, Any]) -> dict[str, Any]:
@@ -253,9 +277,10 @@ def _normalize_govtribe_result(source_config: dict[str, Any], lookup_result: dic
     source_log = _normalize_source_log(source_name, parsed.get("source_log"), source_url or default_url)
     matched = bool(parsed.get("matched"))
     matched_by = str(parsed.get("matched_by") or "").strip()
+    enrichment_value = parsed.get("enrichment") if isinstance(parsed.get("enrichment"), dict) else {}
     summary = str(
-        (parsed.get("enrichment") or {}).get("summary")
-        if isinstance(parsed.get("enrichment"), dict)
+        enrichment_value.get("summary")
+        if isinstance(enrichment_value, dict)
         else parsed.get("summary") or ""
     ).strip()
 
@@ -270,7 +295,31 @@ def _normalize_govtribe_result(source_config: dict[str, Any], lookup_result: dic
             )
         ]
 
-    enrichment_value = parsed.get("enrichment") if isinstance(parsed.get("enrichment"), dict) else {}
+    evidence_model = normalize_provider_evidence_model(
+        enrichment_value.get("evidence_model") or enrichment_value.get("normalized_evidence") or enrichment_value,
+        source_id=source_id,
+        source_name=source_name,
+        source_url=source_url or default_url,
+        external_record_id=str(parsed.get("external_record_id") or "").strip(),
+    )
+    if not summary:
+        summary = str(evidence_model.get("summary") or "").strip()
+    competitive_landscape = _dedupe_strings(
+        evidence_model_competitive_notes(evidence_model, max_items=6)
+        + _coerce_string_list(enrichment_value.get("competitive_landscape"), max_items=6)
+    )[:6]
+    vehicle_signals = _dedupe_strings(
+        evidence_model_vehicle_signals(evidence_model, max_items=6)
+        + _coerce_string_list(enrichment_value.get("vehicle_signals"), max_items=6)
+    )[:6]
+    related_procurements = _dedupe_strings(
+        evidence_model_related_procurement_lines(evidence_model, max_items=6)
+        + _coerce_string_list(enrichment_value.get("related_procurements"), max_items=6)
+    )[:6]
+    next_questions = _dedupe_strings(
+        evidence_model_next_questions(evidence_model, max_items=6)
+        + _coerce_string_list(enrichment_value.get("next_questions"), max_items=6)
+    )[:6]
     notes = _dedupe_strings(
         _coerce_string_list(parsed.get("notes"), max_items=6)
         + ([matched_by] if matched_by else [])
@@ -293,10 +342,11 @@ def _normalize_govtribe_result(source_config: dict[str, Any], lookup_result: dic
         "source_log": source_log,
         "enrichment": {
             "summary": summary,
-            "competitive_landscape": _coerce_string_list(enrichment_value.get("competitive_landscape"), max_items=6),
-            "vehicle_signals": _coerce_string_list(enrichment_value.get("vehicle_signals"), max_items=6),
-            "related_procurements": _coerce_string_list(enrichment_value.get("related_procurements"), max_items=6),
-            "next_questions": _coerce_string_list(enrichment_value.get("next_questions"), max_items=6),
+            "competitive_landscape": competitive_landscape,
+            "vehicle_signals": vehicle_signals,
+            "related_procurements": related_procurements,
+            "next_questions": next_questions,
+            "evidence_model": evidence_model,
         },
     }
     response_id = str(lookup_result.get("response_id") or "").strip()
@@ -367,12 +417,8 @@ class GovTribeMCPCommercialIntelProvider:
             )
 
         lookup_result = call_openai_mcp_json(
-            developer_prompt=(
-                "You are a federal capture analyst using the GovTribe MCP server as a read-only commercial-intelligence source. "
-                "Use the GovTribe MCP tools before answering. Return only compact JSON with fields matched, matched_by, confidence, "
-                "external_record_id, source_url, notes, source_log, and enrichment. The enrichment object may contain summary, "
-                "competitive_landscape, vehicle_signals, related_procurements, and next_questions. If GovTribe has no useful corroboration, "
-                "set matched to false, keep lists short, and do not invent IDs or URLs."
+            developer_prompt=_govtribe_prompt(
+                "If GovTribe has no useful corroboration, set matched to false, keep lists short, and do not invent IDs or URLs."
             ),
             user_payload={
                 "mode": "scan_enrichment",
@@ -405,12 +451,9 @@ class GovTribeMCPCommercialIntelProvider:
             )
 
         lookup_result = call_openai_mcp_json(
-            developer_prompt=(
-                "You are a federal capture analyst using the GovTribe MCP server as a read-only commercial-intelligence source. "
-                "Use the GovTribe MCP tools before answering. Return only compact JSON with fields matched, matched_by, confidence, "
-                "external_record_id, source_url, notes, source_log, and enrichment. The enrichment object may contain summary, "
-                "competitive_landscape, vehicle_signals, related_procurements, and next_questions. Focus on incumbent clues, adjacent "
-                "contracts, likely vehicle context, and the next research questions that the capture team should validate."
+            developer_prompt=_govtribe_prompt(
+                "Focus on incumbent clues, vehicle path, set-aside posture, related procurements, recompete clues, contract value or ceiling if visible, "
+                "recommended teaming posture, and the next research questions that the capture team should validate."
             ),
             user_payload={
                 "mode": "capture_enrichment",
@@ -523,6 +566,10 @@ def _attach_scan_result(record: dict[str, Any], result: dict[str, Any]) -> None:
     section = record.setdefault("commercial_intel", {})
     matches = section.setdefault("matches", [])
     matches.append(result)
+    evidence_models = section.setdefault("evidence_models", [])
+    enrichment = result.get("enrichment") if isinstance(result.get("enrichment"), dict) else {}
+    if isinstance(enrichment.get("evidence_model"), dict):
+        evidence_models.append(enrichment.get("evidence_model"))
     section["enabled_source_ids"] = _dedupe_strings(
         [*section.get("enabled_source_ids", []), str(result.get("source_id") or "").strip()]
     )
@@ -680,6 +727,7 @@ def enrich_capture_context(
     if not providers:
         return {
             "matches": [],
+            "evidence_models": [],
             "source_statuses": [],
             "source_log": [],
             "competitive_landscape": [],
@@ -690,6 +738,7 @@ def enrich_capture_context(
         }
 
     matches: list[dict[str, Any]] = []
+    evidence_models: list[dict[str, Any]] = []
     source_statuses: list[dict[str, Any]] = []
     source_log: list[dict[str, Any]] = []
     competitive_landscape: list[str] = []
@@ -707,9 +756,11 @@ def enrich_capture_context(
             preferences=preferences,
         )
         matches.append(result)
+        enrichment = result.get("enrichment") if isinstance(result.get("enrichment"), dict) else {}
+        if isinstance(enrichment.get("evidence_model"), dict):
+            evidence_models.append(enrichment.get("evidence_model"))
         source_statuses.append(_capture_status_from_result(result))
         source_log.extend(result.get("source_log", []) or [])
-        enrichment = result.get("enrichment") if isinstance(result.get("enrichment"), dict) else {}
         competitive_landscape.extend(_coerce_string_list(enrichment.get("competitive_landscape"), max_items=6))
         vehicle_signals.extend(_coerce_string_list(enrichment.get("vehicle_signals"), max_items=6))
         related_procurements.extend(_coerce_string_list(enrichment.get("related_procurements"), max_items=6))
@@ -721,6 +772,7 @@ def enrich_capture_context(
 
     return {
         "matches": matches,
+        "evidence_models": evidence_models,
         "source_statuses": source_statuses,
         "source_log": _dedupe_source_log(source_log),
         "competitive_landscape": _dedupe_strings(competitive_landscape),

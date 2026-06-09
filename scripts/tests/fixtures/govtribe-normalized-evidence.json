@@ -1,0 +1,70 @@
+{
+  "summary": "GovTribe surfaced a related identity services task order with a likely incumbent and vehicle signal.",
+  "incumbent": {
+    "name": "Alpha Systems",
+    "status": "likely",
+    "confidence": "high",
+    "evidence": [
+      "GovTribe linked a related task order that names Alpha Systems on similar scope."
+    ],
+    "notes": [
+      "Validate against the final solicitation package."
+    ]
+  },
+  "vehicle": {
+    "name": "CIO-SP3",
+    "contract_type": "Firm-fixed-price",
+    "set_aside": "Small Business Set-Aside",
+    "confidence": "medium",
+    "evidence": [
+      "Related GovTribe record points to a CIO-SP3 task-order path."
+    ]
+  },
+  "recompete_clues": [
+    {
+      "signal": "follow-on task order",
+      "why_it_matters": "Suggests predecessor contract history and continuity pressure.",
+      "confidence": "high"
+    }
+  ],
+  "related_procurements": [
+    {
+      "title": "Identity Services Support Task Order",
+      "identifier": "GS00Q17GWD1234",
+      "relationship": "Likely predecessor task order",
+      "contract_value": "$24,500,000",
+      "confidence": "high",
+      "url": "https://govtribe.com/opportunity/fake-related-task-order",
+      "notes": [
+        "Customer chain appears aligned to the current buyer."
+      ]
+    }
+  ],
+  "contract_value_or_ceiling": {
+    "amount": "$24,500,000",
+    "label": "Prior related task order value",
+    "confidence": "medium",
+    "evidence": [
+      "GovTribe lists the related task-order value."
+    ]
+  },
+  "teaming_posture": {
+    "recommended_posture": "Team, do not prime",
+    "confidence": "medium",
+    "rationale": [
+      "Visible vehicle path favors an existing holder."
+    ],
+    "partner_signals": [
+      "A CIO-SP3 holder with customer continuity."
+    ],
+    "risks": [
+      "Prime posture is weak without confirmed vehicle access."
+    ]
+  },
+  "next_questions": [
+    "Confirm whether the current opportunity stays on CIO-SP3 or moves to open market."
+  ],
+  "evidence_gaps": [
+    "Need the final solicitation attachments to validate evaluation basis."
+  ]
+}

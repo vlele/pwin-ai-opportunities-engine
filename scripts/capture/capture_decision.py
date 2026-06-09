@@ -1759,8 +1759,17 @@ def build_capture_decision_sections(
     stakeholder_contacts: list[dict[str, str]],
     vehicle_signals: list[str],
     learned_semantic_preferences: dict[str, Any],
+    normalized_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     vendor_name = _profile_company_name(vendor_profile)
+    normalized_evidence = normalized_evidence if isinstance(normalized_evidence, dict) else {}
+    normalized_incumbent = normalized_evidence.get("incumbent", {}) if isinstance(normalized_evidence.get("incumbent"), dict) else {}
+    normalized_vehicle = normalized_evidence.get("vehicle", {}) if isinstance(normalized_evidence.get("vehicle"), dict) else {}
+    normalized_contract_value = normalized_evidence.get("contract_value_or_ceiling", {}) if isinstance(normalized_evidence.get("contract_value_or_ceiling"), dict) else {}
+    normalized_teaming = normalized_evidence.get("teaming_posture", {}) if isinstance(normalized_evidence.get("teaming_posture"), dict) else {}
+    normalized_related = normalized_evidence.get("related_procurements", []) if isinstance(normalized_evidence.get("related_procurements"), list) else []
+    normalized_conflicts = normalized_evidence.get("conflicts", []) if isinstance(normalized_evidence.get("conflicts"), list) else []
+    normalized_questions = _string_list(normalized_evidence.get("next_questions"), max_items=6)
     notice_text = " ".join(
         [
             str(opportunity.get("title", "") or ""),
@@ -1778,13 +1787,27 @@ def build_capture_decision_sections(
     contract_structures = vehicle_posture.get("contract_structures", [])
     vehicle_profile_hits = vehicle_posture.get("profile_hits", [])
     vehicle_access_required = bool(vehicle_posture.get("requires_existing_vehicle_access"))
-    set_aside_text = str(opportunity.get("set_aside", "") or "Not stated")
+    set_aside_text = str(normalized_vehicle.get("set_aside") or opportunity.get("set_aside") or "Not stated")
+    if str(normalized_vehicle.get("contract_type") or "").strip():
+        contract_type = str(normalized_vehicle.get("contract_type") or "").strip()
     set_aside_statement, set_aside_access_ok = _set_aside_access(set_aside_text, _profile_set_asides(vendor_profile))
     qualification_gaps = _required_qualification_gaps(vendor_profile, notice_text)
     semantic_context = _semantic_capture_context(opportunity, learned_semantic_preferences)
     customer_priorities = _priority_analysis(notice_text, public_research, attachment_bundle, award_basis, contract_type)
     funding_analysis = _funding_analysis(funding_assessment, award_signals, public_research, attachment_bundle, evidence_gaps)
     incumbent = _incumbent_analysis(notice_text, award_signals, attachment_validation, attachment_bundle)
+    normalized_incumbent_name = str(normalized_incumbent.get("name") or "").strip()
+    if normalized_incumbent_name and incumbent.get("incumbent_name") == "No confirmed incumbent":
+        incumbent["incumbent_name"] = normalized_incumbent_name
+        incumbent["source_basis"] = "Cross-source evidence synthesis across official and commercial signals; still validate against the solicitation package."
+    incumbent["strength_signals"] = _dedupe_strings(
+        incumbent.get("strength_signals", [])
+        + _string_list(normalized_incumbent.get("evidence"), max_items=4)
+    )
+    incumbent["vulnerability_signals"] = _dedupe_strings(
+        incumbent.get("vulnerability_signals", [])
+        + [f'Source conflict to validate: {item.get("field")}.' for item in normalized_conflicts[:1] if isinstance(item, dict)]
+    )
     stakeholder_analysis = _stakeholder_analysis(resolved.get("buyer", ""), stakeholder_contacts, opportunity)
     vehicle_access_ok = (not vehicle_access_required) or bool(vehicle_profile_hits)
     capability_fit = _capability_fit(
@@ -1819,6 +1842,23 @@ def build_capture_decision_sections(
         set_aside_access_ok,
         incumbent,
     )
+    partner_analysis["best_partner_candidates"] = _dedupe_strings(
+        partner_analysis.get("best_partner_candidates", [])
+        + _string_list(normalized_teaming.get("partner_signals"), max_items=4)
+    )
+    partner_analysis["partner_rationale"] = _dedupe_strings(
+        partner_analysis.get("partner_rationale", [])
+        + _string_list(normalized_teaming.get("rationale"), max_items=4)
+        + (
+            [f'Commercial-intel posture signal: {normalized_teaming.get("recommended_posture")}']
+            if str(normalized_teaming.get("recommended_posture") or "").strip()
+            else []
+        )
+    )
+    partner_analysis["partner_risks"] = _dedupe_strings(
+        partner_analysis.get("partner_risks", [])
+        + _string_list(normalized_teaming.get("risks"), max_items=4)
+    )
     competitive_gate_open, gate_reasons = _competitive_gate(opportunity, notice_text)
     recommendation = _score_and_recommendation(
         opportunity,
@@ -1843,6 +1883,24 @@ def build_capture_decision_sections(
         )
     document_inventory = _document_inventory(attachment_bundle, source_log, evidence_gaps)
     competitive_analysis = _competitive_analysis(award_signals, incumbent.get("incumbent_name", ""))
+    if normalized_incumbent_name and all(
+        _normalize_text(item.get("name", "")) != _normalize_text(normalized_incumbent_name)
+        for item in competitive_analysis
+        if isinstance(item, dict)
+    ):
+        first_related = normalized_related[0] if normalized_related and isinstance(normalized_related[0], dict) else {}
+        competitive_analysis.insert(
+            0,
+            {
+                "name": normalized_incumbent_name,
+                "why_likely": str(first_related.get("relationship") or "Cross-source evidence suggests predecessor or advantaged performer posture.").strip(),
+                "strengths": " ".join(_string_list(normalized_incumbent.get("evidence"), max_items=2)) or "Cross-source evidence points to a meaningful incumbent or predecessor signal.",
+                "weaknesses": "Still requires direct solicitation-package validation." if incumbent.get("source_basis", "").startswith("Cross-source") else "No direct weakness surfaced beyond remaining validation gaps.",
+                "likely_strategy": "Likely to emphasize continuity, predecessor knowledge, and any advantaged vehicle or customer position.",
+                "partner_relevance": "Low as a likely prime competitor unless later evidence shows a subcontract-only role.",
+                "evidence": str(first_related.get("title") or "").strip() or "Commercial and official-source synthesis.",
+            },
+        )
     subtle_signals = _subtle_signals(
         notice_text,
         opportunity,
@@ -1869,6 +1927,7 @@ def build_capture_decision_sections(
             + ["Ghost prior disliked patterns by proving this bid is not just another commodity or continuity-heavy support play."]
         )
     questions = _questions_to_ask(customer_priorities, capability_fit, partner_analysis, funding_analysis, document_inventory)
+    questions["internal"] = _dedupe_strings(questions.get("internal", []) + normalized_questions)
     action_plan = _action_plan(document_inventory, funding_analysis, partner_analysis, capability_fit, recommendation.get("recommendation", ""))
 
     snapshot = {
@@ -1878,7 +1937,7 @@ def build_capture_decision_sections(
         "notice_type": str(opportunity.get("notice_type", "") or "Not stated"),
         "naics": ", ".join(_string_list(opportunity.get("naics", []))) or "Not stated",
         "psc": ", ".join(_string_list(opportunity.get("other_taxonomy_tags", []))) or "Not stated",
-        "contract_vehicle": ", ".join(vehicle_access_paths) if vehicle_access_paths else ("Not a pre-existing vehicle gate from current evidence" if contract_structures else "Not explicit in current evidence"),
+        "contract_vehicle": str(normalized_vehicle.get("name") or "").strip() or (", ".join(vehicle_access_paths) if vehicle_access_paths else ("Not a pre-existing vehicle gate from current evidence" if contract_structures else "Not explicit in current evidence")),
         "contract_structure": ", ".join(contract_structures) if contract_structures else "Not explicit in current evidence",
         "set_aside": set_aside_text,
         "contract_type": contract_type,
@@ -1887,7 +1946,7 @@ def build_capture_decision_sections(
         "transition_window": transition_window,
         "due_date": str(opportunity.get("due_date", "") or "Not stated"),
         "days_until_due": str(opportunity.get("days_until_due", "") or "Not stated"),
-        "estimated_value": _currency(opportunity.get("estimated_value")),
+        "estimated_value": str(normalized_contract_value.get("amount") or "").strip() or _currency(opportunity.get("estimated_value")),
         "place_of_performance": _location_text(opportunity),
         "opportunity_url": str(resolved.get("url", "") or "N/A"),
         "scan_bucket": str(opportunity.get("bucket", "") or "Not stated"),
@@ -1931,6 +1990,17 @@ def build_capture_decision_sections(
                     if qualification_gaps.get("surfaced")
                     else []
                 ),
+                *_string_list(normalized_vehicle.get("evidence"), max_items=4),
+                *(
+                    [f'{normalized_contract_value.get("label", "Contract value / ceiling")}: {normalized_contract_value.get("amount")}']
+                    if str(normalized_contract_value.get("amount") or "").strip()
+                    else []
+                ),
+                *(
+                    [f'Source conflict to validate: {item.get("field")} -> {", ".join((item.get("values") or [])[:2])}.']
+                    for item in normalized_conflicts[:2]
+                    if isinstance(item, dict)
+                ),
             ]
         ),
         "evaluation_basis": award_basis,
@@ -1960,6 +2030,7 @@ def build_capture_decision_sections(
                     if qualification_gaps.get("surfaced")
                     else []
                 ),
+                *normalized_questions[:2],
             ]
         ),
         "vehicle_or_eligibility_gaps": _dedupe_strings(
@@ -2000,6 +2071,11 @@ def build_capture_decision_sections(
         ),
         "overall_confidence": recommendation.get("confidence", "Medium"),
     }
+    if normalized_conflicts:
+        assumptions["unknowns"] = _dedupe_strings(
+            assumptions.get("unknowns", [])
+            + [f'Source conflict remains on {item.get("field")}.' for item in normalized_conflicts[:2] if isinstance(item, dict)]
+        )
 
     executive_judgment_lines = _dedupe_strings(
         [
@@ -2036,6 +2112,7 @@ def build_capture_decision_sections(
             "historical_fit_context": _dedupe_strings(
                 semantic_context.get("support", [])[:2] + semantic_context.get("cautions", [])[:2]
             ),
+            "cross_source_conflicts": normalized_conflicts,
         },
         "opportunity_snapshot": snapshot,
         "pursuit_recommendation": recommendation,
@@ -2067,4 +2144,5 @@ def build_capture_decision_sections(
         "questions_to_ask": questions,
         "capture_action_plan": action_plan,
         "assumptions_unknowns_confidence": assumptions,
+        "normalized_evidence": normalized_evidence,
     }

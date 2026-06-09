@@ -13,6 +13,11 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from common.openai_reasoning import assess_scan_fit
+from common.evidence_model import (
+    build_scan_official_evidence_model,
+    evidence_model_scan_notes,
+    merge_evidence_models,
+)
 from common.paths import load_json, today_local_str, utc_now_iso, write_json
 from common.runtime import NOT_IMPLEMENTED_IN_BUNDLE_STATUS
 from common.commercial_intel import COMMERCIAL_INTEL_SOURCE_IDS, enrich_scan_records
@@ -1212,9 +1217,53 @@ def _normalize_explanations(records: list[dict[str, Any]]) -> list[dict[str, Any
                 "reasons": record.get("explanation_reasons", []),
                 "main_caveat": record.get("main_caveat", "N/A"),
                 "commercial_intel_notes": record.get("commercial_intel_notes", []),
+                "cross_source_evidence_notes": record.get("cross_source_evidence_notes", []),
+                "cross_source_evidence": record.get("cross_source_evidence", {}),
             }
         )
     return items
+
+
+def _dedupe_scan_strings(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(text)
+    return result
+
+
+def _apply_cross_source_scan_evidence(records: list[dict[str, Any]]) -> None:
+    for record in records:
+        commercial_section = record.get("commercial_intel") if isinstance(record.get("commercial_intel"), dict) else {}
+        provider_models = [
+            model
+            for model in (commercial_section.get("evidence_models", []) or [])
+            if isinstance(model, dict)
+        ]
+        merged = merge_evidence_models([build_scan_official_evidence_model(record), *provider_models])
+        record["cross_source_evidence"] = merged
+        evidence_notes = evidence_model_scan_notes(merged, max_items=3)
+        record["cross_source_evidence_notes"] = evidence_notes
+        if evidence_notes:
+            record["explanation_reasons"] = _dedupe_scan_strings(
+                list(record.get("explanation_reasons", []) or []) + evidence_notes
+            )[:4]
+        conflicts = merged.get("conflicts", []) or []
+        if conflicts:
+            first_conflict = conflicts[0]
+            conflict_caveat = (
+                f'Source conflict remains on {first_conflict.get("field", "cross-source evidence")}: '
+                f'{", ".join((first_conflict.get("values") or [])[:2])}.'
+            )
+            current_caveat = str(record.get("main_caveat") or "").strip()
+            record["main_caveat"] = _dedupe_scan_strings([current_caveat, conflict_caveat])[0] if current_caveat else conflict_caveat
 
 
 def _search_text_for_enrichment(profile: dict[str, Any]) -> str:
@@ -1457,6 +1506,7 @@ def main() -> int:
     )
     source_statuses.extend(commercial_enrichment.get("source_statuses", []))
     source_issues.extend(commercial_enrichment.get("source_issues", []))
+    _apply_cross_source_scan_evidence(records)
 
     for source in enabled_sources:
         source_id = source.get("id")

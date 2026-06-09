@@ -62,34 +62,43 @@ def render_entry(entry: dict[str, Any], explanation: dict[str, Any]) -> str:
     title = entry.get("title", "Untitled opportunity")
     summary = explanation.get("summary") or explanation.get("opportunity_summary") or "N/A"
     reasons = explanation.get("reasons") or explanation.get("why_it_matters") or []
+    cross_source_notes = explanation.get("cross_source_evidence_notes") or explanation.get("commercial_intel_notes") or []
     if isinstance(reasons, str):
         reasons = [reasons]
+    if isinstance(cross_source_notes, str):
+        cross_source_notes = [cross_source_notes]
     caveat = explanation.get("main_caveat") or explanation.get("caveat") or "N/A"
     source_label = f'{entry.get("source_name", "Unknown")} (Tier {entry.get("source_tier", "N/A")})'
-    return "\n".join(
-        [
-            f"### {entry['entry_id']} - {title}",
-            "",
-            "| Field | Value |",
-            "|:---|:---|",
-            f"| Buyer | {entry.get('buyer', 'N/A')} |",
-            f"| Due | {entry.get('due_date', 'N/A')} |",
-            f"| Timing Window | {timing_label(entry)} |",
-            f"| Notice Type | {entry.get('notice_type', 'N/A')} |",
-            f"| Opportunity Class | {entry.get('opportunity_class', 'N/A')} |",
-            f"| Source | {source_label} |",
-            f"| Match Score | {entry.get('match_score', 0)} |",
-            f"| Confidence | {entry.get('confidence_score', 0)} |",
-            f"| Direct URL | {entry.get('url', 'N/A')} |",
-            "",
-            f"Opportunity summary: {summary}",
-            "",
-            "Why it matters:",
-            reasons_block(reasons, "Evidence-backed details still being assembled."),
-            "",
-            f"Caveat: {caveat}",
-        ]
-    )
+    lines = [
+        f"### {entry['entry_id']} - {title}",
+        "",
+        "| Field | Value |",
+        "|:---|:---|",
+        f"| Buyer | {entry.get('buyer', 'N/A')} |",
+        f"| Due | {entry.get('due_date', 'N/A')} |",
+        f"| Timing Window | {timing_label(entry)} |",
+        f"| Notice Type | {entry.get('notice_type', 'N/A')} |",
+        f"| Opportunity Class | {entry.get('opportunity_class', 'N/A')} |",
+        f"| Source | {source_label} |",
+        f"| Match Score | {entry.get('match_score', 0)} |",
+        f"| Confidence | {entry.get('confidence_score', 0)} |",
+        f"| Direct URL | {entry.get('url', 'N/A')} |",
+        "",
+        f"Opportunity summary: {summary}",
+        "",
+        "Why it matters:",
+        reasons_block(reasons, "Evidence-backed details still being assembled."),
+    ]
+    if cross_source_notes:
+        lines.extend(
+            [
+                "",
+                "Cross-source signals:",
+                reasons_block(cross_source_notes, "No cross-source corroboration surfaced in this run."),
+            ]
+        )
+    lines.extend(["", f"Caveat: {caveat}"])
+    return "\n".join(lines)
 
 
 def render_section(entries: list[dict[str, Any]], lookup: dict[str, dict[str, Any]]) -> str:

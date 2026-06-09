@@ -14,6 +14,14 @@ if str(SCRIPT_ROOT) not in sys.path:
 
 from common.jsonl import append_jsonl
 from common.commercial_intel import enrich_capture_context
+from common.evidence_model import (
+    build_capture_official_evidence_model,
+    evidence_model_competitive_notes,
+    evidence_model_next_questions,
+    evidence_model_related_procurement_lines,
+    evidence_model_vehicle_signals,
+    merge_evidence_models,
+)
 from common.paths import load_json, safe_slug, standard_procurement_paths, today_local_str, utc_now_iso, write_json, write_text
 from common.source_registry import get_enabled_sources
 from common.validation import validate_capture_brief_text
@@ -1812,11 +1820,28 @@ def main() -> int:
         vehicle_signals.append("Attachment text references a SATOC / task-order contract structure that should be validated against the solicitation package.")
     if not vehicle_signals:
         vehicle_signals.append("Likely vehicle path remains unconfirmed from the current public package; validate open-market versus existing-vehicle assumptions.")
-    vehicle_signals = _dedupe_strings(vehicle_signals + commercial_intel.get("vehicle_signals", []))
+    official_capture_evidence = build_capture_official_evidence_model(
+        resolved=resolved,
+        opportunity=opportunity,
+        award_signals=award_signals,
+        attachment_validation=attachment_validation,
+        attachment_bundle=attachment_bundle,
+        vehicle_signals=vehicle_signals,
+        notice_context_text=notice_context_text,
+    )
+    cross_source_evidence = merge_evidence_models(
+        [official_capture_evidence, *(commercial_intel.get("evidence_models", []) or [])]
+    )
+    vehicle_signals = _dedupe_strings(
+        vehicle_signals
+        + evidence_model_vehicle_signals(cross_source_evidence, max_items=6)
+        + commercial_intel.get("vehicle_signals", [])
+    )
     attachment_competitive_notes = _dedupe_strings(
         attachment_validation.get("notes", [])
         + attachment_validation.get("direct_mentions", [])
         + attachment_validation.get("supporting_snippets", [])
+        + evidence_model_competitive_notes(cross_source_evidence, max_items=6)
         + commercial_intel.get("competitive_landscape", [])
     )
     funding_assessment = _funding_assessment(
@@ -1838,6 +1863,7 @@ def main() -> int:
     related_procurements = (
         award_signals.get("related_procurements", [])
         + attachment_validation.get("supporting_snippets", [])
+        + evidence_model_related_procurement_lines(cross_source_evidence, max_items=6)
         + commercial_intel.get("related_procurements", [])
     )
     evidence_gaps = _dedupe_strings(
@@ -1864,6 +1890,7 @@ def main() -> int:
             ),
             *award_signals.get("evidence_gaps", []),
             *public_research.get("evidence_gaps", []),
+            *(cross_source_evidence.get("evidence_gaps", []) if isinstance(cross_source_evidence, dict) else []),
         ]
     )
     executive_risks = _dedupe_strings(
@@ -1881,7 +1908,13 @@ def main() -> int:
             *(_matching_lines("success metrics", public_research.get("mission_context_signals", []), max_items=1) if public_research.get("mission_context_signals") else []),
         ]
     )
+    merged_incumbent_name = str(
+        ((cross_source_evidence.get("incumbent") or {}).get("name") if isinstance(cross_source_evidence, dict) else "")
+        or ""
+    ).strip()
     incumbent_list = (
+        ([merged_incumbent_name] if merged_incumbent_name else [])
+        or
         attachment_validation.get("validated_incumbents", [])
         or award_signals.get("competitive_landscape", {}).get("likely_incumbents", [])
     )
@@ -2014,6 +2047,7 @@ def main() -> int:
         stakeholder_contacts=stakeholder_contacts,
         vehicle_signals=vehicle_signals,
         learned_semantic_preferences=learned_semantic_preferences,
+        normalized_evidence=cross_source_evidence,
     )
     decision_sections.setdefault("capture_judgment", {}).update(
         {
@@ -2087,9 +2121,11 @@ def main() -> int:
         "funding_assessment": funding_assessment,
         "related_procurements": related_procurements,
         "vehicle_signals": vehicle_signals,
+        "cross_source_evidence": cross_source_evidence,
         "commercial_intel": {
             "source_statuses": commercial_intel.get("source_statuses", []),
             "matches": commercial_intel.get("matches", []),
+            "evidence_models": commercial_intel.get("evidence_models", []),
             "related_procurements": commercial_intel.get("related_procurements", []),
             "vehicle_signals": commercial_intel.get("vehicle_signals", []),
             "competitive_landscape": commercial_intel.get("competitive_landscape", []),
@@ -2146,7 +2182,7 @@ def main() -> int:
                     if not public_research.get("budget_document_signals") or not public_research.get("acquisition_forecast_signals")
                     else []
                 ),
-                *commercial_intel.get("next_questions", []),
+                *evidence_model_next_questions(cross_source_evidence, max_items=6),
             ]
         ),
         "action_items_next_10_days": _dedupe_strings(
