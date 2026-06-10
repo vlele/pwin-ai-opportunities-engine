@@ -1274,6 +1274,38 @@ def _search_text_for_enrichment(profile: dict[str, Any]) -> str:
     return keywords[0] if keywords else ""
 
 
+def _company_website(profile: dict[str, Any]) -> str:
+    company = profile.get("company", {}) if isinstance(profile.get("company"), dict) else {}
+    website = company.get("website") or profile.get("company_url") or profile.get("website") or ""
+    return str(website).strip()
+
+
+def _bootstrap_recommended_next_moves(bundle_root: Path, workspace: Path, vendor_profile: dict[str, Any]) -> list[dict[str, Any]]:
+    bootstrap_script = (bundle_root / "scripts" / "bootstrap" / "bootstrap_workspace.py").as_posix()
+    workspace_path = workspace.as_posix()
+    website = _company_website(vendor_profile)
+    company_url = website or "<company-url>"
+    bootstrap_command = (
+        f'python3 "{bootstrap_script}" --workspace "{workspace_path}" --company-url "{company_url}"'
+    )
+    bootstrap_message = (
+        f"Bootstrap this workspace from {website} before you rerun the scan."
+        if website
+        else "Bootstrap this workspace from the company website before you rerun the scan."
+    )
+    return [
+        {
+            "type": "bootstrap_workspace",
+            "message": bootstrap_message,
+            "command": bootstrap_command,
+        },
+        {
+            "type": "confirm_bootstrap_outputs",
+            "message": "Review procurement/STARTER_PROFILE.md, confirm the candidate NAICS, and then rerun the scan.",
+        },
+    ]
+
+
 def _write_scan_outputs(
     opportunities_path: Path,
     explanations_path: Path,
@@ -1324,6 +1356,7 @@ def main() -> int:
     source_issues: list[str] = []
     source_statuses: list[dict[str, Any]] = []
     records: list[dict[str, Any]] = []
+    recommended_next_moves: list[dict[str, Any]] = []
 
     configured_enabled_sources = get_enabled_sources(registry)
     enabled_sources = filter_sources_for_policy(configured_enabled_sources, federal_only=args.federal_only)
@@ -1345,16 +1378,25 @@ def main() -> int:
 
     if "sam_contract_opportunities" in enabled_ids:
         sam_result = search_sam_opportunities(naics_codes=naics_codes, today=today)
-        source_statuses.append(
-            {
-                "source_id": "sam_contract_opportunities",
-                "status": sam_result.get("status", "unknown"),
-                "notes": sam_result.get("notes", []),
-                "queried_naics": sam_result.get("queried_naics", []),
-                "error_count": len(sam_result.get("errors", [])),
-                "record_count": len(sam_result.get("records", [])),
-            }
-        )
+        sam_source_status = {
+            "source_id": "sam_contract_opportunities",
+            "status": sam_result.get("status", "unknown"),
+            "notes": sam_result.get("notes", []),
+            "queried_naics": sam_result.get("queried_naics", []),
+            "error_count": len(sam_result.get("errors", [])),
+            "record_count": len(sam_result.get("records", [])),
+        }
+        if sam_result.get("recommended_next_step") == "bootstrap_workspace":
+            recommended_next_moves = _bootstrap_recommended_next_moves(bundle_root, workspace, vendor_profile)
+            sam_source_status["recommended_next_step"] = "bootstrap_workspace"
+            sam_source_status["recommended_message"] = sam_result.get("recommended_message", "")
+            sam_source_status["recommended_next_moves"] = recommended_next_moves
+            if recommended_next_moves and recommended_next_moves[0].get("command"):
+                sam_source_status["recommended_command"] = recommended_next_moves[0]["command"]
+            guidance_note = str(sam_result.get("recommended_message", "")).strip()
+            if guidance_note:
+                source_issues.append(guidance_note)
+        source_statuses.append(sam_source_status)
         source_issues.extend(sam_result.get("errors", []))
 
         candidate_records = []
@@ -1549,6 +1591,16 @@ def main() -> int:
             f"Opportunities snapshot path: {opportunities_path.as_posix()}",
             f"Explanations snapshot path: {explanations_path.as_posix()}",
             f"Refresh reasons: {', '.join(refresh_reasons) if refresh_reasons else 'none'}",
+            *(
+                [f"Recommended next move: {recommended_next_moves[0]['message']}"]
+                if recommended_next_moves
+                else []
+            ),
+            *(
+                [f"Bootstrap command: {recommended_next_moves[0]['command']}"]
+                if recommended_next_moves and recommended_next_moves[0].get("command")
+                else []
+            ),
         ],
         enabled_source_summary=enabled_summary,
         source_issues=source_issues,
@@ -1559,6 +1611,9 @@ def main() -> int:
         "date": date_str,
         "horizon": args.horizon,
         "federal_only": args.federal_only,
+        "recommended_next_step": recommended_next_moves[0]["type"] if recommended_next_moves else "",
+        "bootstrap_suggested": bool(recommended_next_moves),
+        "recommended_next_moves": recommended_next_moves,
         "preferences_path": preferences_path.as_posix(),
         "registry_path": registry_path.as_posix(),
         "opportunities_path": opportunities_path.as_posix(),

@@ -120,10 +120,15 @@ def search_sam_opportunities(
     if not naics_codes:
         return {
             "status": "no_naics",
-            "notes": ["Vendor profile does not contain confirmed or candidate NAICS codes."],
+            "notes": [
+                "Vendor profile does not contain confirmed or candidate NAICS codes.",
+                "Bootstrap this workspace from the company website before running the first real scan.",
+            ],
             "records": [],
             "queried_naics": [],
             "errors": [],
+            "recommended_next_step": "bootstrap_workspace",
+            "recommended_message": "Bootstrap this workspace from the company website so the vendor profile contains confirmed or candidate NAICS codes.",
         }
 
     posted_from = _format_mmddyyyy(today - timedelta(days=lookback_days))

@@ -101,7 +101,21 @@ cd "$HOME/work/acme-capture"
 
 This skill writes its outputs into `procurement/` inside that workspace.
 
-## 4. Bootstrap the Workspace from the Company URL
+## 4. Bootstrap First, Then Scan
+
+Use this rule of thumb:
+
+- if this is a brand-new workspace, bootstrap first
+- if `procurement/vendor-profile.json` does not contain confirmed or candidate NAICS, bootstrap first
+- if a scan returns `no_naics`, treat that as a bootstrap prompt, not a successful first scan
+
+A workspace is ready for its first real scan when all of these are true:
+
+- `procurement/vendor-profile.json` exists
+- the vendor profile contains confirmed or candidate NAICS
+- `procurement/STARTER_PROFILE.md` exists for review before the first scan
+
+## 5. Bootstrap the Workspace from the Company URL
 
 In OpenClaw or Codex, ask:
 
@@ -131,6 +145,14 @@ In Claude Code, use:
 /pwin-bootstrap workspace path $PWD and company URL https://example.com with candidate NAICS 541511 and 541512
 ```
 
+If you want the direct underlying CLI path on any host, run:
+
+```bash
+python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" \
+  --workspace "$PWD" \
+  --company-url "https://example.com"
+```
+
 That creates or updates:
 
 - `procurement/vendor-profile.json`
@@ -152,7 +174,7 @@ It also seeds `procurement/preferences.json` to exclude `grants` by default, pre
 
 Before the first real scan, review `procurement/STARTER_PROFILE.md` and confirm or correct the provisional fields.
 
-## 5. Optional: Enable GovTribe in This Workspace
+## 6. Optional: Enable GovTribe in This Workspace
 
 You can skip this section and stay official-source only.
 
@@ -178,7 +200,7 @@ What `GovTribe MCP` adds when it is both enabled and configured:
 - optional capture-time incumbent, vehicle, related-procurement, and teaming clues
 - normalized cross-source evidence with explicit conflict reporting when official and commercial signals disagree
 
-## 6. Run the First Scan
+## 7. Run the First Scan
 
 Once the workspace is bootstrapped, ask:
 
@@ -195,10 +217,18 @@ In Claude Code, use:
 Expected behavior:
 
 - if `SAM_API_KEY` is missing, the scan reports `missing_api_key`
-- if the workspace still has no usable NAICS, the scan reports `no_naics`
+- if the workspace still has no usable NAICS, the scan reports `no_naics` and returns a bootstrap recommendation with the next command to run
 - if `OPENAI_API_KEY` is present, the scan can add semantic fit reasoning and a `semantic_audit` block
 - if `GovTribe MCP` is enabled and configured, the scan can add commercial source statuses plus `cross_source_evidence_notes`
 - if the scan finds matches, you will get a dated digest with stable IDs like `A1`, `W2`, or `E1`
+
+If you hit `no_naics`, rerun bootstrap before you try another scan:
+
+```bash
+python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" \
+  --workspace "$PWD" \
+  --company-url "https://example.com"
+```
 
 Key scan artifacts:
 
@@ -207,7 +237,7 @@ Key scan artifacts:
 - `procurement/digest-entry-map/YYYY-MM-DD.json`
 - `procurement/digests/YYYY-MM-DD.md`
 
-## 7. Read the Digest
+## 8. Read the Digest
 
 Ask:
 
@@ -223,7 +253,7 @@ In Claude Code, use:
 
 The digest is where you pick stable IDs for tracked capture.
 
-## 8. Run Capture Research
+## 9. Run Capture Research
 
 You now have three supported capture paths:
 
@@ -283,7 +313,7 @@ If `GovTribe MCP` is enabled and configured, capture evidence may include:
 - `cross_source_evidence`
 - normalized fields for incumbent, vehicle, recompete clues, related procurements, contract value or ceiling, teaming posture, next questions, and conflicts
 
-## 9. Give Feedback
+## 10. Give Feedback
 
 Use plain-English feedback such as:
 

@@ -101,7 +101,7 @@ After the script runs:
 - read the `digest_path` it returns
 - answer from that digest
 - do not invent a second digest in chat
-- if the scan reports `no_naics`, say plainly that the current workspace does not have usable NAICS for SAM retrieval
+- if the scan reports `no_naics`, say plainly that the current workspace does not have usable NAICS for SAM retrieval, recommend bootstrap immediately, and include the exact bootstrap command when the company URL is already known from the workspace
 
 ### 2. Show Digest
 
