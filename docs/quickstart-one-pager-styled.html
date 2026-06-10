@@ -78,23 +78,40 @@
   <link rel="stylesheet" href="quickstart-one-pager-styled.css" />
 </head>
 <body>
-<h1 id="pwinai-opportunities-quick-start">pWin.ai Opportunities Quick Start</h1>
+<header id="title-block-header">
+<h1 class="title">pWin.ai Opportunities Quick Start</h1>
+</header>
+<h1 id="pwin.ai-opportunities-quick-start">pWin.ai Opportunities Quick Start</h1>
 <p><code>pWin.ai Opportunities</code> helps you bootstrap a workspace from a company website, scan federal opportunities, turn promising items into capture briefs, and improve future matching with plain-English feedback.</p>
+<p>This version reflects the current shipped behavior:</p>
+<ul>
+<li>official-source scan and capture run on <code>SAM.gov</code> plus <code>USAspending.gov</code></li>
+<li>scan can use OpenAI reasoning to read opportunity text more like a human reviewer</li>
+<li><code>GovTribe MCP</code> is now an optional commercial-intelligence sidecar for scan and capture</li>
+<li>capture can run from a stable ID, from local files, or from both together</li>
+<li>capture evidence now includes normalized cross-source fields such as incumbent, vehicle, related procurements, teaming posture, and source conflicts when that evidence is available</li>
+</ul>
 <h2 id="minimum-requirements">Minimum Requirements</h2>
 <ul>
 <li>One working host: <code>OpenAI Codex</code>, <code>OpenClaw</code>, or <code>Claude Code</code></li>
 <li><code>python3</code> available in your shell</li>
 <li>A workspace folder where the skill can write artifacts</li>
 <li>A <code>SAM.gov</code> API key exposed as <code>SAM_API_KEY</code></li>
-<li>An OpenAI API key exposed as <code>OPENAI_API_KEY</code></li>
-<li>A reasoning-capable OpenAI model configured for your host</li>
-<li><code>o3-mini</code> is fine for this setup</li>
 <li>Internet access</li>
 <li>GitHub access to this repo</li>
 </ul>
-<p>This one-pager assumes an OpenAI-backed setup. If your host can talk to multiple model providers, use an OpenAI key for the steps below.</p>
+<p>Strongly recommended:</p>
+<ul>
+<li>An OpenAI API key exposed as <code>OPENAI_API_KEY</code></li>
+<li>A reasoning-capable OpenAI model for your host</li>
+</ul>
+<p>Optional:</p>
+<ul>
+<li>A <code>GovTribe MCP</code> API key exposed as <code>GOVTRIBE_MCP_API_KEY</code></li>
+</ul>
+<p>Base scan and capture work with <code>SAM_API_KEY</code> alone. <code>OPENAI_API_KEY</code> enables the shipped reasoning path and any <code>GovTribe MCP</code> call. <code>GovTribe MCP</code> is optional and disabled by default per workspace.</p>
 <p>If your GitHub setup uses HTTPS instead of SSH, swap the clone URLs below to the HTTPS form you normally use.</p>
-<h2 id="1-install-the-skill">1. Install the Skill</h2>
+<h2 id="install-the-skill">1. Install the Skill</h2>
 <h3 id="openai-codex">OpenAI Codex</h3>
 <div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true"></a><span class="fu">git</span> clone git@github.com:vlele/pwin-ai-opportunities-engine.git <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/.codex/skills/pwin-ai-opportunities&quot;</span></span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true"></a><span class="bu">export</span> <span class="va">PWIN_AI_OPPS_ROOT=</span><span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/.codex/skills/pwin-ai-opportunities&quot;</span></span></code></pre></div>
@@ -107,35 +124,41 @@
 <span id="cb3-2"><a href="#cb3-2" aria-hidden="true"></a><span class="bu">export</span> <span class="va">PWIN_AI_OPPS_ROOT=</span><span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/src/pwin-ai-opportunities&quot;</span></span>
 <span id="cb3-3"><a href="#cb3-3" aria-hidden="true"></a><span class="fu">mkdir</span> -p <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/.claude/commands/pwin-ai-opportunities&quot;</span></span>
 <span id="cb3-4"><a href="#cb3-4" aria-hidden="true"></a><span class="fu">cp</span> -R <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/claude-code/.claude/commands/.&quot;</span> <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/.claude/commands/pwin-ai-opportunities/&quot;</span></span></code></pre></div>
-<p>Then copy or merge <code>claude-code/CLAUDE.md</code> into the Claude Code project context you normally use. After that, Claude Code users can call the command pack with prompts such as <code>/pwin-bootstrap</code>, <code>/pwin-scan</code>, <code>/pwin-research</code>, <code>/pwin-feedback</code>, and <code>/pwin-show-digest</code>.</p>
-<h2 id="2-add-your-keys">2. Add Your Keys</h2>
-<p>In the shell where your host runs, export your keys:</p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true"></a><span class="bu">export</span> <span class="va">SAM_API_KEY=</span><span class="st">&quot;your-sam-gov-key&quot;</span></span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true"></a><span class="bu">export</span> <span class="va">OPENAI_API_KEY=</span><span class="st">&quot;your-openai-key&quot;</span></span></code></pre></div>
-<p>This quick start assumes <code>OPENAI_API_KEY</code> and a reasoning model. If you need a safe default model choice, <code>o3-mini</code> is fine.</p>
-<p>The important part is that your host is configured to use a reasoning-capable OpenAI model rather than a non-reasoning default. <code>SAM_API_KEY</code> is the only skill-specific secret, but this guide assumes the LLM side is OpenAI.</p>
-<h2 id="3-pick-a-workspace">3. Pick a Workspace</h2>
+<p>Then copy or merge <code>claude-code/CLAUDE.md</code> into the Claude Code project context you normally use.</p>
+<h2 id="add-your-keys">2. Add Your Keys</h2>
+<p>Required minimum:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true"></a><span class="bu">export</span> <span class="va">SAM_API_KEY=</span><span class="st">&quot;your-sam-gov-key&quot;</span></span></code></pre></div>
+<p>Recommended for the shipped reasoning path:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true"></a><span class="bu">export</span> <span class="va">OPENAI_API_KEY=</span><span class="st">&quot;your-openai-key&quot;</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true"></a><span class="bu">export</span> <span class="va">OPENAI_MODEL=</span><span class="st">&quot;gpt-5-mini&quot;</span></span></code></pre></div>
+<p>Optional for the <code>GovTribe MCP</code> sidecar:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true"></a><span class="bu">export</span> <span class="va">GOVTRIBE_MCP_API_KEY=</span><span class="st">&quot;your-govtribe-mcp-key&quot;</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true"></a><span class="bu">export</span> <span class="va">GOVTRIBE_MCP_URL=</span><span class="st">&quot;https://govtribe.com/mcp&quot;</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true"></a><span class="bu">export</span> <span class="va">GOVTRIBE_MCP_TIMEOUT_SECONDS=</span>90</span></code></pre></div>
+<p>Notes:</p>
+<ul>
+<li>If <code>OPENAI_MODEL</code> is not set, the shipped scripts default to <code>gpt-5-mini</code>.</li>
+<li>If <code>GovTribe MCP</code> is enabled in a workspace but <code>OPENAI_API_KEY</code> or <code>GOVTRIBE_MCP_API_KEY</code> is missing, scan and capture still run, but the commercial sidecar reports <code>not_configured</code>.</li>
+<li><code>GovWin IQ</code> is only a credential scaffold today, not a live runtime connector.</li>
+</ul>
+<h2 id="pick-a-workspace">3. Pick a Workspace</h2>
 <p>Create or open one folder per company:</p>
-<div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true"></a><span class="fu">mkdir</span> -p <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/work/acme-capture&quot;</span></span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true"></a><span class="bu">cd</span> <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/work/acme-capture&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb7"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true"></a><span class="fu">mkdir</span> -p <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/work/acme-capture&quot;</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true"></a><span class="bu">cd</span> <span class="st">&quot;</span><span class="va">$HOME</span><span class="st">/work/acme-capture&quot;</span></span></code></pre></div>
 <p>This skill writes its outputs into <code>procurement/</code> inside that workspace.</p>
-<h2 id="4-bootstrap-the-workspace-from-the-company-url">4. Bootstrap the Workspace from the Company URL</h2>
+<h2 id="bootstrap-the-workspace-from-the-company-url">4. Bootstrap the Workspace from the Company URL</h2>
 <p>In OpenClaw or Codex, ask:</p>
-<pre class="text"><code>Use pwin-ai-opportunities and bootstrap this workspace from https://example.com.
-</code></pre>
+<pre class="text"><code>Use pwin-ai-opportunities and bootstrap this workspace from https://example.com.</code></pre>
 <p>If you already know the NAICS codes, say:</p>
 <pre class="text"><code>Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
-with confirmed NAICS 541511 and 541512.
-</code></pre>
+with confirmed NAICS 541511 and 541512.</code></pre>
 <p>If those NAICS are still tentative, say:</p>
 <pre class="text"><code>Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
-and treat NAICS 541511 and 541512 as candidates.
-</code></pre>
-<p>In Claude Code, use the command pack:</p>
+and treat NAICS 541511 and 541512 as candidates.</code></pre>
+<p>In Claude Code, use:</p>
 <pre class="text"><code>/pwin-bootstrap workspace path $PWD and company URL https://example.com
 /pwin-bootstrap workspace path $PWD and company URL https://example.com with confirmed NAICS 541511 and 541512
-/pwin-bootstrap workspace path $PWD and company URL https://example.com with candidate NAICS 541511 and 541512
-</code></pre>
+/pwin-bootstrap workspace path $PWD and company URL https://example.com with candidate NAICS 541511 and 541512</code></pre>
 <p>That creates or updates:</p>
 <ul>
 <li><code>procurement/vendor-profile.json</code></li>
@@ -150,50 +173,107 @@ and treat NAICS 541511 and 541512 as candidates.
 <li><code>company.website</code> plus an inferred company name and summary</li>
 <li>inferred <code>core_competencies</code>, <code>other_taxonomy_tags.keywords</code>, and a starter <code>fit_narrative</code></li>
 <li>confirmed <code>naics.confirmed</code> values when you provide confirmed codes</li>
-<li>candidate <code>naics.candidates</code> values from tentative input plus website inference</li>
+<li>candidate <code>naics.candidate</code> values from tentative input plus website inference</li>
 <li>candidate buyer notes, provenance facts, and a reminder that website-derived facts are still provisional</li>
 </ul>
 <p>It also seeds <code>procurement/preferences.json</code> to exclude <code>grants</code> by default, prefer <code>contracts</code>, <code>subcontracts</code>, and <code>forecasts</code>, and reuse the inferred capability keywords. If <code>procurement/vendor-profile.json</code> already exists, bootstrap merges into it instead of resetting the file.</p>
-<p>Then review <code>procurement/STARTER_PROFILE.md</code> and confirm or correct the provisional fields before the first real scan.</p>
-<h2 id="5-run-the-first-scan">5. Run the First Scan</h2>
+<p>Before the first real scan, review <code>procurement/STARTER_PROFILE.md</code> and confirm or correct the provisional fields.</p>
+<h2 id="optional-enable-govtribe-in-this-workspace">5. Optional: Enable GovTribe in This Workspace</h2>
+<p>You can skip this section and stay official-source only.</p>
+<p>If you want <code>GovTribe MCP</code> enrichment in this specific workspace, flip it on in <code>procurement/source-registry.json</code>:</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true"></a><span class="ex">python3</span> - <span class="op">&lt;&lt;&#39;PY&#39;</span></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true"></a>import json</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true"></a>from pathlib import Path</span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true"></a></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true"></a>path = Path(&quot;procurement/source-registry.json&quot;)</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true"></a>data = json.loads(path.read_text())</span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true"></a>for source in data.get(&quot;sources&quot;, []):</span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true"></a>    if source.get(&quot;id&quot;) == &quot;govtribe_mcp_commercial_intel&quot;:</span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true"></a>        source[&quot;enabled&quot;] = True</span>
+<span id="cb12-10"><a href="#cb12-10" aria-hidden="true"></a>path.write_text(json.dumps(data, indent=2) + &quot;\n&quot;)</span>
+<span id="cb12-11"><a href="#cb12-11" aria-hidden="true"></a><span class="op">PY</span></span></code></pre></div>
+<p>What <code>GovTribe MCP</code> adds when it is both enabled and configured:</p>
+<ul>
+<li>optional scan-time commercial-intelligence matching</li>
+<li>optional capture-time incumbent, vehicle, related-procurement, and teaming clues</li>
+<li>normalized cross-source evidence with explicit conflict reporting when official and commercial signals disagree</li>
+</ul>
+<h2 id="run-the-first-scan">6. Run the First Scan</h2>
 <p>Once the workspace is bootstrapped, ask:</p>
-<pre class="text"><code>Use pwin-ai-opportunities and run a federal opportunity scan for the next 30 to 45 days in this workspace.
-</code></pre>
+<pre class="text"><code>Use pwin-ai-opportunities and run a federal opportunity scan for the next 30 to 45 days in this workspace.</code></pre>
 <p>In Claude Code, use:</p>
-<pre class="text"><code>/pwin-scan workspace path $PWD and horizon 30-45
-</code></pre>
-<p>Expected first-run behavior:</p>
+<pre class="text"><code>/pwin-scan workspace path $PWD and horizon 30-45</code></pre>
+<p>Expected behavior:</p>
 <ul>
 <li>if <code>SAM_API_KEY</code> is missing, the scan reports <code>missing_api_key</code></li>
 <li>if the workspace still has no usable NAICS, the scan reports <code>no_naics</code></li>
+<li>if <code>OPENAI_API_KEY</code> is present, the scan can add semantic fit reasoning and a <code>semantic_audit</code> block</li>
+<li>if <code>GovTribe MCP</code> is enabled and configured, the scan can add commercial source statuses plus <code>cross_source_evidence_notes</code></li>
 <li>if the scan finds matches, you will get a dated digest with stable IDs like <code>A1</code>, <code>W2</code>, or <code>E1</code></li>
 </ul>
-<h2 id="6-read-the-digest">6. Read the Digest</h2>
+<p>Key scan artifacts:</p>
+<ul>
+<li><code>procurement/opportunities/YYYY-MM-DD.json</code></li>
+<li><code>procurement/explanations/YYYY-MM-DD.json</code></li>
+<li><code>procurement/digest-entry-map/YYYY-MM-DD.json</code></li>
+<li><code>procurement/digests/YYYY-MM-DD.md</code></li>
+</ul>
+<h2 id="read-the-digest">7. Read the Digest</h2>
 <p>Ask:</p>
-<pre class="text"><code>Use pwin-ai-opportunities and show the latest digest.
-</code></pre>
+<pre class="text"><code>Use pwin-ai-opportunities and show the latest digest.</code></pre>
 <p>In Claude Code, use:</p>
-<pre class="text"><code>/pwin-show-digest workspace path $PWD and date latest
-</code></pre>
-<h2 id="7-run-capture-research">7. Run Capture Research</h2>
-<p>Pick a stable ID from the digest and ask:</p>
-<pre class="text"><code>Use pwin-ai-opportunities and research A1 with full capture depth.
-</code></pre>
+<pre class="text"><code>/pwin-show-digest workspace path $PWD and date latest</code></pre>
+<p>The digest is where you pick stable IDs for tracked capture.</p>
+<h2 id="run-capture-research">8. Run Capture Research</h2>
+<p>You now have three supported capture paths:</p>
+<ul>
+<li>tracked capture from a digest stable ID such as <code>A1</code></li>
+<li>direct local-file capture with one or more <code>--file</code> inputs plus metadata</li>
+<li>hybrid capture that starts from a stable ID and adds local files</li>
+</ul>
+<h3 id="tracked-capture-from-a-stable-id">Tracked capture from a stable ID</h3>
+<p>Ask:</p>
+<pre class="text"><code>Use pwin-ai-opportunities and research A1 with full capture depth.</code></pre>
 <p>In Claude Code, use:</p>
-<pre class="text"><code>/pwin-research workspace path $PWD and entry A1 with full capture depth
-</code></pre>
-<p>That produces a fresh capture brief and evidence file under <code>procurement/capture-briefs/</code> and <code>procurement/capture-evidence/</code>.</p>
-<h2 id="8-give-feedback">8. Give Feedback</h2>
+<pre class="text"><code>/pwin-research workspace path $PWD and entry A1 with full capture depth</code></pre>
+<h3 id="direct-local-file-capture">Direct local-file capture</h3>
+<div class="sourceCode" id="cb19"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> <span class="kw">\</span></span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true"></a>  <span class="ex">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="kw">\</span></span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true"></a>  <span class="ex">--file</span> <span class="st">&quot;/absolute/path/to/PWS.pdf&quot;</span> <span class="kw">\</span></span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true"></a>  <span class="ex">--file</span> <span class="st">&quot;/absolute/path/to/QA.docx&quot;</span> <span class="kw">\</span></span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true"></a>  <span class="ex">--title</span> <span class="st">&quot;Example opportunity&quot;</span> <span class="kw">\</span></span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true"></a>  <span class="ex">--buyer</span> <span class="st">&quot;Department of Example&quot;</span> <span class="kw">\</span></span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true"></a>  <span class="ex">--summary</span> <span class="st">&quot;Direct local-file capture from downloaded solicitation artifacts.&quot;</span> <span class="kw">\</span></span>
+<span id="cb19-8"><a href="#cb19-8" aria-hidden="true"></a>  <span class="ex">--solicitation-number</span> <span class="st">&quot;ABC123&quot;</span> <span class="kw">\</span></span>
+<span id="cb19-9"><a href="#cb19-9" aria-hidden="true"></a>  <span class="ex">--depth</span> full_360</span></code></pre></div>
+<p>Optional metadata for direct local-file capture includes <code>--url</code> and <code>--notice-id</code> when you have them.</p>
+<h3 id="hybrid-capture">Hybrid capture</h3>
+<div class="sourceCode" id="cb20"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> <span class="kw">\</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true"></a>  <span class="ex">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="kw">\</span></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true"></a>  <span class="ex">--entry</span> <span class="st">&quot;A1&quot;</span> <span class="kw">\</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true"></a>  <span class="ex">--file</span> <span class="st">&quot;/absolute/path/to/amendment.pdf&quot;</span> <span class="kw">\</span></span>
+<span id="cb20-5"><a href="#cb20-5" aria-hidden="true"></a>  <span class="ex">--depth</span> full_360</span></code></pre></div>
+<p>All three capture modes write fresh artifacts under:</p>
+<ul>
+<li><code>procurement/capture-briefs/</code></li>
+<li><code>procurement/capture-evidence/</code></li>
+</ul>
+<p>If <code>GovTribe MCP</code> is enabled and configured, capture evidence may include:</p>
+<ul>
+<li><code>commercial_intel.source_statuses</code></li>
+<li><code>commercial_intel.matches</code></li>
+<li><code>cross_source_evidence</code></li>
+<li>normalized fields for incumbent, vehicle, recompete clues, related procurements, contract value or ceiling, teaming posture, next questions, and conflicts</li>
+</ul>
+<h2 id="give-feedback">9. Give Feedback</h2>
 <p>Use plain-English feedback such as:</p>
 <pre class="text"><code>never show grants
 like A1
 dislike W2 because too small
-more like A1
-</code></pre>
-<p>In Claude Code, the command-pack equivalent is:</p>
+more like A1</code></pre>
+<p>In Claude Code, use:</p>
 <pre class="text"><code>/pwin-feedback workspace path $PWD and text never show grants
-/pwin-feedback workspace path $PWD and text like A1
-</code></pre>
+/pwin-feedback workspace path $PWD and text like A1</code></pre>
 <p>That feedback is logged to <code>procurement/feedback-events.jsonl</code> and applied to future scans.</p>
 <h2 id="what-gets-created-in-your-workspace">What Gets Created in Your Workspace</h2>
 <ul>
@@ -201,8 +281,11 @@ more like A1
 <li><code>procurement/preferences.json</code></li>
 <li><code>procurement/source-registry.json</code></li>
 <li><code>procurement/STARTER_PROFILE.md</code></li>
-<li><code>procurement/digests/YYYY-MM-DD.md</code></li>
+<li><code>procurement/opportunities/YYYY-MM-DD.json</code></li>
+<li><code>procurement/explanations/YYYY-MM-DD.json</code></li>
 <li><code>procurement/digest-entry-map/YYYY-MM-DD.json</code></li>
+<li><code>procurement/digests/YYYY-MM-DD.md</code></li>
+<li><code>procurement/reports/YYYY-MM-DD.md</code></li>
 <li><code>procurement/capture-briefs/...</code></li>
 <li><code>procurement/capture-evidence/...</code></li>
 <li><code>procurement/feedback-events.jsonl</code></li>
@@ -212,24 +295,31 @@ more like A1
 <ul>
 <li><code>missing_api_key</code> <code>SAM_API_KEY</code> is not exported in the shell running the scan.</li>
 <li><code>no_naics</code> The workspace still does not have confirmed or candidate <code>NAICS</code> after bootstrap or manual edits.</li>
+<li><code>govtribe_mcp_commercial_intel: not_configured</code> The workspace has GovTribe enabled, but the runtime shell is missing <code>OPENAI_API_KEY</code> or <code>GOVTRIBE_MCP_API_KEY</code>.</li>
+<li>GovTribe <code>http_error</code>, <code>error</code>, or <code>IncompleteRead</code> Rerun the scan or capture. The official-source path should still complete even when the commercial sidecar has a transient failure.</li>
 <li><code>HTTP 429</code> from <code>SAM.gov</code> Your key is wired correctly, but the API quota is throttled. Wait until the <code>nextAccessTime</code> returned by <code>SAM.gov</code> and rerun.</li>
 </ul>
 <h2 id="short-version">Short Version</h2>
-<ol>
+<ol type="1">
 <li>Clone the repo with your normal authenticated GitHub method.</li>
 <li>Export <code>SAM_API_KEY</code>.</li>
+<li>Export <code>OPENAI_API_KEY</code> if you want the shipped reasoning path.</li>
+<li>Export <code>GOVTRIBE_MCP_API_KEY</code> only if you want the optional GovTribe sidecar.</li>
 <li>Create a workspace.</li>
 <li>Bootstrap it from the company website.</li>
 <li>Review the starter profile and the populated <code>vendor-profile.json</code>.</li>
+<li>Optionally enable GovTribe in <code>procurement/source-registry.json</code>.</li>
 <li>Run the federal-only scan.</li>
-<li>Read the digest, research a stable ID, and give feedback.</li>
+<li>Read the digest, research a stable ID or local files, and give feedback.</li>
 </ol>
 <h2 id="direct-script-equivalents">Direct Script Equivalents</h2>
-<p>These are helpful for debugging or CI. In normal OpenClaw and Codex usage, prefer the chat prompts above. In Claude Code, prefer the <code>/pwin-*</code> command pack shown above.</p>
-<div class="sourceCode" id="cb18"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/bootstrap/bootstrap_workspace.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --company-url <span class="st">&quot;https://example.com&quot;</span></span>
-<span id="cb18-2"><a href="#cb18-2" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/scan/run_scan.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --horizon <span class="st">&quot;30-45&quot;</span> --federal-only</span>
-<span id="cb18-3"><a href="#cb18-3" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/show/show_digest.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --date latest</span>
-<span id="cb18-4"><a href="#cb18-4" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --entry <span class="st">&quot;A1&quot;</span> --depth full_360</span>
-<span id="cb18-5"><a href="#cb18-5" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/feedback/apply_feedback.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --text <span class="st">&quot;never show grants&quot;</span></span></code></pre></div>
+<p>These are helpful for debugging or CI. In normal OpenClaw and Codex usage, prefer the chat prompts above. In Claude Code, prefer the <code>/pwin-*</code> command pack.</p>
+<div class="sourceCode" id="cb23"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/bootstrap/bootstrap_workspace.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --company-url <span class="st">&quot;https://example.com&quot;</span></span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/scan/run_scan.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --horizon <span class="st">&quot;30-45&quot;</span> --federal-only</span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/show/show_digest.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --date latest</span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --entry <span class="st">&quot;A1&quot;</span> --depth full_360</span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --file <span class="st">&quot;/absolute/path/to/PWS.pdf&quot;</span> --file <span class="st">&quot;/absolute/path/to/QA.docx&quot;</span> --title <span class="st">&quot;Example opportunity&quot;</span> --buyer <span class="st">&quot;Department of Example&quot;</span> --summary <span class="st">&quot;Direct local-file capture from downloaded solicitation artifacts.&quot;</span> --solicitation-number <span class="st">&quot;ABC123&quot;</span> --depth full_360</span>
+<span id="cb23-6"><a href="#cb23-6" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --entry <span class="st">&quot;A1&quot;</span> --file <span class="st">&quot;/absolute/path/to/amendment.pdf&quot;</span> --depth full_360</span>
+<span id="cb23-7"><a href="#cb23-7" aria-hidden="true"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/feedback/apply_feedback.py&quot;</span> --workspace <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> --text <span class="st">&quot;never show grants&quot;</span></span></code></pre></div>
 </body>
 </html>

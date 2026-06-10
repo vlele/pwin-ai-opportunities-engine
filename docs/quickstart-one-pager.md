@@ -2,19 +2,33 @@
 
 `pWin.ai Opportunities` helps you bootstrap a workspace from a company website, scan federal opportunities, turn promising items into capture briefs, and improve future matching with plain-English feedback.
 
+This version reflects the current shipped behavior:
+
+- official-source scan and capture run on `SAM.gov` plus `USAspending.gov`
+- scan can use OpenAI reasoning to read opportunity text more like a human reviewer
+- `GovTribe MCP` is now an optional commercial-intelligence sidecar for scan and capture
+- capture can run from a stable ID, from local files, or from both together
+- capture evidence now includes normalized cross-source fields such as incumbent, vehicle, related procurements, teaming posture, and source conflicts when that evidence is available
+
 ## Minimum Requirements
 
 - One working host: `OpenAI Codex`, `OpenClaw`, or `Claude Code`
 - `python3` available in your shell
 - A workspace folder where the skill can write artifacts
 - A `SAM.gov` API key exposed as `SAM_API_KEY`
-- An OpenAI API key exposed as `OPENAI_API_KEY`
-- A reasoning-capable OpenAI model configured for your host
-- `o3-mini` is fine for this setup
 - Internet access
 - GitHub access to this repo
 
-This one-pager assumes an OpenAI-backed setup. If your host can talk to multiple model providers, use an OpenAI key for the steps below.
+Strongly recommended:
+
+- An OpenAI API key exposed as `OPENAI_API_KEY`
+- A reasoning-capable OpenAI model for your host
+
+Optional:
+
+- A `GovTribe MCP` API key exposed as `GOVTRIBE_MCP_API_KEY`
+
+Base scan and capture work with `SAM_API_KEY` alone. `OPENAI_API_KEY` enables the shipped reasoning path and any `GovTribe MCP` call. `GovTribe MCP` is optional and disabled by default per workspace.
 
 If your GitHub setup uses HTTPS instead of SSH, swap the clone URLs below to the HTTPS form you normally use.
 
@@ -46,20 +60,35 @@ cp -R "$PWIN_AI_OPPS_ROOT/claude-code/.claude/commands/." "$HOME/.claude/command
 ```
 
 Then copy or merge `claude-code/CLAUDE.md` into the Claude Code project context you normally use.
-After that, Claude Code users can call the command pack with prompts such as `/pwin-bootstrap`, `/pwin-scan`, `/pwin-research`, `/pwin-feedback`, and `/pwin-show-digest`.
 
 ## 2. Add Your Keys
 
-In the shell where your host runs, export your keys:
+Required minimum:
 
 ```bash
 export SAM_API_KEY="your-sam-gov-key"
-export OPENAI_API_KEY="your-openai-key"
 ```
 
-This quick start assumes `OPENAI_API_KEY` and a reasoning model. If you need a safe default model choice, `o3-mini` is fine.
+Recommended for the shipped reasoning path:
 
-The important part is that your host is configured to use a reasoning-capable OpenAI model rather than a non-reasoning default. `SAM_API_KEY` is the only skill-specific secret, but this guide assumes the LLM side is OpenAI.
+```bash
+export OPENAI_API_KEY="your-openai-key"
+export OPENAI_MODEL="gpt-5-mini"
+```
+
+Optional for the `GovTribe MCP` sidecar:
+
+```bash
+export GOVTRIBE_MCP_API_KEY="your-govtribe-mcp-key"
+export GOVTRIBE_MCP_URL="https://govtribe.com/mcp"
+export GOVTRIBE_MCP_TIMEOUT_SECONDS=90
+```
+
+Notes:
+
+- If `OPENAI_MODEL` is not set, the shipped scripts default to `gpt-5-mini`.
+- If `GovTribe MCP` is enabled in a workspace but `OPENAI_API_KEY` or `GOVTRIBE_MCP_API_KEY` is missing, scan and capture still run, but the commercial sidecar reports `not_configured`.
+- `GovWin IQ` is only a credential scaffold today, not a live runtime connector.
 
 ## 3. Pick a Workspace
 
@@ -94,7 +123,7 @@ Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
 and treat NAICS 541511 and 541512 as candidates.
 ```
 
-In Claude Code, use the command pack:
+In Claude Code, use:
 
 ```text
 /pwin-bootstrap workspace path $PWD and company URL https://example.com
@@ -121,9 +150,35 @@ Bootstrap does more than create empty files. It immediately pre-populates `procu
 
 It also seeds `procurement/preferences.json` to exclude `grants` by default, prefer `contracts`, `subcontracts`, and `forecasts`, and reuse the inferred capability keywords. If `procurement/vendor-profile.json` already exists, bootstrap merges into it instead of resetting the file.
 
-Then review `procurement/STARTER_PROFILE.md` and confirm or correct the provisional fields before the first real scan.
+Before the first real scan, review `procurement/STARTER_PROFILE.md` and confirm or correct the provisional fields.
 
-## 5. Run the First Scan
+## 5. Optional: Enable GovTribe in This Workspace
+
+You can skip this section and stay official-source only.
+
+If you want `GovTribe MCP` enrichment in this specific workspace, flip it on in `procurement/source-registry.json`:
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("procurement/source-registry.json")
+data = json.loads(path.read_text())
+for source in data.get("sources", []):
+    if source.get("id") == "govtribe_mcp_commercial_intel":
+        source["enabled"] = True
+path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+```
+
+What `GovTribe MCP` adds when it is both enabled and configured:
+
+- optional scan-time commercial-intelligence matching
+- optional capture-time incumbent, vehicle, related-procurement, and teaming clues
+- normalized cross-source evidence with explicit conflict reporting when official and commercial signals disagree
+
+## 6. Run the First Scan
 
 Once the workspace is bootstrapped, ask:
 
@@ -137,13 +192,22 @@ In Claude Code, use:
 /pwin-scan workspace path $PWD and horizon 30-45
 ```
 
-Expected first-run behavior:
+Expected behavior:
 
 - if `SAM_API_KEY` is missing, the scan reports `missing_api_key`
 - if the workspace still has no usable NAICS, the scan reports `no_naics`
+- if `OPENAI_API_KEY` is present, the scan can add semantic fit reasoning and a `semantic_audit` block
+- if `GovTribe MCP` is enabled and configured, the scan can add commercial source statuses plus `cross_source_evidence_notes`
 - if the scan finds matches, you will get a dated digest with stable IDs like `A1`, `W2`, or `E1`
 
-## 6. Read the Digest
+Key scan artifacts:
+
+- `procurement/opportunities/YYYY-MM-DD.json`
+- `procurement/explanations/YYYY-MM-DD.json`
+- `procurement/digest-entry-map/YYYY-MM-DD.json`
+- `procurement/digests/YYYY-MM-DD.md`
+
+## 7. Read the Digest
 
 Ask:
 
@@ -157,7 +221,9 @@ In Claude Code, use:
 /pwin-show-digest workspace path $PWD and date latest
 ```
 
-## 7. Run Capture Research
+The digest is where you pick stable IDs for tracked capture.
+
+## 8. Run Capture Research
 
 You now have three supported capture paths:
 
@@ -165,7 +231,9 @@ You now have three supported capture paths:
 - direct local-file capture with one or more `--file` inputs plus metadata
 - hybrid capture that starts from a stable ID and adds local files
 
-If you already have a stable ID from the digest, ask:
+### Tracked capture from a stable ID
+
+Ask:
 
 ```text
 Use pwin-ai-opportunities and research A1 with full capture depth.
@@ -177,7 +245,7 @@ In Claude Code, use:
 /pwin-research workspace path $PWD and entry A1 with full capture depth
 ```
 
-If you already have local solicitation files and do not want to wait for a prior stable ID, run direct capture like this:
+### Direct local-file capture
 
 ```bash
 python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" \
@@ -193,7 +261,7 @@ python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" \
 
 Optional metadata for direct local-file capture includes `--url` and `--notice-id` when you have them.
 
-If you want to augment a tracked opportunity with extra local documents, use hybrid capture:
+### Hybrid capture
 
 ```bash
 python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" \
@@ -203,9 +271,19 @@ python3 "$PWIN_AI_OPPS_ROOT/scripts/capture/run_capture_research.py" \
   --depth full_360
 ```
 
-All three capture modes write the same fresh brief and evidence artifacts under `procurement/capture-briefs/` and `procurement/capture-evidence/`.
+All three capture modes write fresh artifacts under:
 
-## 8. Give Feedback
+- `procurement/capture-briefs/`
+- `procurement/capture-evidence/`
+
+If `GovTribe MCP` is enabled and configured, capture evidence may include:
+
+- `commercial_intel.source_statuses`
+- `commercial_intel.matches`
+- `cross_source_evidence`
+- normalized fields for incumbent, vehicle, recompete clues, related procurements, contract value or ceiling, teaming posture, next questions, and conflicts
+
+## 9. Give Feedback
 
 Use plain-English feedback such as:
 
@@ -216,7 +294,7 @@ dislike W2 because too small
 more like A1
 ```
 
-In Claude Code, the command-pack equivalent is:
+In Claude Code, use:
 
 ```text
 /pwin-feedback workspace path $PWD and text never show grants
@@ -231,8 +309,11 @@ That feedback is logged to `procurement/feedback-events.jsonl` and applied to fu
 - `procurement/preferences.json`
 - `procurement/source-registry.json`
 - `procurement/STARTER_PROFILE.md`
-- `procurement/digests/YYYY-MM-DD.md`
+- `procurement/opportunities/YYYY-MM-DD.json`
+- `procurement/explanations/YYYY-MM-DD.json`
 - `procurement/digest-entry-map/YYYY-MM-DD.json`
+- `procurement/digests/YYYY-MM-DD.md`
+- `procurement/reports/YYYY-MM-DD.md`
 - `procurement/capture-briefs/...`
 - `procurement/capture-evidence/...`
 - `procurement/feedback-events.jsonl`
@@ -244,6 +325,10 @@ That feedback is logged to `procurement/feedback-events.jsonl` and applied to fu
   `SAM_API_KEY` is not exported in the shell running the scan.
 - `no_naics`
   The workspace still does not have confirmed or candidate `NAICS` after bootstrap or manual edits.
+- `govtribe_mcp_commercial_intel: not_configured`
+  The workspace has GovTribe enabled, but the runtime shell is missing `OPENAI_API_KEY` or `GOVTRIBE_MCP_API_KEY`.
+- GovTribe `http_error`, `error`, or `IncompleteRead`
+  Rerun the scan or capture. The official-source path should still complete even when the commercial sidecar has a transient failure.
 - `HTTP 429` from `SAM.gov`
   Your key is wired correctly, but the API quota is throttled. Wait until the `nextAccessTime` returned by `SAM.gov` and rerun.
 
@@ -251,16 +336,18 @@ That feedback is logged to `procurement/feedback-events.jsonl` and applied to fu
 
 1. Clone the repo with your normal authenticated GitHub method.
 2. Export `SAM_API_KEY`.
-3. Create a workspace.
-4. Bootstrap it from the company website.
-5. Review the starter profile and the populated `vendor-profile.json`.
-6. Run the federal-only scan.
-7. Read the digest.
-8. Research a stable ID or run direct local-file capture, then give feedback.
+3. Export `OPENAI_API_KEY` if you want the shipped reasoning path.
+4. Export `GOVTRIBE_MCP_API_KEY` only if you want the optional GovTribe sidecar.
+5. Create a workspace.
+6. Bootstrap it from the company website.
+7. Review the starter profile and the populated `vendor-profile.json`.
+8. Optionally enable GovTribe in `procurement/source-registry.json`.
+9. Run the federal-only scan.
+10. Read the digest, research a stable ID or local files, and give feedback.
 
 ## Direct Script Equivalents
 
-These are helpful for debugging or CI. In normal OpenClaw and Codex usage, prefer the chat prompts above. In Claude Code, prefer the `/pwin-*` command pack shown above.
+These are helpful for debugging or CI. In normal OpenClaw and Codex usage, prefer the chat prompts above. In Claude Code, prefer the `/pwin-*` command pack.
 
 ```bash
 python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" --workspace "$PWD" --company-url "https://example.com"
