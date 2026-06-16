@@ -395,7 +395,6 @@ def _vendor_tool_arguments(tool: dict[str, Any], *, lookup: str, limit: int = 5)
     query = _vendor_lookup_query(lookup)
     cleaned_uei = _clean_uei(lookup)
     is_uei = _is_likely_uei(lookup)
-    url_slug = _lookup_url_slug(lookup)
     if not properties:
         args: dict[str, Any] = {"query": query, "per_page": limit, "search_mode": "keyword"}
         if is_uei:
@@ -419,8 +418,6 @@ def _vendor_tool_arguments(tool: dict[str, Any], *, lookup: str, limit: int = 5)
                     args[name] = fields
             elif key in {"uei values", "ueis", "uei"} and is_uei:
                 args[name] = [cleaned_uei]
-            elif key == "govtribe ids" and url_slug:
-                args[name] = [url_slug]
             continue
         if _is_object_prop(spec):
             continue

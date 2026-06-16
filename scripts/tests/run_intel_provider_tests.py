@@ -447,6 +447,8 @@ def main() -> int:
         url_args = vendor_client.calls[-1][1]
         if url_args.get("query") != "halvik corp 5grr4":
             failures.append("govtribe_vendor_url_query")
+        if "govtribe_ids" in url_args:
+            failures.append("govtribe_vendor_url_no_slug_id_filter")
 
         no_match_provider = GovTribeMCPCommercialIntelProvider(
             {"id": "govtribe_mcp_commercial_intel"},
