@@ -91,6 +91,56 @@ def main() -> int:
         assert "Acme Federal" in starter_profile, starter_profile
         assert "Bootstrap snapshot" in memory, memory
 
+        nav_site = root / "nav-site"
+        nav_workspace = root / "nav-workspace"
+        write(
+            nav_site / "index.html",
+            """
+            <html>
+              <head>
+                <title>Halvik, LLC | About Us</title>
+              </head>
+              <body>
+                <h1>About Us</h1>
+                <h2>Logistics</h2>
+                <h2>Digital Services</h2>
+                <h2>Cybersecurity</h2>
+                <p>We help federal agencies protect mission systems and operate secure technology programs.</p>
+              </body>
+            </html>
+            """,
+        )
+
+        nav_result = seed_workspace(
+            bundle_root=bundle_root,
+            workspace=nav_workspace,
+            company_url=(nav_site / "index.html").resolve().as_uri(),
+            user_naics=["519290"],
+            naics_status="confirmed",
+            explicit_name="Halvik, LLC",
+            explicit_summary="Halvik supports federal cybersecurity programs.",
+        )
+
+        nav_vendor_profile = load_json(nav_workspace / "procurement" / "vendor-profile.json", default={})
+        nav_preferences = load_json(nav_workspace / "procurement" / "preferences.json", default={})
+        nav_starter_profile = (nav_workspace / "procurement" / "STARTER_PROFILE.md").read_text(encoding="utf-8")
+        nav_memory = (nav_workspace / "MEMORY.md").read_text(encoding="utf-8")
+        nav_payload = json.dumps(
+            {
+                "core_competencies": nav_vendor_profile.get("core_competencies", []),
+                "keywords": nav_vendor_profile.get("other_taxonomy_tags", {}).get("keywords", []),
+                "positive_keywords": nav_preferences.get("soft_preferences", {}).get("positive_keywords", []),
+                "starter_profile": nav_starter_profile,
+                "memory": nav_memory,
+            }
+        ).lower()
+
+        assert nav_result["status"] == "OK", nav_result
+        assert "cybersecurity" in nav_vendor_profile["core_competencies"], nav_vendor_profile
+        assert "cybersecurity" in nav_preferences["soft_preferences"]["positive_keywords"], nav_preferences
+        for low_signal_term in ("about us", "logistics", "digital services"):
+            assert low_signal_term not in nav_payload, nav_payload
+
     print("run_bootstrap_tests.py: PASS")
     return 0
 

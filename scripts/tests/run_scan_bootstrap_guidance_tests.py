@@ -137,6 +137,19 @@ class FakeGovTribeNoMatchProvider:
 
 
 def main() -> int:
+    polluted_keywords = run_scan._vendor_keywords(
+        {
+            "core_competencies": ["about us", "cybersecurity", "logistics management"],
+            "other_taxonomy_tags": {"keywords": ["logistics"]},
+        },
+        {"soft_preferences": {"positive_keywords": ["digital services", "cloud modernization"]}},
+    )
+    assert "cybersecurity" in polluted_keywords, polluted_keywords
+    assert "cloud modernization" in polluted_keywords, polluted_keywords
+    assert "logistics management" in polluted_keywords, polluted_keywords
+    for low_signal_term in ("about us", "logistics", "digital services"):
+        assert low_signal_term not in polluted_keywords, polluted_keywords
+
     original_sam_api_key = os.environ.get("SAM_API_KEY")
     os.environ["SAM_API_KEY"] = "test-sam-key"
     try:

@@ -12,7 +12,11 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from intel.mcp_http import MCPHttpClient, clean_bearer_token  # type: ignore
-from intel.providers.govtribe_mcp import GovTribeMCPCommercialIntelProvider, discover_tool_families  # type: ignore
+from intel.providers.govtribe_mcp import (  # type: ignore
+    GovTribeMCPCommercialIntelProvider,
+    _scan_retrieval_queries,
+    discover_tool_families,
+)
 from intel.providers.sam_gov import hydrate_sam_notice, search_sam_opportunities  # type: ignore
 from scan.sam_hydrate import hydrate_sam_notice as legacy_hydrate_sam_notice  # type: ignore
 from scan.sam_search import search_sam_opportunities as legacy_search_sam_opportunities  # type: ignore
@@ -341,6 +345,22 @@ def main() -> int:
             failures.append("govtribe_retrieval_empty_profile_no_match")
         if fake_client.calls[calls_before_empty_retrieval:]:
             failures.append("govtribe_retrieval_empty_profile_no_call")
+
+        polluted_queries = _scan_retrieval_queries(
+            {
+                "company": {"name": "Halvik, LLC", "summary": "Federal IT services contractor."},
+                "core_competencies": ["about us", "cybersecurity"],
+                "other_taxonomy_tags": {"keywords": ["logistics"]},
+                "fit_narrative": "Prioritize cybersecurity.",
+            },
+            {"soft_preferences": {"positive_keywords": ["digital services", "cloud modernization"]}},
+        )
+        polluted_query_text = " ".join(query for query, _mode in polluted_queries).lower()
+        if "cybersecurity" not in polluted_query_text or "cloud modernization" not in polluted_query_text:
+            failures.append("govtribe_retrieval_scrub_keeps_real_terms")
+        for low_signal_term in ("about us", "logistics", "digital services"):
+            if low_signal_term in polluted_query_text:
+                failures.append(f"govtribe_retrieval_scrub_{low_signal_term.replace(' ', '_')}")
 
         retrieval = provider.search_scan_opportunities(
             vendor_profile={
