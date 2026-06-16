@@ -4,7 +4,8 @@ Use this reference when working on the optional GovTribe MCP commercial-intellig
 
 ## Core Rules
 
-- Use GovTribe as optional commercial enrichment after official SAM.gov retrieval, not as the source of truth for active notices.
+- Use GovTribe as optional commercial enrichment after official SAM.gov retrieval by default.
+- Use GovTribe as primary scan retrieval only when the workspace explicitly sets `provider_options.allow_scan_retrieval_without_sam: true` and SAM.gov is disabled or missing `SAM_API_KEY`.
 - Use `GOVTRIBE_MCP_API_KEY` for GovTribe MCP. Do not require `OPENAI_API_KEY` for GovTribe.
 - Use typed `Search_*` tools when the target record family is known.
 - Use `Search_GovTribe` only as a broad resolver when the record type, GovTribe ID, or source identifier meaning is unclear.
@@ -148,13 +149,14 @@ Semantic guidance:
 - Do not use keyword operators in semantic mode.
 - Pair broad semantic queries with strong filters when possible.
 
-## Scan Enrichment Pattern
+## Scan Retrieval And Enrichment Pattern
 
-1. Use `Search_Federal_Contract_Opportunities` first.
+1. When SAM.gov produced records, use `Search_Federal_Contract_Opportunities` only as scan enrichment.
 2. If a SAM record has a solicitation number, call with `solicitation_numbers: ["<number>"]`, `search_mode: "keyword"`, and the opportunity fields above.
 3. If that returns no records, call the same tool with a keyword `query` built from the title and buyer.
 4. Use semantic mode only when title/buyer keyword search returns no useful records and the task is broad concept discovery.
-5. If GovTribe returns no match or a schema-compatible tool is unavailable, keep the SAM.gov scan path running and report the provider status.
+5. When SAM.gov cannot run and GovTribe-only scan retrieval is explicitly opted in, call `Search_Federal_Contract_Opportunities` directly with vendor capability/profile terms as `query`, confirmed/candidate NAICS as structured `naics_codes` when the schema supports it, and focused `fields_to_return`.
+6. If GovTribe returns no match or a schema-compatible tool is unavailable, report `no_match` or `tool_contract_unavailable` and keep the scan output shape stable.
 
 ## Capture Enrichment Pattern
 

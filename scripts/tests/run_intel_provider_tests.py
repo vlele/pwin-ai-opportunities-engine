@@ -81,6 +81,7 @@ class FakeGovTribeClient:
                         "query": {"type": "string"},
                         "search_mode": {"type": "string", "enum": ["keyword", "semantic"]},
                         "per_page": {"type": "number"},
+                        "naics_codes": {"type": "array", "items": {"type": "string"}},
                         "solicitation_numbers": {"type": "array", "items": {"type": "string"}},
                         "fields_to_return": {
                             "type": "array",
@@ -92,8 +93,18 @@ class FakeGovTribeClient:
                                     "source_url",
                                     "name",
                                     "solicitation_number",
+                                    "opportunity_type",
+                                    "opportunity_state",
+                                    "set_aside_type",
+                                    "posted_date",
+                                    "due_date",
+                                    "award_date",
                                     "descriptions",
                                     "govtribe_ai_summary",
+                                    "federal_contract_vehicle",
+                                    "federal_agency",
+                                    "naics_category",
+                                    "psc_category",
                                     "government_files",
                                     "federal_contract_awards",
                                     "federal_contract_idvs",
@@ -117,6 +128,11 @@ class FakeGovTribeClient:
                         "solicitation_number": "IRS-2026-001",
                         "url": "https://govtribe.com/opportunity/gt-123",
                         "summary": "GovTribe opportunity record with incumbent and vehicle clues.",
+                        "posted_date": "2026-06-01",
+                        "due_date": "2026-07-15",
+                        "federal_agency": {"name": "Internal Revenue Service"},
+                        "naics_category": {"code": "541512", "name": "Computer Systems Design Services"},
+                        "set_aside_type": "Total Small Business Set-Aside",
                         "incumbent_name": "Alpha Systems",
                         "vehicle_name": "CIO-SP3",
                         "award_amount": "$24,500,000",
@@ -231,6 +247,9 @@ def main() -> int:
         missing_result = provider.enrich_scan(record={"title": "Demo"}, hydrated_text="", vendor_profile={}, preferences={})
         if missing_result.get("status") != "not_configured":
             failures.append("govtribe_missing_key_status")
+        missing_retrieval = provider.search_scan_opportunities(vendor_profile={}, preferences={})
+        if missing_retrieval.get("status") != "not_configured":
+            failures.append("govtribe_retrieval_missing_key_status")
 
     with patch.dict(os.environ, {"GOVTRIBE_MCP_API_KEY": "test-key"}, clear=True):
         provider = GovTribeMCPCommercialIntelProvider({"id": "govtribe_mcp_commercial_intel"}, client=FakeNoToolsClient())  # type: ignore[arg-type]
@@ -245,6 +264,12 @@ def main() -> int:
         )
         if no_tool_result.get("status") != "tool_contract_unavailable":
             failures.append("govtribe_no_tool_contract_status")
+        no_tool_retrieval = provider.search_scan_opportunities(
+            vendor_profile={"core_competencies": ["case management"], "naics": {"confirmed": ["541512"]}},
+            preferences={},
+        )
+        if no_tool_retrieval.get("status") != "tool_contract_unavailable":
+            failures.append("govtribe_retrieval_no_tool_contract_status")
 
     with patch.dict(os.environ, {"GOVTRIBE_MCP_API_KEY": "test-key"}, clear=True):
         fake_client = FakeGovTribeClient()
@@ -283,6 +308,41 @@ def main() -> int:
             failures.append("govtribe_keyword_mode")
         if "fields_to_return" not in first_call_args:
             failures.append("govtribe_fields_to_return")
+
+        retrieval = provider.search_scan_opportunities(
+            vendor_profile={
+                "company": {"name": "Acme Federal", "summary": "Cloud modernization for civilian agencies."},
+                "core_competencies": ["case management modernization", "data analytics"],
+                "fit_narrative": "Prioritize case management modernization and cloud delivery.",
+                "naics": {"confirmed": ["541512"], "candidates": ["541519"]},
+            },
+            preferences={"soft_preferences": {"positive_keywords": ["taxpayer services"], "preferred_naics": ["541611"]}},
+        )
+        retrieval_records = retrieval.get("records", [])
+        if retrieval.get("status") != "ok" or not retrieval_records:
+            failures.append("govtribe_retrieval_status")
+        else:
+            first_record = retrieval_records[0]
+            if first_record.get("source_id") != "govtribe_mcp_commercial_intel":
+                failures.append("govtribe_retrieval_source_id")
+            if first_record.get("canonical_record_id") != "govtribe:gt-123":
+                failures.append("govtribe_retrieval_canonical_id")
+            if first_record.get("buyer") != "Internal Revenue Service":
+                failures.append("govtribe_retrieval_buyer")
+            if "541512" not in first_record.get("naics", []):
+                failures.append("govtribe_retrieval_naics")
+            evidence = first_record.get("raw_match_evidence", {})
+            if evidence.get("tool_name") != "Search_Federal_Contract_Opportunities":
+                failures.append("govtribe_retrieval_tool_name")
+        retrieval_call_args = fake_client.calls[-1][1]
+        if fake_client.calls[-1][0] != "Search_Federal_Contract_Opportunities":
+            failures.append("govtribe_retrieval_typed_tool")
+        if retrieval_call_args.get("search_mode") != "keyword":
+            failures.append("govtribe_retrieval_keyword_first")
+        if retrieval_call_args.get("naics_codes") != ["541512", "541519", "541611"]:
+            failures.append("govtribe_retrieval_naics_filter")
+        if "fields_to_return" not in retrieval_call_args:
+            failures.append("govtribe_retrieval_fields_to_return")
 
     output = {
         "status": "OK" if not failures else "FAILED",

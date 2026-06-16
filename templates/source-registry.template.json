@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "template_version": "2026-06-16-intel-provider-refactor-v1",
+  "template_version": "2026-06-16-govtribe-scan-retrieval-v1",
   "default_timezone": "America/New_York",
   "refresh_policy": {
     "refresh_runtime_registry_when_template_changes": true,
@@ -92,9 +92,13 @@
         "related_procurement"
       ],
       "capabilities": [
+        "scan_retrieval",
         "scan_enrichment",
         "capture_enrichment"
       ],
+      "provider_options": {
+        "allow_scan_retrieval_without_sam": false
+      },
       "homepage": "https://govtribe.com/mcp",
       "api_docs": "https://govtribe.com/docs/govtribe-user-guide/govtribe-mcp/govtribe-mcp-for-developers/"
     },
