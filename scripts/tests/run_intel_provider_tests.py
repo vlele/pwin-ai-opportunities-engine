@@ -22,6 +22,12 @@ from scan.sam_hydrate import hydrate_sam_notice as legacy_hydrate_sam_notice  # 
 from scan.sam_search import search_sam_opportunities as legacy_search_sam_opportunities  # type: ignore
 
 
+GOVTRIBE_OPERATOR_ERROR = (
+    "The selected federal agency ids operator is invalid. "
+    "The selected federal contract opportunity ids operator is invalid."
+)
+
+
 class FakeResponse:
     def __init__(self, body: str | dict[str, object], headers: dict[str, str] | None = None):
         self.body = json.dumps(body, ensure_ascii=True) if isinstance(body, dict) else body
@@ -170,6 +176,47 @@ class FakeGovTribeSemanticFallbackClient(FakeGovTribeClient):
         if args.get("search_mode") == "keyword":
             return {"structuredContent": {"records": []}}
         return {"structuredContent": {"records": self.records()}}
+
+
+class FakeGovTribeStructuredErrorClient(FakeGovTribeClient):
+    def call_tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+        self.calls.append((name, arguments or {}))
+        return {
+            "structuredContent": {
+                "isError": True,
+                "message": GOVTRIBE_OPERATOR_ERROR,
+                "summary": GOVTRIBE_OPERATOR_ERROR,
+            }
+        }
+
+
+class FakeGovTribeTextErrorClient(FakeGovTribeClient):
+    def call_tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+        self.calls.append((name, arguments or {}))
+        return {"content": [{"type": "text", "text": GOVTRIBE_OPERATOR_ERROR}]}
+
+
+class FakeGovTribeMixedCaptureClient(FakeGovTribeClient):
+    def list_tools(self) -> list[dict[str, object]]:
+        return [
+            {"name": "Search_Federal_Contract_Opportunities", "description": "Search federal contract opportunities."},
+            {"name": "Search_Federal_Contract_Awards", "description": "Search federal contract awards and vendors."},
+            {"name": "Search_Federal_Contract_IDVs", "description": "Search federal contract IDVs and vehicle records."},
+            {"name": "Search_Federal_Contract_Vehicles", "description": "Search contract vehicles, IDIQs, GWACs, and schedules."},
+            {"name": "Search_Government_Files", "description": "Search government files and procurement documents."},
+        ]
+
+    def call_tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+        self.calls.append((name, arguments or {}))
+        if name == "Search_Federal_Contract_Opportunities":
+            return {"structuredContent": {"records": self.records()}}
+        return {
+            "structuredContent": {
+                "isError": True,
+                "message": GOVTRIBE_OPERATOR_ERROR,
+                "summary": GOVTRIBE_OPERATOR_ERROR,
+            }
+        }
 
 
 def _header_map(request: object) -> dict[str, str]:
@@ -448,6 +495,91 @@ def main() -> int:
         semantic_notes = semantic_retrieval.get("notes", [])
         if not any("semantic expansion ran after keyword" in str(note) for note in semantic_notes):
             failures.append("govtribe_semantic_retrieval_note")
+
+        structured_error_provider = GovTribeMCPCommercialIntelProvider(
+            {
+                "id": "govtribe_mcp_commercial_intel",
+                "name": "GovTribe MCP Commercial Intelligence",
+                "homepage": "https://govtribe.com/mcp",
+            },
+            client=FakeGovTribeStructuredErrorClient(),  # type: ignore[arg-type]
+        )
+        structured_error = structured_error_provider.enrich_scan(
+            record={
+                "title": "Halvik Federal IT Services",
+                "buyer": "Department of Homeland Security",
+                "solicitation_number": "HALVIK-2026-001",
+                "summary": "IT services support.",
+            },
+            hydrated_text="IT services support.",
+            vendor_profile={"company": {"name": "Halvik"}},
+            preferences={},
+        )
+        structured_enrichment = structured_error.get("enrichment", {})
+        if structured_error.get("status") != "error" or structured_error.get("matched"):
+            failures.append("govtribe_structured_tool_error_status")
+        if structured_enrichment.get("summary"):
+            failures.append("govtribe_structured_tool_error_summary")
+        if structured_enrichment.get("related_procurements"):
+            failures.append("govtribe_structured_tool_error_related_procurements")
+        if structured_error.get("source_log"):
+            failures.append("govtribe_structured_tool_error_source_log")
+        if not any("operator is invalid" in str(note) for note in structured_error.get("notes", [])):
+            failures.append("govtribe_structured_tool_error_note")
+
+        text_error_provider = GovTribeMCPCommercialIntelProvider(
+            {
+                "id": "govtribe_mcp_commercial_intel",
+                "name": "GovTribe MCP Commercial Intelligence",
+                "homepage": "https://govtribe.com/mcp",
+            },
+            client=FakeGovTribeTextErrorClient(),  # type: ignore[arg-type]
+        )
+        text_error_retrieval = text_error_provider.search_scan_opportunities(
+            vendor_profile={
+                "company": {"name": "Halvik", "summary": "Federal IT services contractor."},
+                "core_competencies": ["cybersecurity"],
+                "naics": {"confirmed": ["541512"]},
+            },
+            preferences={},
+        )
+        if text_error_retrieval.get("status") != "error":
+            failures.append("govtribe_text_tool_error_retrieval_status")
+        if text_error_retrieval.get("records"):
+            failures.append("govtribe_text_tool_error_retrieval_records")
+        if not any("operator is invalid" in str(note) for note in text_error_retrieval.get("notes", [])):
+            failures.append("govtribe_text_tool_error_retrieval_note")
+
+        mixed_capture_provider = GovTribeMCPCommercialIntelProvider(
+            {
+                "id": "govtribe_mcp_commercial_intel",
+                "name": "GovTribe MCP Commercial Intelligence",
+                "homepage": "https://govtribe.com/mcp",
+            },
+            client=FakeGovTribeMixedCaptureClient(),  # type: ignore[arg-type]
+        )
+        mixed_capture = mixed_capture_provider.enrich_capture(
+            resolved={
+                "title": "IRS Case Management Modernization",
+                "buyer": "Internal Revenue Service",
+                "url": "https://sam.gov/example",
+                "solicitation_number": "IRS-2026-001",
+            },
+            notice_context_text="Requirement supports case management modernization and operational reporting.",
+            attachment_bundle={"attachments": []},
+            vendor_profile={"company": {"name": "Acme Federal"}},
+            preferences={},
+        )
+        mixed_enrichment = mixed_capture.get("enrichment", {})
+        mixed_related = " ".join(str(item) for item in mixed_enrichment.get("related_procurements", []))
+        if mixed_capture.get("status") != "partial_error" or not mixed_capture.get("matched"):
+            failures.append("govtribe_mixed_capture_partial_error_status")
+        if "IRS Case Management Modernization" not in mixed_related:
+            failures.append("govtribe_mixed_capture_keeps_valid_related_procurement")
+        if "operator is invalid" in str(mixed_enrichment.get("summary")) or "operator is invalid" in mixed_related:
+            failures.append("govtribe_mixed_capture_error_not_evidence")
+        if not any("operator is invalid" in str(note) for note in mixed_capture.get("notes", [])):
+            failures.append("govtribe_mixed_capture_error_note")
 
     output = {
         "status": "OK" if not failures else "FAILED",
