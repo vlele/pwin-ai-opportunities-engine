@@ -78,6 +78,18 @@ BUYER_RULES: list[tuple[str, tuple[str, ...]]] = [
 ]
 GENERIC_NAME_SEGMENTS = {"home", "welcome", "homepage"}
 GOVTRIBE_BOOTSTRAP_PROVENANCE = "govtribe_subscription_derived"
+GOVTRIBE_BOOLEAN_TEXT_VALUES = {"true", "false", "yes", "no"}
+GOVTRIBE_GENERIC_METADATA_VALUES = {
+    "business or organization",
+    "for profit organization",
+    "limited liability company",
+    "partnership or limited liability partnership",
+}
+NAICS_LABEL_BY_CODE = {
+    "519290": "Web Search Portals and All Other Information Services",
+    "541512": "Computer Systems Design Services",
+}
+NAICS_CODE_BY_LABEL = {normalize_profile_term(label): code for code, label in NAICS_LABEL_BY_CODE.items()}
 
 
 @dataclass
@@ -162,6 +174,29 @@ def _append_unique(values: list[str], value: str) -> None:
 
 def _clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", value or "").strip()
+
+
+def _clean_bootstrap_signal(value: Any) -> str:
+    return _clean_text(str(value or ""))
+
+
+def _is_govtribe_generic_signal(value: Any) -> bool:
+    normalized = normalize_profile_term(str(value or ""))
+    return normalized in GOVTRIBE_BOOLEAN_TEXT_VALUES or normalized in GOVTRIBE_GENERIC_METADATA_VALUES
+
+
+def _clean_govtribe_values(values: list[Any], *, allow_generic_metadata: bool = False) -> list[str]:
+    cleaned: list[str] = []
+    for value in values:
+        text = _clean_bootstrap_signal(value)
+        if not text:
+            continue
+        if normalize_profile_term(text) in GOVTRIBE_BOOLEAN_TEXT_VALUES:
+            continue
+        if not allow_generic_metadata and normalize_profile_term(text) in GOVTRIBE_GENERIC_METADATA_VALUES:
+            continue
+        cleaned.append(text)
+    return _merge_unique([], cleaned)
 
 
 def _normalize_url(raw_value: str) -> str:
@@ -419,18 +454,41 @@ def _six_digit_codes(values: list[str]) -> list[str]:
     return codes
 
 
-def _naics_items(values: list[str]) -> list[dict[str, str]]:
+def _naics_items(values: list[Any]) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     for value in values:
+        if isinstance(value, dict):
+            code = _clean_text(str(value.get("code") or ""))
+            label = _clean_text(str(value.get("label") or value.get("name") or "")) or NAICS_LABEL_BY_CODE.get(code, "")
+            if code or label:
+                item = {"code": code, "label": label}
+                if item not in items:
+                    items.append(item)
+            continue
         text = str(value or "").strip()
         if not text:
             continue
         match = re.search(r"\b\d{6}\b", text)
-        code = match.group(0) if match else text
-        label = text if match and text != code else ""
+        code = match.group(0) if match else NAICS_CODE_BY_LABEL.get(normalize_profile_term(text), "")
+        label = text if match and text != code else NAICS_LABEL_BY_CODE.get(code, "")
+        if not code and not label:
+            label = text
         item = {"code": code, "label": label}
         if item not in items:
             items.append(item)
+    return items
+
+
+def _govtribe_naics_items(vendor_record: dict[str, Any], candidate_codes: list[str]) -> list[dict[str, str]]:
+    items = _naics_items([*vendor_record.get("naics_items", []), *vendor_record.get("naics", [])])
+    known_codes = {item["code"] for item in items if item.get("code")}
+    for code in candidate_codes:
+        clean_code = _clean_text(str(code or ""))
+        if not clean_code or clean_code in known_codes:
+            continue
+        item = {"code": clean_code, "label": NAICS_LABEL_BY_CODE.get(clean_code, "")}
+        items.append(item)
+        known_codes.add(clean_code)
     return items
 
 
@@ -460,17 +518,35 @@ def _append_govtribe_provenance(
 
 
 def _govtribe_capabilities(vendor_record: dict[str, Any]) -> list[str]:
-    values = [
-        *[item for item in vendor_record.get("naics", []) if not re.fullmatch(r"\d{6}", str(item or "").strip())],
-        *vendor_record.get("certifications", []),
+    corpus = _clean_text(
+        " ".join(
+            [
+                str(vendor_record.get("summary") or ""),
+                " ".join(str(item or "") for item in vendor_record.get("award_signals", [])),
+                " ".join(str(item or "") for item in vendor_record.get("keywords", [])),
+            ]
+        )
+    ).lower()
+    capabilities: list[str] = []
+    for label, patterns in CAPABILITY_RULES:
+        if any(pattern in corpus for pattern in patterns):
+            capabilities.append(label)
+    if capabilities:
+        return capabilities[:6]
+    fallback_terms = [
+        item
+        for item in vendor_record.get("keywords", [])
+        if not re.fullmatch(r"\d{6}", str(item or "").strip())
+        and not _is_govtribe_generic_signal(item)
+        and not is_low_signal_profile_term(str(item))
     ]
-    return [item for item in values if not is_low_signal_profile_term(str(item))][:6]
+    return _clean_govtribe_values(fallback_terms)[:6]
 
 
 def _govtribe_fit_narrative(vendor_record: dict[str, Any]) -> str:
     capabilities = _govtribe_capabilities(vendor_record)[:3]
-    buyers = vendor_record.get("buyers", [])[:2]
-    vehicles = vendor_record.get("contract_vehicles", [])[:2]
+    buyers = _clean_govtribe_values(vendor_record.get("buyers", []))[:2]
+    vehicles = _clean_govtribe_values(vendor_record.get("contract_vehicles", []))[:2]
     parts = capabilities or ["GovTribe-reported NAICS, certifications, and award signals"]
     buyer_note = f" for buyers such as {', '.join(buyers)}" if buyers else ""
     vehicle_note = f" through vehicles such as {', '.join(vehicles)}" if vehicles else ""
@@ -766,16 +842,24 @@ def seed_workspace_from_govtribe(
         company_summary = "Vendor profile seeded from GovTribe subscription-derived fields. Review and confirm before scanning."
     govtribe_url = str(vendor_record.get("source_url") or vendor_record.get("govtribe_url") or govtribe_lookup).strip()
     display_source_url = govtribe_url or govtribe_lookup
-    vendor_naics = _six_digit_codes([str(item) for item in vendor_record.get("naics", [])])
+    display_naics_items = _govtribe_naics_items(vendor_record, _six_digit_codes([str(item) for item in vendor_record.get("naics", [])]))
+    vendor_naics = _merge_unique([], [item["code"] for item in display_naics_items if item.get("code")])
     confirmed_values = user_naics if naics_status == "confirmed" else []
     candidate_values = user_naics if naics_status != "confirmed" else []
     candidate_naics = _merge_unique(candidate_values, vendor_naics)
     capabilities = _govtribe_capabilities(vendor_record)
-    buyers = [str(item) for item in vendor_record.get("buyers", []) if str(item or "").strip()]
-    certifications = [str(item) for item in vendor_record.get("certifications", []) if str(item or "").strip()]
-    contract_vehicles = [str(item) for item in vendor_record.get("contract_vehicles", []) if str(item or "").strip()]
-    award_signals = [str(item) for item in vendor_record.get("award_signals", []) if str(item or "").strip()]
-    keywords = [str(item) for item in vendor_record.get("keywords", []) if str(item or "").strip()]
+    buyers = _clean_govtribe_values(vendor_record.get("buyers", []))
+    certifications = _clean_govtribe_values(vendor_record.get("certifications", []), allow_generic_metadata=True)
+    set_aside_programs = _clean_govtribe_values(
+        [item for item in certifications if "certified" in normalize_profile_term(item) or "small disadvantaged" in normalize_profile_term(item)]
+    )
+    contract_vehicles = _clean_govtribe_values(vendor_record.get("contract_vehicles", []))
+    award_signals = _clean_govtribe_values(vendor_record.get("award_signals", []))
+    keywords = [
+        item
+        for item in _clean_govtribe_values([*vendor_record.get("keywords", []), *capabilities])
+        if not re.fullmatch(r"\d{6}", item)
+    ]
 
     vendor_profile_path = procurement / "vendor-profile.json"
     vendor_profile = load_json(bundle_root / "templates" / "vendor-profile.template.json", default={}) or {}
@@ -829,7 +913,7 @@ def seed_workspace_from_govtribe(
     )
     vendor_profile["commercial_constraints"]["set_aside_programs"] = _merge_unique(
         vendor_profile["commercial_constraints"].get("set_aside_programs", []),
-        certifications,
+        set_aside_programs,
     )
     vendor_profile["contract_vehicles"] = _merge_unique(vendor_profile.get("contract_vehicles", []), contract_vehicles)
     vendor_profile["notes"] = _merge_unique(
@@ -871,7 +955,7 @@ def seed_workspace_from_govtribe(
     preferences.setdefault("soft_preferences", {})
     preferences["soft_preferences"]["positive_keywords"] = _merge_unique(
         preferences["soft_preferences"].get("positive_keywords", []),
-        [*keywords, *capabilities],
+        keywords,
     )
     preferences["soft_preferences"]["preferred_opportunity_classes"] = _merge_unique(
         preferences["soft_preferences"].get("preferred_opportunity_classes", []),
@@ -910,7 +994,7 @@ def seed_workspace_from_govtribe(
         company_summary=company_summary,
         capabilities=capabilities,
         buyers=buyers,
-        candidate_naics=_naics_items([*vendor_record.get("naics", []), *candidate_naics]),
+        candidate_naics=_govtribe_naics_items(vendor_record, candidate_naics),
     )
     starter_profile += (
         "\n\nGovTribe source note: GovTribe subscription-derived facts are provisional commercial intelligence. "
