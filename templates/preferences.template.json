@@ -19,7 +19,11 @@
     "preferred_set_asides": [],
     "preferred_opportunity_classes": [],
     "preferred_naics": [],
-    "preferred_contract_types": []
+    "preferred_contract_types": [],
+    "preferred_pricing_types": [],
+    "preferred_psc": [],
+    "preferred_contract_vehicle_subcategories": [],
+    "preferred_teaming_partners": []
   },
   "scoring_weights": {
     "capability_fit": 35,
@@ -130,7 +134,11 @@
         "preferred_set_asides": [],
         "preferred_opportunity_classes": [],
         "preferred_naics": [],
-        "preferred_contract_types": []
+        "preferred_contract_types": [],
+        "preferred_pricing_types": [],
+        "preferred_psc": [],
+        "preferred_contract_vehicle_subcategories": [],
+        "preferred_teaming_partners": []
       },
       "notes": []
     },

@@ -44,9 +44,12 @@ Use these fields as a compact default projection when the schema supports them.
 - `address`
 - `sba_certifications`
 - `business_types`
+- `parent_or_child`
+- `parent`
 - `naics_category`
 - `federal_contract_awards`
 - `federal_contract_idvs`
+- `federal_contract_sub_awards`
 - `awarded_federal_contract_vehicle`
 
 ### `Search_Federal_Contract_Opportunities`
@@ -186,11 +189,18 @@ Semantic guidance:
 2. For exact UEI input, pass `uei_values: ["<UEI>"]`, `search_mode: "keyword"`, `per_page: 5`, and the vendor fields above.
 3. For GovTribe vendor URLs, parse the vendor slug for `query` and prefer returned records whose `govtribe_url` or ID matches the slug.
 4. For vendor names, pass the name as `query`, use keyword mode, and choose exact normalized name or DBA before falling back to the highest-ranked result.
-5. After the vendor is resolved, use `Search_Federal_Contract_Awards` with the vendor UEI/GovTribe ID, `per_page: 0`, and aggregations such as `top_contracting_federal_agencies_by_dollars_obligated`, `top_funding_federal_agencies_by_dollars_obligated`, and `top_federal_contract_vehicles_by_dollars_obligated` to identify buyer and vehicle signals.
-6. Use `Search_Federal_Contract_Vehicles` or `Find_Federal_Contract_Vehicles` with the vendor UEI/GovTribe ID to identify vehicles the vendor has access to, including schedules, GWACs, BPAs, and IDIQs.
-7. Normalize returned fields into `vendor-profile.json` with field-level provenance marked `govtribe_subscription_derived`.
-8. Never write API keys, bearer tokens, Authorization headers, or token fragments into workspace files.
-9. If GovTribe is not configured or returns no match, report that status and use website bootstrap only when a company URL is also available.
+5. If the resolved vendor has `parent_or_child: "Child"` and a `parent` record, preserve that hierarchy and explicitly ask the user whether to stay on the resolved child vendor or move up the vendor chain to the parent before scanning.
+6. After the vendor is resolved, use `Search_Federal_Contract_Awards` with the vendor UEI/GovTribe ID, `per_page: 0`, and every compatible bootstrap aggregation the schema exposes: buyer agencies, vehicles, NAICS, places of performance, set-asides, contract types, pricing types, and value stats.
+7. When available, call `Search_Service_Contract_Inventory` with the vendor UEI/GovTribe ID and `per_page: 0` for pricing/workshare aggregations: derived hourly rate, invoiced dollars, hours, FTEs, role split, PSC/NAICS categories, buyer agencies, states, fiscal years, and contract numbers.
+8. When available, call `Search_FCV_Subcategories` with the vendor UEI/GovTribe ID to capture concrete GSA MAS SINs, pools, lots, lanes, and other vehicle subcategories that are more actionable than a top-level vehicle name.
+9. When available, call `Search_Federal_Contract_Sub_Awards` with the vendor UEI/GovTribe ID to capture subcontractor posture, historical prime relationships, and sub-award buyer context. Add `"subcontractor"` only when the vendor appears in sub-award evidence or the vendor profile explicitly carries sub-award evidence.
+10. Normalize award aggregation buckets into both simple profile fields and `vendor-profile.json.govtribe_award_profile`; keep NAICS and geography as candidate or soft preference signals, not user-confirmed facts.
+11. Normalize SCI pricing/workshare data into `vendor-profile.json.govtribe_service_contract_inventory_profile`. Use it for soft preferences and starter notes only; do not backfill hard `min_award_value`, `max_award_value`, or labor-rate constraints from history.
+12. Use `Search_Federal_Contract_Vehicles` or `Find_Federal_Contract_Vehicles` with the vendor UEI/GovTribe ID to identify vehicles the vendor has access to, including schedules, GWACs, BPAs, and IDIQs.
+13. Normalize returned fields into `vendor-profile.json` with field-level provenance marked `govtribe_subscription_derived`.
+14. Skip optional aggregations or tools that are not exposed by the active schema and add a bootstrap note instead of failing the workflow.
+15. Never write API keys, bearer tokens, Authorization headers, or token fragments into workspace files.
+16. If GovTribe is not configured or returns no match, report that status and use website bootstrap only when a company URL is also available.
 
 ## Capture Enrichment Pattern
 
