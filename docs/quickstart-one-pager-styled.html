@@ -109,7 +109,7 @@
 <ul>
 <li>A <code>GovTribe MCP</code> API key exposed as <code>GOVTRIBE_MCP_API_KEY</code></li>
 </ul>
-<p>Base scan and capture work with <code>SAM_API_KEY</code> alone. <code>OPENAI_API_KEY</code> enables the shipped reasoning path and any <code>GovTribe MCP</code> call. <code>GovTribe MCP</code> is optional and disabled by default per workspace.</p>
+<p>Base scan and capture work with <code>SAM_API_KEY</code> alone. <code>OPENAI_API_KEY</code> enables only the shipped semantic reasoning path. <code>GovTribe MCP</code> uses <code>GOVTRIBE_MCP_API_KEY</code> directly, is optional, and is disabled by default per workspace.</p>
 <p>If your GitHub setup uses HTTPS instead of SSH, swap the clone URLs below to the HTTPS form you normally use.</p>
 <h2 id="install-the-skill">1. Install the Skill</h2>
 <h3 id="openai-codex">OpenAI Codex</h3>
@@ -138,7 +138,7 @@
 <p>Notes:</p>
 <ul>
 <li>If <code>OPENAI_MODEL</code> is not set, the shipped scripts default to <code>gpt-5-mini</code>.</li>
-<li>If <code>GovTribe MCP</code> is enabled in a workspace but <code>OPENAI_API_KEY</code> or <code>GOVTRIBE_MCP_API_KEY</code> is missing, scan and capture still run, but the commercial sidecar reports <code>not_configured</code>.</li>
+<li>If <code>GovTribe MCP</code> is enabled in a workspace but <code>GOVTRIBE_MCP_API_KEY</code> is missing, scan and capture still run, but the commercial sidecar reports <code>not_configured</code>.</li>
 <li><code>GovWin IQ</code> is only a credential scaffold today, not a live runtime connector.</li>
 </ul>
 <h2 id="pick-a-workspace">3. Pick a Workspace</h2>
@@ -295,8 +295,9 @@ more like A1</code></pre>
 <ul>
 <li><code>missing_api_key</code> <code>SAM_API_KEY</code> is not exported in the shell running the scan.</li>
 <li><code>no_naics</code> The workspace still does not have confirmed or candidate <code>NAICS</code> after bootstrap or manual edits.</li>
-<li><code>govtribe_mcp_commercial_intel: not_configured</code> The workspace has GovTribe enabled, but the runtime shell is missing <code>OPENAI_API_KEY</code> or <code>GOVTRIBE_MCP_API_KEY</code>.</li>
-<li>GovTribe <code>http_error</code>, <code>error</code>, or <code>IncompleteRead</code> Rerun the scan or capture. The official-source path should still complete even when the commercial sidecar has a transient failure.</li>
+<li><code>govtribe_mcp_commercial_intel: not_configured</code> The workspace has GovTribe enabled, but the runtime shell is missing <code>GOVTRIBE_MCP_API_KEY</code>.</li>
+<li><code>govtribe_mcp_commercial_intel: tool_contract_unavailable</code> GovTribe is reachable, but the available MCP tools or schemas do not match the provider contract. The official-source path should still complete.</li>
+<li>GovTribe <code>error</code> or <code>IncompleteRead</code> Rerun the scan or capture. The official-source path should still complete even when the commercial sidecar has a transient failure.</li>
 <li><code>HTTP 429</code> from <code>SAM.gov</code> Your key is wired correctly, but the API quota is throttled. Wait until the <code>nextAccessTime</code> returned by <code>SAM.gov</code> and rerun.</li>
 </ul>
 <h2 id="short-version">Short Version</h2>

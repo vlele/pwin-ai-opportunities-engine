@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "template_version": "2026-06-09-commercial-intel-phase1-v1",
+  "template_version": "2026-06-16-intel-provider-refactor-v1",
   "default_timezone": "America/New_York",
   "refresh_policy": {
     "refresh_runtime_registry_when_template_changes": true,
@@ -80,10 +80,8 @@
         "env_var": "GOVTRIBE_MCP_API_KEY",
         "required": false,
         "supporting_env_vars": [
-          "OPENAI_API_KEY",
           "GOVTRIBE_MCP_URL",
           "GOVTRIBE_MCP_TIMEOUT_SECONDS",
-          "PWIN_COMMERCIAL_INTEL_MODEL",
           "PWIN_COMMERCIAL_SCAN_MAX_RECORDS"
         ]
       },

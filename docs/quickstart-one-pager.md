@@ -28,7 +28,7 @@ Optional:
 
 - A `GovTribe MCP` API key exposed as `GOVTRIBE_MCP_API_KEY`
 
-Base scan and capture work with `SAM_API_KEY` alone. `OPENAI_API_KEY` enables the shipped reasoning path and any `GovTribe MCP` call. `GovTribe MCP` is optional and disabled by default per workspace.
+Base scan and capture work with `SAM_API_KEY` alone. `OPENAI_API_KEY` enables only the shipped semantic reasoning path. `GovTribe MCP` uses `GOVTRIBE_MCP_API_KEY` directly, is optional, and is disabled by default per workspace.
 
 If your GitHub setup uses HTTPS instead of SSH, swap the clone URLs below to the HTTPS form you normally use.
 
@@ -87,7 +87,7 @@ export GOVTRIBE_MCP_TIMEOUT_SECONDS=90
 Notes:
 
 - If `OPENAI_MODEL` is not set, the shipped scripts default to `gpt-5-mini`.
-- If `GovTribe MCP` is enabled in a workspace but `OPENAI_API_KEY` or `GOVTRIBE_MCP_API_KEY` is missing, scan and capture still run, but the commercial sidecar reports `not_configured`.
+- If `GovTribe MCP` is enabled in a workspace but `GOVTRIBE_MCP_API_KEY` is missing, scan and capture still run, but the commercial sidecar reports `not_configured`.
 - `GovWin IQ` is only a credential scaffold today, not a live runtime connector.
 
 ## 3. Pick a Workspace
@@ -356,8 +356,10 @@ That feedback is logged to `procurement/feedback-events.jsonl` and applied to fu
 - `no_naics`
   The workspace still does not have confirmed or candidate `NAICS` after bootstrap or manual edits.
 - `govtribe_mcp_commercial_intel: not_configured`
-  The workspace has GovTribe enabled, but the runtime shell is missing `OPENAI_API_KEY` or `GOVTRIBE_MCP_API_KEY`.
-- GovTribe `http_error`, `error`, or `IncompleteRead`
+  The workspace has GovTribe enabled, but the runtime shell is missing `GOVTRIBE_MCP_API_KEY`.
+- `govtribe_mcp_commercial_intel: tool_contract_unavailable`
+  GovTribe is reachable, but the available MCP tools or schemas do not match the provider contract. The official-source path should still complete.
+- GovTribe `error` or `IncompleteRead`
   Rerun the scan or capture. The official-source path should still complete even when the commercial sidecar has a transient failure.
 - `HTTP 429` from `SAM.gov`
   Your key is wired correctly, but the API quota is throttled. Wait until the `nextAccessTime` returned by `SAM.gov` and rerun.
