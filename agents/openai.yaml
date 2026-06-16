@@ -1,4 +1,4 @@
 interface:
   display_name: "pWin AI Opportunities"
-  short_description: "Scan federal opportunities, manage stable IDs, and generate capture research memos"
-  default_prompt: "Use pwin-ai-opportunities for federal opportunity scans, digest lookups, feedback logging, and decision-grade capture research."
+  short_description: "Scan federal opps and produce capture briefs"
+  default_prompt: "Use $pwin-ai-opportunities for federal opportunity scans, digest lookups, feedback logging, and decision-grade capture research."

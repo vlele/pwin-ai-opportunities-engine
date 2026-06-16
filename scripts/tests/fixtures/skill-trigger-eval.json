@@ -1,0 +1,160 @@
+{
+  "schema": "pwin-ai-opportunities.skill-trigger-eval/v1",
+  "skill": "pwin-ai-opportunities",
+  "cases": [
+    {
+      "id": "trigger-bootstrap-url",
+      "prompt": "Use pwin-ai-opportunities and bootstrap this workspace from https://example.govcontractor.com.",
+      "expected_trigger": true,
+      "category": "bootstrap",
+      "rationale": "Explicitly asks the skill to bootstrap a workspace from a company website."
+    },
+    {
+      "id": "trigger-bootstrap-naics",
+      "prompt": "Seed the pWin.ai opportunity workspace with confirmed NAICS 541511 and 541512 from our company site.",
+      "expected_trigger": true,
+      "category": "bootstrap",
+      "rationale": "Asks for starter workspace seeding with NAICS context."
+    },
+    {
+      "id": "trigger-scan-30-45",
+      "prompt": "Run a federal opportunity scan for the next 30 to 45 days in this workspace.",
+      "expected_trigger": true,
+      "category": "scan",
+      "rationale": "Requests the shipped federal scan mode."
+    },
+    {
+      "id": "trigger-scan-refresh",
+      "prompt": "Refresh my pWin shortlist for the 60 to 90 day horizon.",
+      "expected_trigger": true,
+      "category": "scan",
+      "rationale": "Requests shortlist refresh and horizon behavior handled by scan mode."
+    },
+    {
+      "id": "trigger-digest-latest",
+      "prompt": "Show the latest pwin-ai-opportunities digest.",
+      "expected_trigger": true,
+      "category": "digest",
+      "rationale": "Requests the shipped show-digest mode."
+    },
+    {
+      "id": "trigger-digest-date",
+      "prompt": "Show the 2026-05-09 opportunity digest with stable IDs.",
+      "expected_trigger": true,
+      "category": "digest",
+      "rationale": "Requests a dated digest artifact and stable IDs."
+    },
+    {
+      "id": "trigger-feedback-like",
+      "prompt": "like A1 because it matches our cloud modernization work",
+      "expected_trigger": true,
+      "category": "feedback",
+      "rationale": "Uses stable-entry feedback syntax handled by feedback mode."
+    },
+    {
+      "id": "trigger-feedback-never",
+      "prompt": "never show grants",
+      "expected_trigger": true,
+      "category": "feedback",
+      "rationale": "Uses a hard preference phrase handled by feedback mode."
+    },
+    {
+      "id": "trigger-capture-stable-id",
+      "prompt": "Research A1 with full capture depth.",
+      "expected_trigger": true,
+      "category": "capture_research",
+      "rationale": "Requests capture research for a digest stable ID."
+    },
+    {
+      "id": "trigger-capture-local-files",
+      "prompt": "Run capture on these local solicitation files and label the opportunity as CMS modernization.",
+      "expected_trigger": true,
+      "category": "capture_research",
+      "rationale": "Requests the local-file capture research path."
+    },
+    {
+      "id": "no-trigger-generic-procurement",
+      "prompt": "Explain how federal procurement works for small businesses.",
+      "expected_trigger": false,
+      "category": "generic_procurement",
+      "rationale": "General education request with no workspace scan, digest, feedback, or capture action."
+    },
+    {
+      "id": "no-trigger-far-summary",
+      "prompt": "Summarize FAR Part 15 negotiation rules.",
+      "expected_trigger": false,
+      "category": "generic_procurement",
+      "rationale": "Procurement reference question outside the shipped opportunity workflow."
+    },
+    {
+      "id": "no-trigger-state-local",
+      "prompt": "Scan California and Texas state procurement portals for data analytics bids.",
+      "expected_trigger": false,
+      "category": "state_local_scan",
+      "rationale": "State and local sources are outside the shipped federal-only source contract."
+    },
+    {
+      "id": "no-trigger-local-school-board",
+      "prompt": "Find school board RFPs near Chicago for website redesign.",
+      "expected_trigger": false,
+      "category": "state_local_scan",
+      "rationale": "Local procurement search is not part of this skill's supported runtime."
+    },
+    {
+      "id": "no-trigger-grants-search",
+      "prompt": "Search Grants.gov for NIH funding opportunities.",
+      "expected_trigger": false,
+      "category": "grants",
+      "rationale": "Grant search is explicitly outside the shipped opportunity source contract."
+    },
+    {
+      "id": "no-trigger-grant-strategy",
+      "prompt": "Draft a grant strategy for a nonprofit climate program.",
+      "expected_trigger": false,
+      "category": "grants",
+      "rationale": "Grant strategy is unrelated to federal contract scan and capture workflows."
+    },
+    {
+      "id": "no-trigger-report-edit",
+      "prompt": "Copyedit this procurement report for grammar and tone.",
+      "expected_trigger": false,
+      "category": "manual_report_edit",
+      "rationale": "Manual editing is not a shipped scan, digest, feedback, or capture mode."
+    },
+    {
+      "id": "no-trigger-slide-outline",
+      "prompt": "Turn this opportunity report into a five-slide executive deck.",
+      "expected_trigger": false,
+      "category": "manual_report_edit",
+      "rationale": "Presentation creation is outside the skill's runtime contract."
+    },
+    {
+      "id": "no-trigger-sam-key",
+      "prompt": "Help me sign up for a SAM.gov API key.",
+      "expected_trigger": false,
+      "category": "credential_setup",
+      "rationale": "Credential setup is prerequisite support, not an invocation of the shipped scripts."
+    },
+    {
+      "id": "no-trigger-openai-key",
+      "prompt": "Configure my OpenAI API key for this machine.",
+      "expected_trigger": false,
+      "category": "credential_setup",
+      "rationale": "General credential setup should not trigger this opportunity workflow."
+    },
+    {
+      "id": "no-trigger-agency-background",
+      "prompt": "Give me background on NASA's Artemis procurement strategy.",
+      "expected_trigger": false,
+      "category": "unrelated_federal_research",
+      "rationale": "Federal research without a tracked opportunity or capture request is outside the shipped workflow."
+    },
+    {
+      "id": "no-trigger-vendor-profile-only",
+      "prompt": "Write a generic vendor profile for a cybersecurity company.",
+      "expected_trigger": false,
+      "category": "unrelated_federal_research",
+      "rationale": "Generic profile writing does not ask to seed this skill's workspace artifacts."
+    }
+  ]
+}

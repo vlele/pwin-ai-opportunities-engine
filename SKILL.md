@@ -1,6 +1,6 @@
 ---
 name: pwin-ai-opportunities
-description: pWin.ai Opportunities runs federal opportunity scans, renders stable-ID digests, applies user feedback, and produces decision-grade capture research from shared local scripts and templates.
+description: "Use pWin.ai Opportunities for federal opportunity workflows: bootstrap or onboard workspaces, run scans, show stable-ID digests, log feedback, and produce capture research from shipped scripts and templates."
 ---
 
 Use this skill when the user wants any of the following:
@@ -394,31 +394,25 @@ For skill-path failures specifically:
 
 Read these only when needed for the chosen mode:
 
-- `SKILL_ROOT/references/onboarding-playbook.md`
-- `SKILL_ROOT/references/scan-playbook.md`
-- `SKILL_ROOT/references/capture-research-playbook.md`
-- `SKILL_ROOT/references/usaspending-payloads.md`
-- `SKILL_ROOT/references/validation-rules.md`
-- `SKILL_ROOT/references/source-catalog.md`
-- `SKILL_ROOT/references/feedback-learning.md`
-- `SKILL_ROOT/references/validation-and-recovery.md`
+- Read `SKILL_ROOT/references/onboarding-playbook.md` when bootstrap or onboarding needs website-derived inference, NAICS confirmation handling, starter preference seeding, or first-conversation guidance.
+- Read `SKILL_ROOT/references/scan-playbook.md` when running or troubleshooting scan mode, digest-entry map generation, stable ID behavior, or no-opportunity scan output.
+- Read `SKILL_ROOT/references/capture-research-playbook.md` when running capture research, validating partial-vs-complete capture output, or deciding whether a brief is too shallow to present as final.
+- Read `SKILL_ROOT/references/usaspending-payloads.md` when implementing, debugging, or manually checking USAspending JSON POST requests.
+- Read `SKILL_ROOT/references/validation-rules.md` when checking digest or capture artifacts before answering the user.
+- Read `SKILL_ROOT/references/source-catalog.md` when source scope, trust tier, source enablement, or unsupported source questions arise.
+- Read `SKILL_ROOT/references/govtribe-mcp-tool-guide.md` when GovTribe MCP is enabled, when commercial-intelligence enrichment is requested, or when constructing GovTribe tool calls.
+- Read `SKILL_ROOT/references/feedback-learning.md` when applying feedback or explaining how logged feedback affects future scans.
+- Read `SKILL_ROOT/references/validation-and-recovery.md` when artifacts are missing, stale, invalid, or need recovery guidance.
 
 ## Examples
 
-Use the shipped examples as behavioral anchors:
+Use the shipped examples only as behavioral anchors for the active task:
 
-- `SKILL_ROOT/examples/commands-bootstrap.txt`
-- `SKILL_ROOT/examples/good-digest-2026-05-09.md`
-- `SKILL_ROOT/examples/good-digest-entry-map-2026-05-09.json`
-- `SKILL_ROOT/examples/good-capture-brief-partial.md`
-- `SKILL_ROOT/examples/good-capture-brief-complete.md`
-- `SKILL_ROOT/examples/good-capture-evidence-partial.json`
-- `SKILL_ROOT/examples/good-capture-evidence-complete.json`
-- `SKILL_ROOT/examples/good-user-response-partial.txt`
-- `SKILL_ROOT/examples/good-user-response-complete.txt`
-- `SKILL_ROOT/examples/bad-seed-stub.md`
-- `SKILL_ROOT/examples/bad-menu-only-response.txt`
-- `SKILL_ROOT/examples/bad-legacy-brief-reuse.md`
+- Bootstrap command shape: `SKILL_ROOT/examples/commands-bootstrap.txt` and `SKILL_ROOT/examples/first-run-commands.txt`
+- Scan and digest output shape: `SKILL_ROOT/examples/good-digest-2026-05-09.md` and `SKILL_ROOT/examples/good-digest-entry-map-2026-05-09.json`
+- Capture output shape: `SKILL_ROOT/examples/good-capture-brief-partial.md`, `SKILL_ROOT/examples/good-capture-brief-complete.md`, `SKILL_ROOT/examples/good-capture-evidence-partial.json`, and `SKILL_ROOT/examples/good-capture-evidence-complete.json`
+- User-facing capture response shape: `SKILL_ROOT/examples/good-user-response-partial.txt` and `SKILL_ROOT/examples/good-user-response-complete.txt`
+- Anti-patterns to reject: `SKILL_ROOT/examples/bad-seed-stub.md`, `SKILL_ROOT/examples/bad-menu-only-response.txt`, and `SKILL_ROOT/examples/bad-legacy-brief-reuse.md`
 
 ## What Not To Do
 
