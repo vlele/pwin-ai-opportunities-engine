@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 from contextlib import redirect_stdout
-from datetime import date
+from datetime import date, datetime, timezone
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -133,6 +133,53 @@ class FakeGovTribeNoMatchProvider:
             "queried_naics": [],
             "tool_name": "",
             "records": [],
+        }
+
+
+class FakeGovTribeExpiredRetrievalProvider:
+    called = False
+
+    def __init__(self, source_config: dict):
+        self.source_config = source_config
+
+    def search_scan_opportunities(self, *, vendor_profile: dict, preferences: dict, limit: int = 25) -> dict:
+        FakeGovTribeExpiredRetrievalProvider.called = True
+        return {
+            "status": "ok",
+            "notes": ["GovTribe MCP tools used: Search_Federal_Contract_Opportunities"],
+            "queried_naics": ["541512"],
+            "tool_name": "Search_Federal_Contract_Opportunities",
+            "records": [
+                {
+                    "source_id": "govtribe_mcp_commercial_intel",
+                    "source_name": "GovTribe MCP Commercial Intelligence",
+                    "source_tier": 4,
+                    "opportunity_id": "govtribe:gt-expired",
+                    "canonical_record_id": "govtribe:gt-expired",
+                    "canonical_record_id_type": "govtribe_id",
+                    "notice_id": "gt-expired",
+                    "title": "Same Day Expired Response Deadline",
+                    "url": "https://govtribe.com/opportunity/gt-expired",
+                    "buyer": "Internal Revenue Service",
+                    "opportunity_class": "contracts",
+                    "notice_type": "solicitation",
+                    "solicitation_number": "IRS-2026-EXP",
+                    "posted_date": "2026-06-01",
+                    "due_date": "2026-06-16T14:00:00Z",
+                    "naics": ["541512"],
+                    "set_aside": "Total Small Business Set-Aside",
+                    "summary": "Modernize case management with cloud delivery and analytics.",
+                    "resource_links": ["https://govtribe.com/opportunity/gt-expired"],
+                    "raw_match_evidence": {
+                        "query": "case management modernization",
+                        "queried_naics": ["541512"],
+                        "search_mode": "keyword",
+                        "tool_name": "Search_Federal_Contract_Opportunities",
+                        "source_record_id": "gt-expired",
+                        "full_desc_loaded": False,
+                    },
+                }
+            ],
         }
 
 
@@ -264,6 +311,31 @@ def main() -> int:
         assert opportunities[0]["source_id"] == "govtribe_mcp_commercial_intel", opportunities
         assert opportunities[0]["canonical_record_id"] == "govtribe:gt-123", opportunities
         assert "bucket" in opportunities[0], opportunities
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        workspace = Path(tmp_dir) / "workspace"
+        _write_workspace(workspace, govtribe_enabled=True, govtribe_retrieval=True)
+        FakeGovTribeExpiredRetrievalProvider.called = False
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            run_scan,
+            "GovTribeMCPCommercialIntelProvider",
+            FakeGovTribeExpiredRetrievalProvider,
+        ), patch.object(
+            run_scan,
+            "_scan_now_utc",
+            return_value=datetime(2026, 6, 16, 19, 39, 6, tzinfo=timezone.utc),
+        ):
+            payload = _run_scan_main(workspace)
+        assert FakeGovTribeExpiredRetrievalProvider.called is True, payload
+        govtribe_retrieval_status = next(
+            item
+            for item in payload["source_statuses"]
+            if item.get("source_id") == "govtribe_mcp_commercial_intel" and item.get("mode") == "scan_retrieval"
+        )
+        assert govtribe_retrieval_status["status"] == "ok", payload
+        assert govtribe_retrieval_status["record_count"] == 1, payload
+        opportunities = json.loads(Path(payload["opportunities_path"]).read_text(encoding="utf-8")).get("records", [])
+        assert opportunities == [], opportunities
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         workspace = Path(tmp_dir) / "workspace"
