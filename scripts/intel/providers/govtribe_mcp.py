@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from common.evidence_model import (
@@ -146,7 +146,7 @@ FAMILY_TOOL_GUIDE: dict[str, dict[str, Any]] = {
         ),
     },
     "vehicles": {
-        "preferred_names": ("Search_Federal_Contract_Vehicles",),
+        "preferred_names": ("Search_Federal_Contract_Vehicles", "Find_Federal_Contract_Vehicles"),
         "required_terms": ("federal", "contract", "vehicle"),
         "fields_to_return": (
             "govtribe_id",
@@ -193,6 +193,7 @@ QUERY_COMPATIBLE_REQUIRED_FIELDS = {
     "page_size",
     "max_results",
     "fields_to_return",
+    "aggregations",
     "naics",
     "naics_code",
     "naics_codes",
@@ -203,7 +204,16 @@ QUERY_COMPATIBLE_REQUIRED_FIELDS = {
     "govtribe_ids",
     "uei_values",
     "vendor_ids",
+    "vendor_ids_operator",
+    "awardee_vendor_ids",
+    "awardee_vendor_ids_operator",
 }
+
+VENDOR_AWARD_AGGREGATIONS = (
+    "top_contracting_federal_agencies_by_dollars_obligated",
+    "top_funding_federal_agencies_by_dollars_obligated",
+    "top_federal_contract_vehicles_by_dollars_obligated",
+)
 
 
 def govtribe_mcp_url() -> str:
@@ -966,7 +976,7 @@ def _first_text(record: dict[str, Any], *keys: str) -> str:
 
 
 def _record_url(record: dict[str, Any], default_url: str) -> str:
-    return _first_text(record, "govtribe_url", "url", "link", "uiLink", "permalink", "source_url", "download_url") or default_url
+    return _first_text(record, "govtribe_url", "url", "u_r_l", "link", "uiLink", "permalink", "source_url", "download_url") or default_url
 
 
 def _record_identifier(record: dict[str, Any]) -> str:
@@ -985,6 +995,7 @@ def _record_identifier(record: dict[str, Any]) -> str:
         "contract_id",
         "contract_number",
         "piid",
+        "gov_tribe_i_d",
     )
 
 
@@ -1480,12 +1491,21 @@ def _vendor_record_buyers(record: dict[str, Any]) -> list[str]:
 def _vendor_record_vehicles(record: dict[str, Any]) -> list[str]:
     values: list[str] = []
     for key in ("awarded_federal_contract_vehicle", "federal_contract_idvs"):
-        values.extend(
-            _collect_text_values(
-                record.get(key),
-                keys=("name", "title", "contract_number", "vehicle"),
-            )
-        )
+        raw_items = record.get(key)
+        if not isinstance(raw_items, list):
+            raw_items = [raw_items] if raw_items else []
+        current_items = [item for item in raw_items if not isinstance(item, dict) or _vehicle_access_is_current(item)]
+        values.extend(_vehicle_names_from_values(current_items))
+    return _signal_values(values)[:8]
+
+
+def _vendor_record_expired_vehicles(record: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for key in ("awarded_federal_contract_vehicle", "federal_contract_idvs"):
+        raw_items = record.get(key)
+        if not isinstance(raw_items, list):
+            raw_items = [raw_items] if raw_items else []
+        values.extend(_expired_vehicle_names_from_values(raw_items))
     return _signal_values(values)[:8]
 
 
@@ -1507,6 +1527,373 @@ def _vendor_record_award_signals(record: dict[str, Any]) -> list[str]:
     return _signal_values(values)[:6]
 
 
+def _vendor_filter_values(vendor_record: dict[str, Any]) -> list[str]:
+    return dedupe_strings(
+        [
+            str(vendor_record.get("uei") or "").strip(),
+            str(vendor_record.get("govtribe_id") or "").strip(),
+            str(vendor_record.get("external_record_id") or "").strip(),
+        ]
+    )[:3]
+
+
+def _vendor_query_text(vendor_record: dict[str, Any]) -> str:
+    values = [str(vendor_record.get("name") or "").strip(), str(vendor_record.get("uei") or "").strip()]
+    return " ".join(value for value in values if value).strip()
+
+
+def _set_vendor_filter_args(args: dict[str, Any], tool: dict[str, Any], vendor_record: dict[str, Any]) -> bool:
+    values = _vendor_filter_values(vendor_record)
+    if not values:
+        return False
+    properties = _schema_properties(tool)
+    preferred_keys = ("vendor ids", "awardee vendor ids", "awardee ids")
+    for wanted_key in preferred_keys:
+        for name, spec in properties.items():
+            if _normalize_key(name) == wanted_key and _is_array_prop(spec):
+                args[name] = values
+                return True
+    return False
+
+
+def _set_common_search_controls(args: dict[str, Any], tool: dict[str, Any], *, limit: int, per_page: int | None = None) -> None:
+    properties = _schema_properties(tool)
+    for name, spec in properties.items():
+        key = _normalize_key(name)
+        if _is_integer_prop(spec) and key in {"limit", "size", "page size", "per page", "max results"}:
+            args[name] = per_page if per_page is not None and key == "per page" else limit
+        elif _is_integer_prop(spec) and key == "page":
+            args[name] = 1
+        elif _is_string_prop(spec) and key == "search mode":
+            allowed_modes = set(_enum_values(spec))
+            if not allowed_modes or "keyword" in allowed_modes:
+                args[name] = "keyword"
+
+
+def _vendor_award_aggregation_arguments(tool: dict[str, Any], vendor_record: dict[str, Any]) -> dict[str, Any]:
+    properties = _schema_properties(tool)
+    args: dict[str, Any] = {}
+    has_vendor_filter = _set_vendor_filter_args(args, tool, vendor_record)
+    aggregation_spec = properties.get("aggregations")
+    if _is_array_prop(aggregation_spec):
+        allowed = set(_enum_values(aggregation_spec))
+        aggregations = [item for item in VENDOR_AWARD_AGGREGATIONS if not allowed or item in allowed]
+        if aggregations:
+            args["aggregations"] = aggregations
+    _set_common_search_controls(args, tool, limit=0, per_page=0)
+    if not has_vendor_filter:
+        query = _vendor_query_text(vendor_record)
+        for name, spec in properties.items():
+            if _normalize_key(name) in {"query", "q", "search", "search query"} and _is_string_prop(spec) and query:
+                args[name] = query
+                break
+    return args if args.get("aggregations") else {}
+
+
+def _vendor_vehicle_search_arguments(tool: dict[str, Any], vendor_record: dict[str, Any], *, limit: int = 15) -> dict[str, Any]:
+    properties = _schema_properties(tool)
+    args: dict[str, Any] = {}
+    has_vendor_filter = _set_vendor_filter_args(args, tool, vendor_record)
+    fields_spec = properties.get("fields_to_return")
+    if _is_array_prop(fields_spec):
+        fields = _fields_for_tool(tool)
+        if fields:
+            args["fields_to_return"] = fields
+    _set_common_search_controls(args, tool, limit=limit)
+    if not has_vendor_filter:
+        query = _vendor_query_text(vendor_record)
+        for name, spec in properties.items():
+            if _normalize_key(name) in {"query", "q", "search", "search query"} and _is_string_prop(spec) and query:
+                args[name] = query
+                break
+    return args
+
+
+def _aggregation_maps(value: Any) -> list[dict[str, Any]]:
+    maps: list[dict[str, Any]] = []
+    if isinstance(value, list):
+        for item in value:
+            maps.extend(_aggregation_maps(item))
+        return maps
+    if not isinstance(value, dict):
+        return maps
+    aggregations = value.get("aggregations")
+    if isinstance(aggregations, dict):
+        maps.append(aggregations)
+    for nested in value.values():
+        if isinstance(nested, (dict, list)):
+            maps.extend(_aggregation_maps(nested))
+    return maps
+
+
+def _tool_result_aggregation_maps(tool_result: dict[str, Any]) -> list[dict[str, Any]]:
+    maps: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for value in _extract_tool_values(tool_result):
+        for item in _aggregation_maps(value):
+            key = json.dumps(item, ensure_ascii=True, sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            maps.append(item)
+    return maps
+
+
+def _bucket_key(bucket: Any) -> dict[str, Any]:
+    if isinstance(bucket, dict):
+        key = bucket.get("key")
+        if isinstance(key, dict):
+            return key
+        if key not in (None, ""):
+            return {"name": key}
+    return bucket if isinstance(bucket, dict) else {}
+
+
+def _bucket_name(bucket: Any) -> str:
+    key = _bucket_key(bucket)
+    return _first_text(key, "name", "title", "value", "key") or _first_text(bucket, "name", "title", "value", "key")
+
+
+def _vehicle_url(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    key = _bucket_key(value)
+    return _first_text(value, "govtribe_url", "url", "u_r_l", "link", "permalink") or _first_text(
+        key,
+        "govtribe_url",
+        "url",
+        "u_r_l",
+        "link",
+        "permalink",
+    )
+
+
+def _vehicle_alias_from_url(value: Any) -> str:
+    url = _vehicle_url(value)
+    slug_match = re.search(r"/([^/?#]+)(?:[?#].*)?$", url)
+    if not slug_match:
+        return ""
+    tokens = [token for token in re.split(r"[^a-z0-9]+", slug_match.group(1).lower()) if token]
+    if not tokens:
+        return ""
+    suffix_candidates: list[list[str]] = []
+    last = tokens[-1]
+    previous = tokens[-2] if len(tokens) > 1 else ""
+    if len(last) <= 2 or any(char.isdigit() for char in last):
+        if previous:
+            suffix_candidates.append([previous, last])
+        if len(tokens) > 2:
+            suffix_candidates.append(tokens[-3:])
+    elif len(last) <= 4:
+        if previous and len(previous) <= 6:
+            suffix_candidates.append([previous, last])
+        suffix_candidates.append([last])
+    elif len(last) <= 6:
+        suffix_candidates.append([last])
+    for candidate in suffix_candidates:
+        alias = " ".join(token.upper() for token in candidate).strip()
+        if len(_normalize_identifier(alias)) >= 3:
+            return alias
+    return ""
+
+
+def _vehicle_display_name(value: Any) -> str:
+    name = _bucket_name(value) if isinstance(value, dict) else _clean_signal_text(value)
+    if not name:
+        return ""
+    alias = _vehicle_alias_from_url(value)
+    if alias and _normalize_identifier(alias) not in _normalize_identifier(name):
+        return f"{name} ({alias})"
+    return name
+
+
+def _aggregation_bucket_names(aggregation_maps: list[dict[str, Any]], names: tuple[str, ...], *, max_items: int = 10) -> list[str]:
+    values: list[str] = []
+    for aggregation_map in aggregation_maps:
+        for name in names:
+            aggregation = aggregation_map.get(name)
+            if not isinstance(aggregation, dict):
+                continue
+            buckets = aggregation.get("buckets")
+            if not isinstance(buckets, list):
+                continue
+            for bucket in buckets:
+                values.append(_bucket_name(bucket))
+    return _signal_values(values)[:max_items]
+
+
+def _vendor_aggregation_buyers(aggregation_maps: list[dict[str, Any]]) -> list[str]:
+    return _aggregation_bucket_names(
+        aggregation_maps,
+        (
+            "top_contracting_federal_agencies_by_dollars_obligated",
+            "top_funding_federal_agencies_by_dollars_obligated",
+        ),
+        max_items=10,
+    )
+
+
+def _vendor_aggregation_vehicles(aggregation_maps: list[dict[str, Any]]) -> list[str]:
+    values: list[str] = []
+    for aggregation_map in aggregation_maps:
+        aggregation = aggregation_map.get("top_federal_contract_vehicles_by_dollars_obligated")
+        if not isinstance(aggregation, dict):
+            continue
+        buckets = aggregation.get("buckets")
+        if not isinstance(buckets, list):
+            continue
+        for bucket in buckets:
+            if _vehicle_access_is_current(bucket):
+                values.append(_vehicle_display_name(bucket))
+    return _signal_values(values)[:12]
+
+
+def _vendor_aggregation_expired_vehicles(aggregation_maps: list[dict[str, Any]]) -> list[str]:
+    values: list[str] = []
+    for aggregation_map in aggregation_maps:
+        aggregation = aggregation_map.get("top_federal_contract_vehicles_by_dollars_obligated")
+        if not isinstance(aggregation, dict):
+            continue
+        buckets = aggregation.get("buckets")
+        if not isinstance(buckets, list):
+            continue
+        values.extend(_expired_vehicle_names_from_values(buckets))
+    return _signal_values(values)[:12]
+
+
+def _vehicle_names_from_values(values: list[Any]) -> list[str]:
+    names: list[str] = []
+    for value in values:
+        if isinstance(value, dict):
+            if _vehicle_access_is_current(value):
+                names.append(_vehicle_display_name(value))
+        else:
+            names.extend(_collect_text_values(value, keys=("name", "title", "contract_number", "vehicle")))
+    return _signal_values(names)
+
+
+def _expired_vehicle_names_from_values(values: list[Any]) -> list[str]:
+    names: list[str] = []
+    for value in values:
+        if isinstance(value, dict) and not _vehicle_access_is_current(value):
+            names.append(_vehicle_display_name(value))
+    return _signal_values(names)
+
+
+def _vehicle_names_from_records(records: list[dict[str, Any]]) -> list[str]:
+    return _vehicle_names_from_values(records)[:15]
+
+
+def _expired_vehicle_names_from_records(records: list[dict[str, Any]]) -> list[str]:
+    return _expired_vehicle_names_from_values(records)[:15]
+
+
+def _vehicle_last_date_to_order(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    key = _bucket_key(value)
+    return _first_text(value, "last_date_to_order", "lastDateToOrder", "last_order_date", "ordering_period_end") or _first_text(
+        key,
+        "last_date_to_order",
+        "lastDateToOrder",
+        "last_order_date",
+        "ordering_period_end",
+    )
+
+
+def _parse_vehicle_date(value: Any) -> date | None:
+    text = _clean_signal_text(value)
+    if not text:
+        return None
+    iso_date = text.split("T", 1)[0]
+    try:
+        return date.fromisoformat(iso_date)
+    except ValueError:
+        pass
+    for fmt in ("%b %d, %Y", "%B %d, %Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _vehicle_access_is_current(value: Any) -> bool:
+    parsed = _parse_vehicle_date(_vehicle_last_date_to_order(value))
+    if parsed is None:
+        return True
+    return parsed >= date.fromisoformat(today_local_str())
+
+
+def _enrich_vendor_record_from_awards_and_vehicles(
+    *,
+    client: MCPHttpClient,
+    families: dict[str, dict[str, Any]],
+    vendor_record: dict[str, Any],
+) -> tuple[dict[str, Any], list[str], list[str]]:
+    enriched = dict(vendor_record)
+    tool_names: list[str] = []
+    notes: list[str] = []
+    errors: list[str] = []
+
+    award_tool = families.get("awards")
+    if award_tool:
+        args = _vendor_award_aggregation_arguments(award_tool, vendor_record)
+        if args:
+            tool_name = _tool_name(award_tool)
+            try:
+                result = client.call_tool(tool_name, args)
+                aggregation_maps = _tool_result_aggregation_maps(result)
+                buyers = _vendor_aggregation_buyers(aggregation_maps)
+                vehicles = _vendor_aggregation_vehicles(aggregation_maps)
+                expired_vehicles = _vendor_aggregation_expired_vehicles(aggregation_maps)
+                if buyers:
+                    enriched["buyers"] = _signal_values([*coerce_string_list(enriched.get("buyers"), max_items=20), *buyers])[:12]
+                if vehicles:
+                    enriched["contract_vehicles"] = _signal_values(
+                        [*coerce_string_list(enriched.get("contract_vehicles"), max_items=20), *vehicles]
+                    )[:15]
+                if expired_vehicles:
+                    enriched["expired_contract_vehicles"] = _signal_values(
+                        [*coerce_string_list(enriched.get("expired_contract_vehicles"), max_items=20), *expired_vehicles]
+                    )[:15]
+                records, call_errors = _tool_result_records_and_errors(result)
+                if records:
+                    enriched["award_signals"] = _signal_values(
+                        [*coerce_string_list(enriched.get("award_signals"), max_items=20), *_vendor_record_award_signals({"federal_contract_awards": records})]
+                    )[:10]
+                errors.extend(f"{tool_name}: {error}" for error in call_errors)
+                tool_names.append(tool_name)
+                notes.append(f"GovTribe MCP award aggregations used: {tool_name}")
+            except (MCPResponseError, MCPHTTPError) as exc:
+                errors.append(f"{tool_name}: {exc}")
+
+    vehicle_tool = families.get("vehicles")
+    if vehicle_tool:
+        args = _vendor_vehicle_search_arguments(vehicle_tool, vendor_record)
+        tool_name = _tool_name(vehicle_tool)
+        try:
+            result = client.call_tool(tool_name, args)
+            records, call_errors = _tool_result_records_and_errors(result)
+            vehicle_names = _vehicle_names_from_records(records)
+            expired_vehicle_names = _expired_vehicle_names_from_records(records)
+            if vehicle_names:
+                enriched["contract_vehicles"] = _signal_values(
+                    [*coerce_string_list(enriched.get("contract_vehicles"), max_items=20), *vehicle_names]
+                )[:15]
+            if expired_vehicle_names:
+                enriched["expired_contract_vehicles"] = _signal_values(
+                    [*coerce_string_list(enriched.get("expired_contract_vehicles"), max_items=20), *expired_vehicle_names]
+                )[:15]
+            errors.extend(f"{tool_name}: {error}" for error in call_errors)
+            tool_names.append(tool_name)
+            notes.append(f"GovTribe MCP vehicle search used: {tool_name}")
+        except (MCPResponseError, MCPHTTPError) as exc:
+            errors.append(f"{tool_name}: {exc}")
+
+    return enriched, dedupe_strings([*notes, *errors]), dedupe_strings(tool_names)
+
+
 def _normalize_vendor_record(record: dict[str, Any], *, source_config: dict[str, Any], default_url: str) -> dict[str, Any]:
     source_url = _record_url(record, default_url)
     name = _first_text(record, "name", "vendor_name", "recipient_name", "awardee") or "Vendor"
@@ -1522,6 +1909,7 @@ def _normalize_vendor_record(record: dict[str, Any], *, source_config: dict[str,
         allow_generic_metadata=True,
     )[:10]
     vehicles = _vendor_record_vehicles(record)
+    expired_vehicles = _vendor_record_expired_vehicles(record)
     buyers = _vendor_record_buyers(record)
     award_signals = _vendor_record_award_signals(record)
     keywords = _signal_values([*naics_codes, *vehicles, *buyers])[:12]
@@ -1541,6 +1929,7 @@ def _normalize_vendor_record(record: dict[str, Any], *, source_config: dict[str,
         "naics_items": naics_items,
         "certifications": certifications,
         "contract_vehicles": vehicles,
+        "expired_contract_vehicles": expired_vehicles,
         "buyers": buyers,
         "award_signals": award_signals,
         "keywords": keywords,
@@ -1687,6 +2076,16 @@ class GovTribeMCPCommercialIntelProvider:
                 "tool_name": _tool_name(tool),
             }
         normalized = _normalize_vendor_record(selected, source_config=self.source_config, default_url=default_url)
+        enrichment_notes: list[str] = []
+        enrichment_tool_names: list[str] = []
+        try:
+            normalized, enrichment_notes, enrichment_tool_names = _enrich_vendor_record_from_awards_and_vehicles(
+                client=client,
+                families=families,
+                vendor_record=normalized,
+            )
+        except Exception as exc:
+            enrichment_notes = [f"GovTribe vendor award/vehicle enrichment skipped: {exc}"]
         return {
             "source_id": normalized["source_id"],
             "source_name": normalized["source_name"],
@@ -1697,8 +2096,8 @@ class GovTribeMCPCommercialIntelProvider:
             "external_record_id": normalized.get("external_record_id", ""),
             "source_url": normalized.get("source_url", ""),
             "vendor_record": normalized,
-            "notes": [f"GovTribe MCP tools used: {_tool_name(tool)}"],
-            "tool_name": _tool_name(tool),
+            "notes": dedupe_strings([f"GovTribe MCP tools used: {_tool_name(tool)}", *enrichment_notes]),
+            "tool_name": ", ".join(dedupe_strings([_tool_name(tool), *enrichment_tool_names])),
         }
 
     def search_scan_opportunities(

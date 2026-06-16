@@ -186,9 +186,11 @@ Semantic guidance:
 2. For exact UEI input, pass `uei_values: ["<UEI>"]`, `search_mode: "keyword"`, `per_page: 5`, and the vendor fields above.
 3. For GovTribe vendor URLs, parse the vendor slug for `query` and prefer returned records whose `govtribe_url` or ID matches the slug.
 4. For vendor names, pass the name as `query`, use keyword mode, and choose exact normalized name or DBA before falling back to the highest-ranked result.
-5. Normalize returned fields into `vendor-profile.json` with field-level provenance marked `govtribe_subscription_derived`.
-6. Never write API keys, bearer tokens, Authorization headers, or token fragments into workspace files.
-7. If GovTribe is not configured or returns no match, report that status and use website bootstrap only when a company URL is also available.
+5. After the vendor is resolved, use `Search_Federal_Contract_Awards` with the vendor UEI/GovTribe ID, `per_page: 0`, and aggregations such as `top_contracting_federal_agencies_by_dollars_obligated`, `top_funding_federal_agencies_by_dollars_obligated`, and `top_federal_contract_vehicles_by_dollars_obligated` to identify buyer and vehicle signals.
+6. Use `Search_Federal_Contract_Vehicles` or `Find_Federal_Contract_Vehicles` with the vendor UEI/GovTribe ID to identify vehicles the vendor has access to, including schedules, GWACs, BPAs, and IDIQs.
+7. Normalize returned fields into `vendor-profile.json` with field-level provenance marked `govtribe_subscription_derived`.
+8. Never write API keys, bearer tokens, Authorization headers, or token fragments into workspace files.
+9. If GovTribe is not configured or returns no match, report that status and use website bootstrap only when a company URL is also available.
 
 ## Capture Enrichment Pattern
 

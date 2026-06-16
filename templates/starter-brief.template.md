@@ -1,7 +1,7 @@
 # Starter profile brief - {{DATE}}
 
 ## User inputs
-- Company URL: {{COMPANY_URL}}
+- {{SOURCE_LABEL}}: {{SOURCE_VALUE}}
 - User-supplied NAICS: {{USER_NAICS}}
 - Plain-language summary: {{SUMMARY}}
 
@@ -13,6 +13,9 @@
 - Candidate buyers:
   - {{BUYER_1}}
   - {{BUYER_2}}
+- Candidate contract vehicles:
+  - {{VEHICLE_1}}
+  - {{VEHICLE_2}}
 - Candidate NAICS:
   - {{NAICS_1}}
   - {{NAICS_2}}

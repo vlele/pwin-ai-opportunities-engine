@@ -199,6 +199,47 @@ def _clean_govtribe_values(values: list[Any], *, allow_generic_metadata: bool = 
     return _merge_unique([], cleaned)
 
 
+def _vehicle_summary_match_terms(vehicles: list[str]) -> list[str]:
+    terms: list[str] = []
+    for vehicle in vehicles:
+        text = _clean_bootstrap_signal(vehicle)
+        if not text:
+            continue
+        terms.append(text)
+        base_name = re.sub(r"\s*\([^)]*\)", "", text).strip()
+        if base_name:
+            terms.append(base_name)
+        terms.extend(match.strip() for match in re.findall(r"\(([^)]+)\)", text) if match.strip())
+    return _merge_unique([], terms)
+
+
+def _contains_vehicle_term(text: str, terms: list[str]) -> bool:
+    normalized_text = normalize_profile_term(text)
+    for term in terms:
+        normalized_term = normalize_profile_term(term)
+        if normalized_term and normalized_term in normalized_text:
+            return True
+    return False
+
+
+def _scrub_expired_vehicle_summary_claims(summary: str, expired_vehicles: list[str]) -> str:
+    terms = _vehicle_summary_match_terms(expired_vehicles)
+    if not terms:
+        return summary
+    kept: list[str] = []
+    for paragraph in re.split(r"\n+", summary):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        has_vehicle_context = re.search(r"\b(contract vehicles?|vehicles?|idvs?|idiqs?|gwacs?|schedules?)\b", paragraph, re.I)
+        if has_vehicle_context and _contains_vehicle_term(paragraph, terms):
+            continue
+        kept.append(paragraph)
+    if kept:
+        return "\n".join(kept)
+    return "Vendor profile seeded from GovTribe subscription-derived fields. Current contract vehicle candidates are listed separately below."
+
+
 def _normalize_url(raw_value: str) -> str:
     value = raw_value.strip()
     if not value:
@@ -564,17 +605,22 @@ def _naics_label(item: dict[str, str]) -> str:
 def _render_starter_profile(
     template_text: str,
     *,
-    company_url: str,
+    source_value: str,
+    source_label: str = "Company URL",
     user_naics: list[str],
     summary: str,
     company_summary: str,
     capabilities: list[str],
     buyers: list[str],
     candidate_naics: list[dict[str, str]],
+    contract_vehicles: list[str] | None = None,
+    provisional_fact_note: str = "Website-derived facts remain provisional until the user confirms them.",
 ) -> str:
+    vehicle_values = contract_vehicles or []
     replacements = {
         "{{DATE}}": utc_now_iso()[:10],
-        "{{COMPANY_URL}}": company_url,
+        "{{SOURCE_LABEL}}": source_label,
+        "{{SOURCE_VALUE}}": source_value,
         "{{USER_NAICS}}": ", ".join(user_naics) if user_naics else "None provided",
         "{{SUMMARY}}": summary or "Not provided",
         "{{COMPANY_SUMMARY}}": company_summary or "Needs confirmation",
@@ -582,10 +628,12 @@ def _render_starter_profile(
         "{{COMPETENCY_2}}": capabilities[1] if len(capabilities) > 1 else "Needs confirmation",
         "{{BUYER_1}}": buyers[0] if len(buyers) > 0 else "Needs confirmation",
         "{{BUYER_2}}": buyers[1] if len(buyers) > 1 else "Needs confirmation",
+        "{{VEHICLE_1}}": vehicle_values[0] if len(vehicle_values) > 0 else "Needs confirmation",
+        "{{VEHICLE_2}}": vehicle_values[1] if len(vehicle_values) > 1 else "Needs confirmation",
         "{{NAICS_1}}": _naics_label(candidate_naics[0]) if len(candidate_naics) > 0 else "Needs confirmation",
         "{{NAICS_2}}": _naics_label(candidate_naics[1]) if len(candidate_naics) > 1 else "Needs confirmation",
         "{{EXCLUSION_1}}": "Grants are excluded by default until the user opts in.",
-        "{{EXCLUSION_2}}": "Website-derived facts remain provisional until the user confirms them.",
+        "{{EXCLUSION_2}}": provisional_fact_note,
         "{{QUESTION_1}}": "Which 2 to 3 capabilities above are truly core to the company?",
         "{{QUESTION_2}}": "Which agencies, buyers, or work types should never show up?",
         "{{QUESTION_3}}": "Are these candidate NAICS codes correct, or should any be confirmed or rejected?",
@@ -722,12 +770,13 @@ def seed_workspace(
     starter_profile_path = procurement / "STARTER_PROFILE.md"
     starter_profile = _render_starter_profile(
         read_text(bundle_root / "templates" / "starter-brief.template.md"),
-        company_url=normalized_url,
+        source_value=normalized_url,
         user_naics=user_naics,
         summary=explicit_summary.strip(),
         company_summary=company_summary,
         capabilities=capabilities,
         buyers=buyers,
+        contract_vehicles=[],
         candidate_naics=inferred_naics,
     )
     write_text(starter_profile_path, starter_profile)
@@ -837,7 +886,8 @@ def seed_workspace_from_govtribe(
     _enable_govtribe_source(source_registry_path, registry, now)
 
     vendor_name = explicit_name.strip() or str(vendor_record.get("name") or "Vendor").strip()
-    company_summary = explicit_summary.strip() or str(vendor_record.get("summary") or "").strip()
+    explicit_summary_text = explicit_summary.strip()
+    company_summary = explicit_summary_text or str(vendor_record.get("summary") or "").strip()
     if not company_summary:
         company_summary = "Vendor profile seeded from GovTribe subscription-derived fields. Review and confirm before scanning."
     govtribe_url = str(vendor_record.get("source_url") or vendor_record.get("govtribe_url") or govtribe_lookup).strip()
@@ -849,11 +899,14 @@ def seed_workspace_from_govtribe(
     candidate_naics = _merge_unique(candidate_values, vendor_naics)
     capabilities = _govtribe_capabilities(vendor_record)
     buyers = _clean_govtribe_values(vendor_record.get("buyers", []))
-    certifications = _clean_govtribe_values(vendor_record.get("certifications", []), allow_generic_metadata=True)
+    certifications = _clean_govtribe_values(vendor_record.get("certifications", []))
     set_aside_programs = _clean_govtribe_values(
         [item for item in certifications if "certified" in normalize_profile_term(item) or "small disadvantaged" in normalize_profile_term(item)]
     )
     contract_vehicles = _clean_govtribe_values(vendor_record.get("contract_vehicles", []))
+    expired_contract_vehicles = _clean_govtribe_values(vendor_record.get("expired_contract_vehicles", []))
+    if not explicit_summary_text:
+        company_summary = _scrub_expired_vehicle_summary_claims(company_summary, expired_contract_vehicles)
     award_signals = _clean_govtribe_values(vendor_record.get("award_signals", []))
     keywords = [
         item
@@ -907,8 +960,9 @@ def seed_workspace_from_govtribe(
         award_signals,
     )
     vendor_profile.setdefault("commercial_constraints", {})
+    existing_certifications = _clean_govtribe_values(vendor_profile["commercial_constraints"].get("certifications", []))
     vendor_profile["commercial_constraints"]["certifications"] = _merge_unique(
-        vendor_profile["commercial_constraints"].get("certifications", []),
+        existing_certifications,
         certifications,
     )
     vendor_profile["commercial_constraints"]["set_aside_programs"] = _merge_unique(
@@ -988,13 +1042,16 @@ def seed_workspace_from_govtribe(
     starter_profile_path = procurement / "STARTER_PROFILE.md"
     starter_profile = _render_starter_profile(
         read_text(bundle_root / "templates" / "starter-brief.template.md"),
-        company_url=display_source_url,
-        user_naics=[*confirmed_values, *candidate_naics],
+        source_label="GovTribe vendor",
+        source_value=display_source_url,
+        user_naics=user_naics,
         summary=explicit_summary.strip(),
         company_summary=company_summary,
         capabilities=capabilities,
         buyers=buyers,
+        contract_vehicles=contract_vehicles,
         candidate_naics=_govtribe_naics_items(vendor_record, candidate_naics),
+        provisional_fact_note="GovTribe-derived facts remain provisional until the user confirms them.",
     )
     starter_profile += (
         "\n\nGovTribe source note: GovTribe subscription-derived facts are provisional commercial intelligence. "
