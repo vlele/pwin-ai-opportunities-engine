@@ -137,6 +137,12 @@ Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
 and treat NAICS 541511 and 541512 as candidates.
 ```
 
+If you are already looking at a GovTribe vendor profile and `GOVTRIBE_MCP_API_KEY` is configured, you can bootstrap from GovTribe instead:
+
+```text
+Use pwin-ai-opportunities and bootstrap this workspace from https://govtribe.com/vendors/halvik-corp-5grr4.
+```
+
 In Claude Code, use:
 
 ```text
@@ -151,6 +157,14 @@ If you want the direct underlying CLI path on any host, run:
 python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" \
   --workspace "$PWD" \
   --company-url "https://example.com"
+```
+
+For GovTribe vendor lookup:
+
+```bash
+python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" \
+  --workspace "$PWD" \
+  --vendor-lookup "Halvik, LLC"
 ```
 
 That creates or updates:
@@ -169,6 +183,8 @@ Bootstrap does more than create empty files. It immediately pre-populates `procu
 - confirmed `naics.confirmed` values when you provide confirmed codes
 - candidate `naics.candidates` values from tentative input plus website inference
 - candidate buyer notes, provenance facts, and a reminder that website-derived facts are still provisional
+
+GovTribe bootstrap can also pre-populate UEI, GovTribe profile URL, NAICS, certifications, contract vehicles, award and buyer signals, and AI summary text. Those facts are labeled as GovTribe subscription-derived commercial intelligence and remain provisional until confirmed.
 
 It also seeds `procurement/preferences.json` to exclude `grants` by default, prefer `contracts`, `subcontracts`, and `forecasts`, and reuse the inferred capability keywords. If `procurement/vendor-profile.json` already exists, bootstrap merges into it instead of resetting the file.
 

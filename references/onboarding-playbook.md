@@ -4,9 +4,11 @@ The goal is to let the user start in plain language and only introduce codes aft
 
 For this release, onboarding should prepare the workspace for federal opportunity scanning only. Do not steer the user toward state or local procurement portals.
 
-## Stage 0: website or domain bootstrap
+## Stage 0: website, domain, or GovTribe vendor bootstrap
 
 If the user gives a company website or domain, start there.
+
+If the user gives a GovTribe vendor URL, vendor name, UEI, or asks to bootstrap from GovTribe vendor search, use GovTribe first when `GOVTRIBE_MCP_API_KEY` is configured. If GovTribe is unavailable, not configured, or returns no match, fall back to website bootstrap only when the user also provided a company website.
 
 If the user also gives NAICS, use those codes immediately to tighten the first pass:
 - treat them as confirmed if the user presents them as authoritative
@@ -29,6 +31,15 @@ From the official site, extract:
 - location and delivery-model clues
 
 Treat every website-derived fact as **provisional** until the user confirms it or until it is corroborated by a higher-confidence official source.
+
+From GovTribe vendor bootstrap, extract available:
+- vendor name, UEI, GovTribe profile URL, summary, location
+- NAICS and taxonomy fields
+- SBA certifications and business types
+- contract vehicles, federal award, IDV, buyer, and agency signals
+- GovTribe AI summary and similar market context when returned
+
+Treat every GovTribe-derived fact as **GovTribe subscription-derived commercial intelligence** until the user confirms it. Keep those facts separate from website-derived and user-confirmed facts in provenance.
 
 ## Stage 1: plain-language business intake
 

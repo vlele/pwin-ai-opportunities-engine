@@ -5,7 +5,7 @@ description: "Use pWin.ai Opportunities for federal opportunity workflows: boots
 
 Use this skill when the user wants any of the following:
 
-- onboarding or bootstrap from a company website
+- onboarding or bootstrap from a company website, GovTribe vendor profile, vendor name, or UEI
 - seeding `vendor-profile.json` or starter workspace files
 - a federal opportunity scan or daily digest
 - the latest digest or a dated digest
@@ -44,6 +44,7 @@ Do not re-implement script logic inside the prompt. Route to the correct script,
 Use when the user asks to:
 
 - bootstrap a workspace from a company website
+- bootstrap a workspace from a GovTribe vendor URL, vendor name, or UEI
 - seed `vendor-profile.json`
 - create starter onboarding files
 - get started from a company URL
@@ -52,6 +53,18 @@ Run:
 
 ```bash
 python3 "<SKILL_ROOT>/scripts/bootstrap/bootstrap_workspace.py" --workspace "$PWD" --company-url "<company url>"
+```
+
+For GovTribe vendor bootstrap, when `GOVTRIBE_MCP_API_KEY` is configured, run:
+
+```bash
+python3 "<SKILL_ROOT>/scripts/bootstrap/bootstrap_workspace.py" --workspace "$PWD" --vendor-lookup "<GovTribe vendor URL, vendor name, or UEI>"
+```
+
+If the user provides both a GovTribe lookup and a company website, pass both. The script attempts GovTribe first and uses website bootstrap only as fallback:
+
+```bash
+python3 "<SKILL_ROOT>/scripts/bootstrap/bootstrap_workspace.py" --workspace "$PWD" --vendor-lookup "<vendor lookup>" --company-url "<company url>"
 ```
 
 If the user supplies NAICS codes, add:
@@ -73,6 +86,7 @@ After the script runs:
 - report the files created
 - summarize the inferred company summary, candidate competencies, and candidate NAICS
 - clearly label website-derived facts as provisional until confirmed
+- when bootstrap used GovTribe, clearly label GovTribe subscription-derived facts as provisional commercial intelligence and separate from website-derived facts
 
 ### 1. Scan
 

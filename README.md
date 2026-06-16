@@ -49,6 +49,12 @@ Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
 with confirmed NAICS 541511 and 541512.
 ```
 
+If you already have a GovTribe vendor profile and `GOVTRIBE_MCP_API_KEY` is configured, you can bootstrap from that record instead:
+
+```text
+Use pwin-ai-opportunities and bootstrap this workspace from https://govtribe.com/vendors/halvik-corp-5grr4.
+```
+
 That creates or updates:
 
 - `procurement/vendor-profile.json`
@@ -65,6 +71,8 @@ Bootstrap also pre-populates `procurement/vendor-profile.json` with:
 - Confirmed `naics.confirmed` values when you provide confirmed codes
 - Candidate `naics.candidates` values from tentative input plus website inference
 - Candidate buyer notes, provenance facts, and a reminder that website-derived facts are still provisional
+
+GovTribe bootstrap uses GovTribe vendor fields when available, including UEI, NAICS, certifications, contract vehicles, award and buyer signals, and AI summary text. GovTribe subscription-derived facts are labeled separately from website-derived facts and remain provisional until confirmed.
 
 It also seeds `procurement/preferences.json` to exclude `grants` by default, prefer `contracts`, `subcontracts`, and `forecasts`, and reuse the inferred capability keywords. If `vendor-profile.json` already exists, bootstrap merges into it instead of wiping your existing work.
 
