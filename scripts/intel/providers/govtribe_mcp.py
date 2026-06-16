@@ -1495,12 +1495,17 @@ def _vendor_record_vehicles(record: dict[str, Any]) -> list[str]:
         if not isinstance(raw_items, list):
             raw_items = [raw_items] if raw_items else []
         current_items = [item for item in raw_items if not isinstance(item, dict) or _vehicle_access_is_current(item)]
-        values.extend(
-            _collect_text_values(
-                current_items,
-                keys=("name", "title", "contract_number", "vehicle"),
-            )
-        )
+        values.extend(_vehicle_names_from_values(current_items))
+    return _signal_values(values)[:8]
+
+
+def _vendor_record_expired_vehicles(record: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for key in ("awarded_federal_contract_vehicle", "federal_contract_idvs"):
+        raw_items = record.get(key)
+        if not isinstance(raw_items, list):
+            raw_items = [raw_items] if raw_items else []
+        values.extend(_expired_vehicle_names_from_values(raw_items))
     return _signal_values(values)[:8]
 
 
@@ -1649,6 +1654,59 @@ def _bucket_name(bucket: Any) -> str:
     return _first_text(key, "name", "title", "value", "key") or _first_text(bucket, "name", "title", "value", "key")
 
 
+def _vehicle_url(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    key = _bucket_key(value)
+    return _first_text(value, "govtribe_url", "url", "u_r_l", "link", "permalink") or _first_text(
+        key,
+        "govtribe_url",
+        "url",
+        "u_r_l",
+        "link",
+        "permalink",
+    )
+
+
+def _vehicle_alias_from_url(value: Any) -> str:
+    url = _vehicle_url(value)
+    slug_match = re.search(r"/([^/?#]+)(?:[?#].*)?$", url)
+    if not slug_match:
+        return ""
+    tokens = [token for token in re.split(r"[^a-z0-9]+", slug_match.group(1).lower()) if token]
+    if not tokens:
+        return ""
+    suffix_candidates: list[list[str]] = []
+    last = tokens[-1]
+    previous = tokens[-2] if len(tokens) > 1 else ""
+    if len(last) <= 2 or any(char.isdigit() for char in last):
+        if previous:
+            suffix_candidates.append([previous, last])
+        if len(tokens) > 2:
+            suffix_candidates.append(tokens[-3:])
+    elif len(last) <= 4:
+        if previous and len(previous) <= 6:
+            suffix_candidates.append([previous, last])
+        suffix_candidates.append([last])
+    elif len(last) <= 6:
+        suffix_candidates.append([last])
+    for candidate in suffix_candidates:
+        alias = " ".join(token.upper() for token in candidate).strip()
+        if len(_normalize_identifier(alias)) >= 3:
+            return alias
+    return ""
+
+
+def _vehicle_display_name(value: Any) -> str:
+    name = _bucket_name(value) if isinstance(value, dict) else _clean_signal_text(value)
+    if not name:
+        return ""
+    alias = _vehicle_alias_from_url(value)
+    if alias and _normalize_identifier(alias) not in _normalize_identifier(name):
+        return f"{name} ({alias})"
+    return name
+
+
 def _aggregation_bucket_names(aggregation_maps: list[dict[str, Any]], names: tuple[str, ...], *, max_items: int = 10) -> list[str]:
     values: list[str] = []
     for aggregation_map in aggregation_maps:
@@ -1686,12 +1744,48 @@ def _vendor_aggregation_vehicles(aggregation_maps: list[dict[str, Any]]) -> list
             continue
         for bucket in buckets:
             if _vehicle_access_is_current(bucket):
-                values.append(_bucket_name(bucket))
+                values.append(_vehicle_display_name(bucket))
     return _signal_values(values)[:12]
 
 
+def _vendor_aggregation_expired_vehicles(aggregation_maps: list[dict[str, Any]]) -> list[str]:
+    values: list[str] = []
+    for aggregation_map in aggregation_maps:
+        aggregation = aggregation_map.get("top_federal_contract_vehicles_by_dollars_obligated")
+        if not isinstance(aggregation, dict):
+            continue
+        buckets = aggregation.get("buckets")
+        if not isinstance(buckets, list):
+            continue
+        values.extend(_expired_vehicle_names_from_values(buckets))
+    return _signal_values(values)[:12]
+
+
+def _vehicle_names_from_values(values: list[Any]) -> list[str]:
+    names: list[str] = []
+    for value in values:
+        if isinstance(value, dict):
+            if _vehicle_access_is_current(value):
+                names.append(_vehicle_display_name(value))
+        else:
+            names.extend(_collect_text_values(value, keys=("name", "title", "contract_number", "vehicle")))
+    return _signal_values(names)
+
+
+def _expired_vehicle_names_from_values(values: list[Any]) -> list[str]:
+    names: list[str] = []
+    for value in values:
+        if isinstance(value, dict) and not _vehicle_access_is_current(value):
+            names.append(_vehicle_display_name(value))
+    return _signal_values(names)
+
+
 def _vehicle_names_from_records(records: list[dict[str, Any]]) -> list[str]:
-    return _signal_values([_record_title(record) for record in records if _vehicle_access_is_current(record)])[:15]
+    return _vehicle_names_from_values(records)[:15]
+
+
+def _expired_vehicle_names_from_records(records: list[dict[str, Any]]) -> list[str]:
+    return _expired_vehicle_names_from_values(records)[:15]
 
 
 def _vehicle_last_date_to_order(value: Any) -> str:
@@ -1752,11 +1846,16 @@ def _enrich_vendor_record_from_awards_and_vehicles(
                 aggregation_maps = _tool_result_aggregation_maps(result)
                 buyers = _vendor_aggregation_buyers(aggregation_maps)
                 vehicles = _vendor_aggregation_vehicles(aggregation_maps)
+                expired_vehicles = _vendor_aggregation_expired_vehicles(aggregation_maps)
                 if buyers:
                     enriched["buyers"] = _signal_values([*coerce_string_list(enriched.get("buyers"), max_items=20), *buyers])[:12]
                 if vehicles:
                     enriched["contract_vehicles"] = _signal_values(
                         [*coerce_string_list(enriched.get("contract_vehicles"), max_items=20), *vehicles]
+                    )[:15]
+                if expired_vehicles:
+                    enriched["expired_contract_vehicles"] = _signal_values(
+                        [*coerce_string_list(enriched.get("expired_contract_vehicles"), max_items=20), *expired_vehicles]
                     )[:15]
                 records, call_errors = _tool_result_records_and_errors(result)
                 if records:
@@ -1777,9 +1876,14 @@ def _enrich_vendor_record_from_awards_and_vehicles(
             result = client.call_tool(tool_name, args)
             records, call_errors = _tool_result_records_and_errors(result)
             vehicle_names = _vehicle_names_from_records(records)
+            expired_vehicle_names = _expired_vehicle_names_from_records(records)
             if vehicle_names:
                 enriched["contract_vehicles"] = _signal_values(
                     [*coerce_string_list(enriched.get("contract_vehicles"), max_items=20), *vehicle_names]
+                )[:15]
+            if expired_vehicle_names:
+                enriched["expired_contract_vehicles"] = _signal_values(
+                    [*coerce_string_list(enriched.get("expired_contract_vehicles"), max_items=20), *expired_vehicle_names]
                 )[:15]
             errors.extend(f"{tool_name}: {error}" for error in call_errors)
             tool_names.append(tool_name)
@@ -1805,6 +1909,7 @@ def _normalize_vendor_record(record: dict[str, Any], *, source_config: dict[str,
         allow_generic_metadata=True,
     )[:10]
     vehicles = _vendor_record_vehicles(record)
+    expired_vehicles = _vendor_record_expired_vehicles(record)
     buyers = _vendor_record_buyers(record)
     award_signals = _vendor_record_award_signals(record)
     keywords = _signal_values([*naics_codes, *vehicles, *buyers])[:12]
@@ -1824,6 +1929,7 @@ def _normalize_vendor_record(record: dict[str, Any], *, source_config: dict[str,
         "naics_items": naics_items,
         "certifications": certifications,
         "contract_vehicles": vehicles,
+        "expired_contract_vehicles": expired_vehicles,
         "buyers": buyers,
         "award_signals": award_signals,
         "keywords": keywords,

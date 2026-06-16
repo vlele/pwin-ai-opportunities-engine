@@ -199,6 +199,47 @@ def _clean_govtribe_values(values: list[Any], *, allow_generic_metadata: bool = 
     return _merge_unique([], cleaned)
 
 
+def _vehicle_summary_match_terms(vehicles: list[str]) -> list[str]:
+    terms: list[str] = []
+    for vehicle in vehicles:
+        text = _clean_bootstrap_signal(vehicle)
+        if not text:
+            continue
+        terms.append(text)
+        base_name = re.sub(r"\s*\([^)]*\)", "", text).strip()
+        if base_name:
+            terms.append(base_name)
+        terms.extend(match.strip() for match in re.findall(r"\(([^)]+)\)", text) if match.strip())
+    return _merge_unique([], terms)
+
+
+def _contains_vehicle_term(text: str, terms: list[str]) -> bool:
+    normalized_text = normalize_profile_term(text)
+    for term in terms:
+        normalized_term = normalize_profile_term(term)
+        if normalized_term and normalized_term in normalized_text:
+            return True
+    return False
+
+
+def _scrub_expired_vehicle_summary_claims(summary: str, expired_vehicles: list[str]) -> str:
+    terms = _vehicle_summary_match_terms(expired_vehicles)
+    if not terms:
+        return summary
+    kept: list[str] = []
+    for paragraph in re.split(r"\n+", summary):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        has_vehicle_context = re.search(r"\b(contract vehicles?|vehicles?|idvs?|idiqs?|gwacs?|schedules?)\b", paragraph, re.I)
+        if has_vehicle_context and _contains_vehicle_term(paragraph, terms):
+            continue
+        kept.append(paragraph)
+    if kept:
+        return "\n".join(kept)
+    return "Vendor profile seeded from GovTribe subscription-derived fields. Current contract vehicle candidates are listed separately below."
+
+
 def _normalize_url(raw_value: str) -> str:
     value = raw_value.strip()
     if not value:
@@ -845,7 +886,8 @@ def seed_workspace_from_govtribe(
     _enable_govtribe_source(source_registry_path, registry, now)
 
     vendor_name = explicit_name.strip() or str(vendor_record.get("name") or "Vendor").strip()
-    company_summary = explicit_summary.strip() or str(vendor_record.get("summary") or "").strip()
+    explicit_summary_text = explicit_summary.strip()
+    company_summary = explicit_summary_text or str(vendor_record.get("summary") or "").strip()
     if not company_summary:
         company_summary = "Vendor profile seeded from GovTribe subscription-derived fields. Review and confirm before scanning."
     govtribe_url = str(vendor_record.get("source_url") or vendor_record.get("govtribe_url") or govtribe_lookup).strip()
@@ -862,6 +904,9 @@ def seed_workspace_from_govtribe(
         [item for item in certifications if "certified" in normalize_profile_term(item) or "small disadvantaged" in normalize_profile_term(item)]
     )
     contract_vehicles = _clean_govtribe_values(vendor_record.get("contract_vehicles", []))
+    expired_contract_vehicles = _clean_govtribe_values(vendor_record.get("expired_contract_vehicles", []))
+    if not explicit_summary_text:
+        company_summary = _scrub_expired_vehicle_summary_claims(company_summary, expired_contract_vehicles)
     award_signals = _clean_govtribe_values(vendor_record.get("award_signals", []))
     keywords = [
         item

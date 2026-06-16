@@ -50,7 +50,9 @@ class FakeGovTribeBootstrapProvider:
                 "uei": "VMRTJLWMQRH7",
                 "summary": (
                     "Halvik provides software engineering, cloud services, cybersecurity, data analytics, "
-                    "and program management support to federal agencies."
+                    "and program management support to federal agencies.\n"
+                    "Halvik has secured positions on GSA MAS and the One Acquisition Solution for "
+                    "Integrated Services Small Business (OASIS SB) IDIQ."
                 ),
                 "location": "Vienna, VA, USA",
                 "naics": ["Web Search Portals and All Other Information Services"],
@@ -61,6 +63,7 @@ class FakeGovTribeBootstrapProvider:
                     "Limited Liability Company",
                 ],
                 "contract_vehicles": ["True", "GSA MAS"],
+                "expired_contract_vehicles": ["One Acquisition Solution for Integrated Services - Small Business (OASIS SB)"],
                 "buyers": ["Department of Veterans Affairs"],
                 "award_signals": ["VA Modernization Support - VA-1 - Department of Veterans Affairs"],
                 "keywords": [
@@ -227,6 +230,7 @@ def main() -> int:
         assert govtribe_vendor_profile["company"]["name"] == "Halvik, LLC", govtribe_vendor_profile["company"]
         assert govtribe_vendor_profile["company"]["uei"] == "VMRTJLWMQRH7", govtribe_vendor_profile["company"]
         assert govtribe_vendor_profile["company"]["govtribe_url"] == "https://govtribe.com/vendors/halvik-corp-5grr4", govtribe_vendor_profile["company"]
+        assert "OASIS SB" not in govtribe_vendor_profile["company"]["summary"], govtribe_vendor_profile["company"]
         assert "519290" in govtribe_vendor_profile["naics"]["candidates"], govtribe_vendor_profile["naics"]
         assert "cybersecurity" in govtribe_vendor_profile["core_competencies"], govtribe_vendor_profile
         assert "cloud modernization" in govtribe_vendor_profile["core_competencies"], govtribe_vendor_profile
@@ -249,6 +253,7 @@ def main() -> int:
         )
         for bad_value in ("True", "For Profit Organization", "Business or Organization", "Limited Liability Company"):
             assert bad_value not in noisy_payload, noisy_payload
+        assert "OASIS SB" not in noisy_payload, noisy_payload
         assert "519290 - Web Search Portals and All Other Information Services" in govtribe_starter, govtribe_starter
         assert "GovTribe vendor: https://govtribe.com/vendors/halvik-corp-5grr4" in govtribe_starter, govtribe_starter
         assert "GSA MAS" in govtribe_starter, govtribe_starter

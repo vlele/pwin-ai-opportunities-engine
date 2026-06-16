@@ -710,7 +710,7 @@ def main() -> int:
             if "National Aeronautics and Space Administration" not in intel_buyers:
                 failures.append("govtribe_vendor_award_aggregation_funding_buyer")
             intel_vehicles = intel_record.get("contract_vehicles", [])
-            if "Multiple Award Schedule" not in intel_vehicles:
+            if "Multiple Award Schedule (MAS)" not in intel_vehicles:
                 failures.append("govtribe_vendor_award_aggregation_vehicle")
             if "8(a) STARS III" not in intel_vehicles:
                 failures.append("govtribe_vendor_vehicle_search")
@@ -718,6 +718,11 @@ def main() -> int:
                 failures.append("govtribe_vendor_award_aggregation_filters_expired_vehicle")
             if "8a Streamlined Technology Acquisition Resources for Services" in intel_vehicles:
                 failures.append("govtribe_vendor_vehicle_search_filters_expired_vehicle")
+            expired_intel_vehicles = intel_record.get("expired_contract_vehicles", [])
+            if not any("Expired Legacy GWAC" in item for item in expired_intel_vehicles):
+                failures.append("govtribe_vendor_tracks_expired_aggregation_vehicle")
+            if not any("8a Streamlined Technology Acquisition Resources for Services" in item for item in expired_intel_vehicles):
+                failures.append("govtribe_vendor_tracks_expired_search_vehicle")
             if "Department of Commerce US Patent and Trademark Office" in intel_record.get("keywords", []):
                 failures.append("govtribe_vendor_intel_buyers_not_keywords")
         intel_call_args = {name: args for name, args in intel_client.calls}
