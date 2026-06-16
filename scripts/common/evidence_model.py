@@ -381,9 +381,13 @@ def _recompete_clues_from_text(text: str, *, source_id: str, source_name: str) -
 
 def build_scan_official_evidence_model(record: dict[str, Any]) -> dict[str, Any]:
     text = " ".join([str(record.get("title") or ""), str(record.get("summary") or "")])
+    source_id = str(record.get("source_id") or "sam_contract_opportunities").strip() or "sam_contract_opportunities"
+    source_name = str(record.get("source_name") or "").strip()
+    if not source_name:
+        source_name = "SAM.gov Contract Opportunities" if source_id == "sam_contract_opportunities" else source_id
     model = empty_evidence_model(
-        source_id="sam_contract_opportunities",
-        source_name="SAM.gov Contract Opportunities",
+        source_id=source_id,
+        source_name=source_name,
     )
     set_aside = str(record.get("set_aside") or "").strip()
     vehicle_name = _vehicle_name_from_text(text)
@@ -397,9 +401,9 @@ def build_scan_official_evidence_model(record: dict[str, Any]) -> dict[str, Any]
             "confidence": "high" if set_aside or vehicle_name or contract_type else "unknown",
             "evidence": _dedupe_strings(
                 [
-                    *([f"SAM record set-aside: {set_aside}."] if set_aside else []),
-                    *([f"SAM notice text suggests vehicle path: {vehicle_name}."] if vehicle_name else []),
-                    *([f"SAM notice text suggests contract type: {contract_type}."] if contract_type else []),
+                    *([f"Opportunity record set-aside: {set_aside}."] if set_aside else []),
+                    *([f"Opportunity text suggests vehicle path: {vehicle_name}."] if vehicle_name else []),
+                    *([f"Opportunity text suggests contract type: {contract_type}."] if contract_type else []),
                 ]
             ),
         }
@@ -411,13 +415,13 @@ def build_scan_official_evidence_model(record: dict[str, Any]) -> dict[str, Any]
                 "amount": estimated_value,
                 "label": "Estimated value",
                 "confidence": "medium",
-                "evidence": [f"SAM record estimated value: {estimated_value}."],
+                "evidence": [f"Opportunity record estimated value: {estimated_value}."],
             }
         )
     model["recompete_clues"] = _recompete_clues_from_text(
         text,
-        source_id="sam_contract_opportunities",
-        source_name="SAM.gov Contract Opportunities",
+        source_id=source_id,
+        source_name=source_name,
     )
     model["next_questions"] = _dedupe_strings(
         [

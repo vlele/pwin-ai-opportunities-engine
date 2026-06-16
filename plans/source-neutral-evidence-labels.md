@@ -1,12 +1,13 @@
-# Source-Neutral Scan Evidence Labels Plan
+# Source-Neutral Scan Evidence Labels Implementation Plan
 
 ## Summary
 
-Fix issue #21 by making scan evidence metadata come from each retrieved record
-instead of always inventing a SAM.gov evidence source. GovTribe-retrieved scan
-records should keep `govtribe_mcp_commercial_intel` /
-`GovTribe MCP Commercial Intelligence` in merged evidence and use
-source-neutral evidence wording such as `Opportunity record set-aside`.
+Fix issue #21 in PR #35 by making scan evidence metadata come from each
+retrieved record instead of always inventing a SAM.gov evidence source.
+GovTribe-retrieved scan records should keep
+`govtribe_mcp_commercial_intel` / `GovTribe MCP Commercial Intelligence` in
+merged evidence and use source-neutral evidence wording such as
+`Opportunity record set-aside`.
 
 ## Implementation Notes
 
@@ -24,6 +25,8 @@ source-neutral evidence wording such as `Opportunity record set-aside`.
 - Do not change capture evidence behavior; `build_capture_official_evidence_model`
   can keep `Official solicitation package` because issue #21 is only about scan
   retrieval records.
+- Commit this plan artifact together with the implementation and regression
+  coverage so PR #35 is the actual fix, not a plan-only PR.
 
 ## Test Commands
 
@@ -43,6 +46,8 @@ git diff --check
 - GovTribe scan evidence strings do not include `SAM record` or `SAM notice`.
 - Set-aside evidence uses `Opportunity record set-aside`.
 - No persisted schema, CLI contract, or public API changes are required.
+- PR #35 is updated to describe the implementation and can close issue #21 on
+  merge.
 
 ## References
 
