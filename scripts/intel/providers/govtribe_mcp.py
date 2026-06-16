@@ -517,6 +517,12 @@ def _scan_retrieval_due_date_range(preferences: dict[str, Any]) -> tuple[str, st
     )
 
 
+def _scan_retrieval_sort(search_mode: str) -> dict[str, str]:
+    if str(search_mode or "").strip().lower() == "semantic":
+        return {"key": "_score", "direction": "desc"}
+    return {"key": "dueDate", "direction": "asc"}
+
+
 def _scan_record_brief(record: dict[str, Any], hydrated_text: str) -> dict[str, Any]:
     return {
         "title": str(record.get("title") or "").strip(),
@@ -1135,18 +1141,22 @@ class GovTribeMCPCommercialIntelProvider:
 
             normalized: dict[str, dict[str, Any]] = {}
             tool_names: list[str] = []
+            semantic_expansion_attempted = False
             for query, search_mode in queries:
+                normalized_search_mode = _search_mode_for_query(query, search_mode)
+                if normalized_search_mode == "semantic":
+                    semantic_expansion_attempted = True
                 found, tool_name = _call_search(
                     client,
                     tool=tool,
                     query=query,
                     naics_codes=queried_naics,
                     limit=limit,
-                    search_mode=search_mode,
+                    search_mode=normalized_search_mode,
                     due_date_from=due_date_from,
                     due_date_to=due_date_to,
                     opportunity_states=["Posted", "Updated"],
-                    sort={"key": "dueDate", "direction": "asc"},
+                    sort=_scan_retrieval_sort(normalized_search_mode),
                 )
                 tool_names.append(tool_name)
                 for item in found:
@@ -1155,7 +1165,7 @@ class GovTribeMCPCommercialIntelProvider:
                         source_config=self.source_config,
                         query=query,
                         queried_naics=queried_naics,
-                        search_mode=search_mode,
+                        search_mode=normalized_search_mode,
                         tool_name=tool_name,
                         default_url=default_url,
                     )
@@ -1191,15 +1201,19 @@ class GovTribeMCPCommercialIntelProvider:
             }
 
         records = list(normalized.values())
+        notes = [
+            *([f"GovTribe MCP tools used: {', '.join(dedupe_strings(tool_names))}"] if tool_names else []),
+            f"GovTribe scan due-date filter: {due_date_from} to {due_date_to}.",
+        ]
+        if semantic_expansion_attempted:
+            notes.append(
+                "GovTribe semantic expansion ran after keyword/structured-filter retrieval returned no records, "
+                "with active-state and due-date filters retained."
+            )
         return {
             "status": "ok" if records else "no_match",
             "records": records,
-            "notes": dedupe_strings(
-                [
-                    *([f"GovTribe MCP tools used: {', '.join(dedupe_strings(tool_names))}"] if tool_names else []),
-                    f"GovTribe scan due-date filter: {due_date_from} to {due_date_to}.",
-                ]
-            ),
+            "notes": dedupe_strings(notes),
             "queried_naics": queried_naics,
             "tool_name": ", ".join(dedupe_strings(tool_names)),
         }

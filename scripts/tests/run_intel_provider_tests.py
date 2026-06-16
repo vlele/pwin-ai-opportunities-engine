@@ -135,29 +135,37 @@ class FakeGovTribeClient:
             }
         ]
 
+    def records(self) -> list[dict[str, object]]:
+        return [
+            {
+                "id": "gt-123",
+                "title": "IRS Case Management Modernization",
+                "solicitation_number": "IRS-2026-001",
+                "url": "https://govtribe.com/opportunity/gt-123",
+                "summary": "GovTribe opportunity record with incumbent and vehicle clues.",
+                "posted_date": "2026-06-01",
+                "due_date": "2026-07-15",
+                "federal_agency": {"name": "Internal Revenue Service"},
+                "naics_category": {"code": "541512", "name": "Computer Systems Design Services"},
+                "set_aside_type": "Total Small Business Set-Aside",
+                "incumbent_name": "Alpha Systems",
+                "vehicle_name": "CIO-SP3",
+                "award_amount": "$24,500,000",
+            }
+        ]
+
     def call_tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
         self.calls.append((name, arguments or {}))
-        return {
-            "structuredContent": {
-                "records": [
-                    {
-                        "id": "gt-123",
-                        "title": "IRS Case Management Modernization",
-                        "solicitation_number": "IRS-2026-001",
-                        "url": "https://govtribe.com/opportunity/gt-123",
-                        "summary": "GovTribe opportunity record with incumbent and vehicle clues.",
-                        "posted_date": "2026-06-01",
-                        "due_date": "2026-07-15",
-                        "federal_agency": {"name": "Internal Revenue Service"},
-                        "naics_category": {"code": "541512", "name": "Computer Systems Design Services"},
-                        "set_aside_type": "Total Small Business Set-Aside",
-                        "incumbent_name": "Alpha Systems",
-                        "vehicle_name": "CIO-SP3",
-                        "award_amount": "$24,500,000",
-                    }
-                ]
-            }
-        }
+        return {"structuredContent": {"records": self.records()}}
+
+
+class FakeGovTribeSemanticFallbackClient(FakeGovTribeClient):
+    def call_tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+        args = arguments or {}
+        self.calls.append((name, args))
+        if args.get("search_mode") == "keyword":
+            return {"structuredContent": {"records": []}}
+        return {"structuredContent": {"records": self.records()}}
 
 
 def _header_map(request: object) -> dict[str, str]:
@@ -375,6 +383,51 @@ def main() -> int:
             failures.append("govtribe_retrieval_naics_filter")
         if "fields_to_return" not in retrieval_call_args:
             failures.append("govtribe_retrieval_fields_to_return")
+
+        semantic_client = FakeGovTribeSemanticFallbackClient()
+        semantic_provider = GovTribeMCPCommercialIntelProvider(
+            {
+                "id": "govtribe_mcp_commercial_intel",
+                "name": "GovTribe MCP Commercial Intelligence",
+                "homepage": "https://govtribe.com/mcp",
+            },
+            client=semantic_client,  # type: ignore[arg-type]
+        )
+        semantic_retrieval = semantic_provider.search_scan_opportunities(
+            vendor_profile={
+                "company": {"name": "Acme Federal", "summary": "Cloud modernization for civilian agencies."},
+                "core_competencies": ["case management modernization", "data analytics"],
+                "fit_narrative": "Prioritize case management modernization and cloud delivery.",
+                "naics": {"confirmed": ["541512"], "candidates": ["541519"]},
+            },
+            preferences={"soft_preferences": {"positive_keywords": ["taxpayer services"], "preferred_naics": ["541611"]}},
+        )
+        if semantic_retrieval.get("status") != "ok" or not semantic_retrieval.get("records"):
+            failures.append("govtribe_semantic_retrieval_status")
+        if len(semantic_client.calls) != 2:
+            failures.append("govtribe_semantic_retrieval_two_pass")
+        keyword_args = semantic_client.calls[0][1] if semantic_client.calls else {}
+        semantic_args = semantic_client.calls[1][1] if len(semantic_client.calls) > 1 else {}
+        if keyword_args.get("search_mode") != "keyword":
+            failures.append("govtribe_semantic_retrieval_keyword_first")
+        if keyword_args.get("sort") != {"key": "dueDate", "direction": "asc"}:
+            failures.append("govtribe_semantic_retrieval_keyword_due_date_sort")
+        if semantic_args.get("search_mode") != "semantic":
+            failures.append("govtribe_semantic_retrieval_mode")
+        if semantic_args.get("sort") != {"key": "_score", "direction": "desc"}:
+            failures.append("govtribe_semantic_retrieval_score_sort")
+        if semantic_args.get("due_date_range") != keyword_args.get("due_date_range"):
+            failures.append("govtribe_semantic_retrieval_due_date_preserved")
+        if semantic_args.get("opportunity_states") != keyword_args.get("opportunity_states"):
+            failures.append("govtribe_semantic_retrieval_states_preserved")
+        if semantic_args.get("naics_codes") != keyword_args.get("naics_codes"):
+            failures.append("govtribe_semantic_retrieval_naics_preserved")
+        semantic_records = semantic_retrieval.get("records", [])
+        if semantic_records and semantic_records[0].get("raw_match_evidence", {}).get("search_mode") != "semantic":
+            failures.append("govtribe_semantic_retrieval_evidence_mode")
+        semantic_notes = semantic_retrieval.get("notes", [])
+        if not any("semantic expansion ran after keyword" in str(note) for note in semantic_notes):
+            failures.append("govtribe_semantic_retrieval_note")
 
     output = {
         "status": "OK" if not failures else "FAILED",
