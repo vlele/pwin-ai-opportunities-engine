@@ -81,6 +81,24 @@ class FakeGovTribeClient:
                         "query": {"type": "string"},
                         "search_mode": {"type": "string", "enum": ["keyword", "semantic"]},
                         "per_page": {"type": "number"},
+                        "due_date_range": {
+                            "type": "object",
+                            "properties": {
+                                "from": {"type": ["string", "null"]},
+                                "to": {"type": ["string", "null"]},
+                            },
+                        },
+                        "opportunity_states": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": ["Posted", "Awarded", "Cancelled", "Updated"]},
+                        },
+                        "sort": {
+                            "type": "object",
+                            "properties": {
+                                "key": {"type": "string", "enum": ["postedDate", "dueDate", "awardDate", "_score"]},
+                                "direction": {"type": "string", "enum": ["asc", "desc"]},
+                            },
+                        },
                         "naics_codes": {"type": "array", "items": {"type": "string"}},
                         "solicitation_numbers": {"type": "array", "items": {"type": "string"}},
                         "fields_to_return": {
@@ -346,6 +364,13 @@ def main() -> int:
             failures.append("govtribe_retrieval_typed_tool")
         if retrieval_call_args.get("search_mode") != "keyword":
             failures.append("govtribe_retrieval_keyword_first")
+        due_date_range = retrieval_call_args.get("due_date_range")
+        if not isinstance(due_date_range, dict) or not due_date_range.get("from") or not due_date_range.get("to"):
+            failures.append("govtribe_retrieval_due_date_range")
+        if retrieval_call_args.get("opportunity_states") != ["Posted", "Updated"]:
+            failures.append("govtribe_retrieval_opportunity_states")
+        if retrieval_call_args.get("sort") != {"key": "dueDate", "direction": "asc"}:
+            failures.append("govtribe_retrieval_due_date_sort")
         if retrieval_call_args.get("naics_codes") != ["541512", "541519", "541611"]:
             failures.append("govtribe_retrieval_naics_filter")
         if "fields_to_return" not in retrieval_call_args:

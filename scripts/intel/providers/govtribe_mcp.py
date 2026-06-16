@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import date, timedelta
 from typing import Any
 
-from common.paths import utc_now_iso
+from common.paths import today_local_str, utc_now_iso
 from common.evidence_model import (
     evidence_model_competitive_notes,
     evidence_model_next_questions,
@@ -290,6 +291,15 @@ def _is_array_prop(spec: Any) -> bool:
     return prop_type == "array"
 
 
+def _is_object_prop(spec: Any) -> bool:
+    if not isinstance(spec, dict):
+        return False
+    prop_type = spec.get("type")
+    if isinstance(prop_type, list):
+        return "object" in prop_type
+    return prop_type == "object"
+
+
 def _enum_values(spec: Any) -> list[str]:
     if not isinstance(spec, dict):
         return []
@@ -338,6 +348,10 @@ def _tool_arguments(
     buyer: str = "",
     limit: int = 3,
     search_mode: str = "keyword",
+    due_date_from: str = "",
+    due_date_to: str = "",
+    opportunity_states: list[str] | None = None,
+    sort: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     properties = _schema_properties(tool)
     if not properties:
@@ -347,6 +361,15 @@ def _tool_arguments(
     string_fallbacks: list[str] = []
     for name, spec in properties.items():
         key = _normalize_key(name)
+        if _is_object_prop(spec):
+            if key == "due date range" and (due_date_from or due_date_to):
+                args[name] = {
+                    "from": due_date_from or None,
+                    "to": due_date_to or None,
+                }
+            elif key == "sort" and sort:
+                args[name] = sort
+            continue
         if _is_integer_prop(spec) and key in {"limit", "size", "page size", "per page", "max results"}:
             args[name] = limit
             continue
@@ -359,6 +382,8 @@ def _tool_arguments(
                 args[name] = [solicitation_number]
             elif key in {"naics", "naics codes", "naics code", "ncode", "ncodes"} and naics_codes:
                 args[name] = naics_codes
+            elif key in {"opportunity states", "opportunity state"} and opportunity_states:
+                args[name] = opportunity_states
             continue
         if not _is_string_prop(spec):
             continue
@@ -473,6 +498,23 @@ def _scan_retrieval_queries(vendor_profile: dict[str, Any], preferences: dict[st
             (semantic_query, "semantic"),
         ]
     return [(vendor_name, "keyword")] if vendor_name != "Vendor" else []
+
+
+def _scan_retrieval_due_date_range(preferences: dict[str, Any]) -> tuple[str, str]:
+    time_horizon = preferences.get("time_horizon", {}) if isinstance(preferences.get("time_horizon"), dict) else {}
+    try:
+        min_days = max(int(time_horizon.get("retrieval_min_days_from_today", 0) or 0), 0)
+    except (TypeError, ValueError):
+        min_days = 0
+    try:
+        max_days = max(int(time_horizon.get("retrieval_max_days_from_today", 120) or 120), min_days)
+    except (TypeError, ValueError):
+        max_days = 120
+    today = date.fromisoformat(today_local_str())
+    return (
+        (today + timedelta(days=min_days)).isoformat(),
+        (today + timedelta(days=max_days)).isoformat(),
+    )
 
 
 def _scan_record_brief(record: dict[str, Any], hydrated_text: str) -> dict[str, Any]:
@@ -697,6 +739,10 @@ def _call_search(
     buyer: str = "",
     limit: int = 3,
     search_mode: str = "keyword",
+    due_date_from: str = "",
+    due_date_to: str = "",
+    opportunity_states: list[str] | None = None,
+    sort: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], str]:
     args = _tool_arguments(
         tool,
@@ -707,6 +753,10 @@ def _call_search(
         buyer=buyer,
         limit=limit,
         search_mode=search_mode,
+        due_date_from=due_date_from,
+        due_date_to=due_date_to,
+        opportunity_states=opportunity_states,
+        sort=sort,
     )
     result = client.call_tool(_tool_name(tool), args)
     return _tool_result_records(result), _tool_name(tool)
@@ -1060,6 +1110,7 @@ class GovTribeMCPCommercialIntelProvider:
         default_url = str(self.source_config.get("homepage") or govtribe_mcp_url()).strip()
         queried_naics = _vendor_retrieval_naics(vendor_profile, preferences)
         queries = _scan_retrieval_queries(vendor_profile, preferences)
+        due_date_from, due_date_to = _scan_retrieval_due_date_range(preferences)
         if not queries and not queried_naics:
             return {
                 "status": "no_match",
@@ -1092,6 +1143,10 @@ class GovTribeMCPCommercialIntelProvider:
                     naics_codes=queried_naics,
                     limit=limit,
                     search_mode=search_mode,
+                    due_date_from=due_date_from,
+                    due_date_to=due_date_to,
+                    opportunity_states=["Posted", "Updated"],
+                    sort={"key": "dueDate", "direction": "asc"},
                 )
                 tool_names.append(tool_name)
                 for item in found:
@@ -1139,7 +1194,12 @@ class GovTribeMCPCommercialIntelProvider:
         return {
             "status": "ok" if records else "no_match",
             "records": records,
-            "notes": [f"GovTribe MCP tools used: {', '.join(dedupe_strings(tool_names))}"] if tool_names else [],
+            "notes": dedupe_strings(
+                [
+                    *([f"GovTribe MCP tools used: {', '.join(dedupe_strings(tool_names))}"] if tool_names else []),
+                    f"GovTribe scan due-date filter: {due_date_from} to {due_date_to}.",
+                ]
+            ),
             "queried_naics": queried_naics,
             "tool_name": ", ".join(dedupe_strings(tool_names)),
         }
