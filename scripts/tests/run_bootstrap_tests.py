@@ -231,6 +231,8 @@ def main() -> int:
         assert "cybersecurity" in govtribe_vendor_profile["core_competencies"], govtribe_vendor_profile
         assert "cloud modernization" in govtribe_vendor_profile["core_competencies"], govtribe_vendor_profile
         assert "Self Certified Small Disadvantaged Business" in govtribe_vendor_profile["commercial_constraints"]["certifications"], govtribe_vendor_profile
+        for generic_certification in ("For Profit Organization", "Business or Organization", "Limited Liability Company"):
+            assert generic_certification not in govtribe_vendor_profile["commercial_constraints"]["certifications"], govtribe_vendor_profile
         assert "Self Certified Small Disadvantaged Business" not in govtribe_vendor_profile["core_competencies"], govtribe_vendor_profile
         assert "GSA MAS" in govtribe_vendor_profile["contract_vehicles"], govtribe_vendor_profile
         assert "True" not in govtribe_vendor_profile["contract_vehicles"], govtribe_vendor_profile
@@ -239,6 +241,7 @@ def main() -> int:
         noisy_payload = json.dumps(
             {
                 "keywords": govtribe_vendor_profile.get("other_taxonomy_tags", {}).get("keywords", []),
+                "certifications": govtribe_vendor_profile.get("commercial_constraints", {}).get("certifications", []),
                 "positive_keywords": govtribe_preferences.get("soft_preferences", {}).get("positive_keywords", []),
                 "preferred_contract_vehicles": govtribe_preferences.get("soft_preferences", {}).get("preferred_contract_vehicles", []),
                 "starter": govtribe_starter,
@@ -247,6 +250,12 @@ def main() -> int:
         for bad_value in ("True", "For Profit Organization", "Business or Organization", "Limited Liability Company"):
             assert bad_value not in noisy_payload, noisy_payload
         assert "519290 - Web Search Portals and All Other Information Services" in govtribe_starter, govtribe_starter
+        assert "GovTribe vendor: https://govtribe.com/vendors/halvik-corp-5grr4" in govtribe_starter, govtribe_starter
+        assert "GSA MAS" in govtribe_starter, govtribe_starter
+        assert "Company URL: https://govtribe.com/vendors/halvik-corp-5grr4" not in govtribe_starter, govtribe_starter
+        assert "User-supplied NAICS: None provided" in govtribe_starter, govtribe_starter
+        assert "User-supplied NAICS: 519290" not in govtribe_starter, govtribe_starter
+        assert "GovTribe-derived facts remain provisional until the user confirms them." in govtribe_starter, govtribe_starter
         assert "GovTribe subscription-derived facts" in govtribe_starter, govtribe_starter
         assert "GovTribe subscription-derived facts" in govtribe_memory, govtribe_memory
         assert "GOVTRIBE_MCP_API_KEY" not in govtribe_payload, govtribe_payload

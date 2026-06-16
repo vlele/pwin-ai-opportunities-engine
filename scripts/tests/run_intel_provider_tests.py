@@ -186,7 +186,10 @@ class FakeGovTribeVendorClient:
                     {"name": "Web Search Portals and All Other Information Services"},
                     {"code": "541512", "name": "Computer Systems Design Services"},
                 ],
-                "awarded_federal_contract_vehicle": [{"name": "GSA MAS", "value": True}],
+                "awarded_federal_contract_vehicle": [
+                    {"name": "GSA MAS", "value": True, "last_date_to_order": "2120-06-01"},
+                    {"name": "Expired Vendor Vehicle", "last_date_to_order": "2020-01-01"},
+                ],
                 "federal_contract_awards": [
                     {
                         "name": "VA Modernization Support",
@@ -250,6 +253,150 @@ class FakeGovTribeVendorClient:
 
     def call_tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
         self.calls.append((name, arguments or {}))
+        return {"structuredContent": {"records": self._records}}
+
+
+class FakeGovTribeVendorIntelClient(FakeGovTribeVendorClient):
+    def list_tools(self) -> list[dict[str, object]]:
+        return [
+            *super().list_tools(),
+            {
+                "name": "Search_Federal_Contract_Awards",
+                "description": "Searches GovTribe federal contract awards and returns award records with funding details.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "search_mode": {"type": "string", "enum": ["keyword", "semantic"]},
+                        "per_page": {"type": "number"},
+                        "page": {"type": "number"},
+                        "vendor_ids": {"type": "array", "items": {"type": "string"}},
+                        "aggregations": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "top_contracting_federal_agencies_by_dollars_obligated",
+                                    "top_funding_federal_agencies_by_dollars_obligated",
+                                    "top_federal_contract_vehicles_by_dollars_obligated",
+                                ],
+                            },
+                        },
+                    },
+                    "required": [],
+                },
+            },
+            {
+                "name": "Search_Federal_Contract_Vehicles",
+                "description": "Search federal contract vehicles, IDIQs, GWACs, and schedules.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "search_mode": {"type": "string", "enum": ["keyword", "semantic"]},
+                        "per_page": {"type": "number"},
+                        "page": {"type": "number"},
+                        "vendor_ids": {"type": "array", "items": {"type": "string"}},
+                        "fields_to_return": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "govtribe_id",
+                                    "govtribe_url",
+                                    "name",
+                                    "contract_type",
+                                    "last_date_to_order",
+                                    "federal_agency",
+                                    "federal_contract_awards",
+                                ],
+                            },
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        ]
+
+    def call_tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+        self.calls.append((name, arguments or {}))
+        if name == "Search_Federal_Contract_Awards":
+            return {
+                "structuredContent": {
+                    "total": 224,
+                    "aggregations": {
+                        "top_contracting_federal_agencies_by_dollars_obligated": {
+                            "buckets": [
+                                {
+                                    "key": {
+                                        "name": "Department of Commerce US Patent and Trademark Office",
+                                        "u_r_l": "https://govtribe.com/agency/federal-agency/uspto",
+                                    },
+                                    "doc_count": 21,
+                                    "sum_value": {"value": 158696956.75},
+                                }
+                            ]
+                        },
+                        "top_funding_federal_agencies_by_dollars_obligated": {
+                            "buckets": [
+                                {
+                                    "key": {
+                                        "name": "National Aeronautics and Space Administration",
+                                        "u_r_l": "https://govtribe.com/agency/federal-agency/nasa",
+                                    },
+                                    "doc_count": 1,
+                                    "sum_value": {"value": 114250000},
+                                }
+                            ]
+                        },
+                        "top_federal_contract_vehicles_by_dollars_obligated": {
+                            "buckets": [
+                                {
+                                    "key": {
+                                        "gov_tribe_i_d": "GWAC-OLD",
+                                        "name": "Expired Legacy GWAC",
+                                        "last_date_to_order": "Jan 1, 2020",
+                                        "u_r_l": "https://govtribe.com/award/federal-vehicle/expired-legacy-gwac",
+                                    },
+                                    "doc_count": 80,
+                                    "sum_value": {"value": 265948759.67},
+                                },
+                                {
+                                    "key": {
+                                        "gov_tribe_i_d": "FSS-MAS",
+                                        "name": "Multiple Award Schedule",
+                                        "last_date_to_order": "Jun 1, 2120",
+                                        "u_r_l": "https://govtribe.com/award/federal-vehicle/multiple-award-schedule-mas",
+                                    },
+                                    "doc_count": 50,
+                                    "sum_value": {"value": 165948759.67},
+                                }
+                            ]
+                        },
+                    },
+                }
+            }
+        if name == "Search_Federal_Contract_Vehicles":
+            return {
+                "structuredContent": {
+                    "data": [
+                        {
+                            "govtribe_id": "GWAC-STARS-II",
+                            "govtribe_url": "https://govtribe.com/award/federal-vehicle/8a-streamlined-technology-acquisition-resources-for-services-8a-stars-ii",
+                            "name": "8a Streamlined Technology Acquisition Resources for Services",
+                            "contract_type": "Master GWAC",
+                            "last_date_to_order": "2021-08-30T04:00:00Z",
+                        },
+                        {
+                            "govtribe_id": "GWAC-8ASTARS3",
+                            "govtribe_url": "https://govtribe.com/award/federal-vehicle/8a-stars-iii-stars-iii",
+                            "name": "8(a) STARS III",
+                            "contract_type": "Master GWAC",
+                            "last_date_to_order": "2120-07-02T04:00:00Z",
+                        }
+                    ]
+                }
+            }
         return {"structuredContent": {"records": self._records}}
 
 
@@ -485,6 +632,8 @@ def main() -> int:
             failures.append("govtribe_vendor_certifications_normalized")
         if isinstance(vendor_record, dict) and "GSA MAS" not in vendor_record.get("contract_vehicles", []):
             failures.append("govtribe_vendor_vehicle_normalized")
+        if isinstance(vendor_record, dict) and "Expired Vendor Vehicle" in vendor_record.get("contract_vehicles", []):
+            failures.append("govtribe_vendor_filters_expired_lookup_vehicle")
         vendor_payload = json.dumps(vendor_record)
         if "True" in vendor_payload or "For Profit Organization" in vendor_record.get("keywords", []):
             failures.append("govtribe_vendor_filters_generic_matching_values")
@@ -540,6 +689,50 @@ def main() -> int:
         no_match_vendor = no_match_provider.resolve_vendor_profile(lookup="Missing Vendor")
         if no_match_vendor.get("status") != "no_match":
             failures.append("govtribe_vendor_no_match_status")
+
+        intel_client = FakeGovTribeVendorIntelClient()
+        intel_provider = GovTribeMCPCommercialIntelProvider(
+            {
+                "id": "govtribe_mcp_commercial_intel",
+                "name": "GovTribe MCP Commercial Intelligence",
+                "homepage": "https://govtribe.com/mcp",
+            },
+            client=intel_client,  # type: ignore[arg-type]
+        )
+        intel_result = intel_provider.resolve_vendor_profile(lookup="ABC123DEF456")
+        intel_record = intel_result.get("vendor_record", {})
+        if intel_result.get("status") != "ok" or not isinstance(intel_record, dict):
+            failures.append("govtribe_vendor_intel_status")
+        else:
+            intel_buyers = intel_record.get("buyers", [])
+            if "Department of Commerce US Patent and Trademark Office" not in intel_buyers:
+                failures.append("govtribe_vendor_award_aggregation_contracting_buyer")
+            if "National Aeronautics and Space Administration" not in intel_buyers:
+                failures.append("govtribe_vendor_award_aggregation_funding_buyer")
+            intel_vehicles = intel_record.get("contract_vehicles", [])
+            if "Multiple Award Schedule" not in intel_vehicles:
+                failures.append("govtribe_vendor_award_aggregation_vehicle")
+            if "8(a) STARS III" not in intel_vehicles:
+                failures.append("govtribe_vendor_vehicle_search")
+            if "Expired Legacy GWAC" in intel_vehicles:
+                failures.append("govtribe_vendor_award_aggregation_filters_expired_vehicle")
+            if "8a Streamlined Technology Acquisition Resources for Services" in intel_vehicles:
+                failures.append("govtribe_vendor_vehicle_search_filters_expired_vehicle")
+            if "Department of Commerce US Patent and Trademark Office" in intel_record.get("keywords", []):
+                failures.append("govtribe_vendor_intel_buyers_not_keywords")
+        intel_call_args = {name: args for name, args in intel_client.calls}
+        award_args = intel_call_args.get("Search_Federal_Contract_Awards", {})
+        vehicle_args = intel_call_args.get("Search_Federal_Contract_Vehicles", {})
+        if award_args.get("vendor_ids") != ["ABC123DEF456", "vendor-123"]:
+            failures.append("govtribe_vendor_award_aggregation_vendor_filter")
+        if award_args.get("per_page") != 0:
+            failures.append("govtribe_vendor_award_aggregation_per_page_zero")
+        if "top_contracting_federal_agencies_by_dollars_obligated" not in award_args.get("aggregations", []):
+            failures.append("govtribe_vendor_award_aggregation_requested_buyers")
+        if vehicle_args.get("vendor_ids") != ["ABC123DEF456", "vendor-123"]:
+            failures.append("govtribe_vendor_vehicle_vendor_filter")
+        if vehicle_args.get("per_page") != 15:
+            failures.append("govtribe_vendor_vehicle_per_page")
 
     with patch.dict(os.environ, {"GOVTRIBE_MCP_API_KEY": "test-key"}, clear=True):
         fake_client = FakeGovTribeClient()
