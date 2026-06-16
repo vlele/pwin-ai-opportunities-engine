@@ -88,6 +88,70 @@ LOW_INFO_RISK_FLAGS = {
     "incumbent_continuity_risk",
 }
 
+EXPLICIT_SEMANTIC_FACET_MARKERS: dict[str, tuple[str, ...]] = {
+    "reseller_hardware_equipment_buy": (
+        "reseller hardware",
+        "reseller equipment",
+        "hardware reseller",
+        "equipment reseller",
+        "hardware buy",
+        "hardware buys",
+        "equipment buy",
+        "equipment buys",
+        "hardware purchase",
+        "equipment purchase",
+        "hardware procurement",
+        "equipment procurement",
+    ),
+    "commodity_support": (
+        "commodity support",
+        "commodity work",
+        "commodity like support",
+        "commodity-like support",
+    ),
+    "operations_maintenance": (
+        "operations and maintenance",
+        "operation and maintenance",
+        "o and m",
+        "o m",
+    ),
+    "cots_sustainment": (
+        "cots sustainment",
+        "annual support",
+        "license support",
+        "software maintenance",
+    ),
+}
+
+NEGATIVE_FEEDBACK_SCOPE_MARKERS = (
+    "dislike",
+    "less like",
+    "wrong",
+    "bad",
+    "poor fit",
+    "not a fit",
+    "not our lane",
+    "outside our lane",
+    "not our work",
+    "outside our scope",
+    "do not do",
+    "don t do",
+    "we do not do",
+    "we don t do",
+    "avoid",
+)
+
+POSITIVE_FEEDBACK_SCOPE_MARKERS = (
+    "like",
+    "more like",
+    "right",
+    "good fit",
+    "right work",
+    "our lane",
+    "prefer",
+    "pursue",
+)
+
 
 def _normalized_text(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
@@ -120,6 +184,215 @@ def _collect_marker_hits(text: str, markers: dict[str, tuple[str, ...]]) -> list
         if any(_has_marker(text, option) for option in options):
             hits.append(label)
     return hits
+
+
+def _collect_explicit_marker_hits(text: str, markers: dict[str, tuple[str, ...]]) -> list[str]:
+    hits: list[str] = []
+    for label, options in markers.items():
+        if _has_marker(text, label.replace("_", " ")) or any(_has_marker(text, option) for option in options):
+            hits.append(label)
+    return hits
+
+
+def _has_negative_feedback_scope(text: str) -> bool:
+    return any(_has_marker(text, marker) for marker in NEGATIVE_FEEDBACK_SCOPE_MARKERS)
+
+
+def _has_positive_feedback_scope(text: str) -> bool:
+    return any(_has_marker(text, marker) for marker in POSITIVE_FEEDBACK_SCOPE_MARKERS)
+
+
+def _has_reseller_hardware_equipment_buy(text: str) -> bool:
+    if any(_has_marker(text, marker) for marker in EXPLICIT_SEMANTIC_FACET_MARKERS["reseller_hardware_equipment_buy"]):
+        return True
+    return _has_marker(text, "reseller") and any(
+        _has_marker(text, marker)
+        for marker in (
+            "hardware",
+            "equipment",
+            "product buy",
+            "product buys",
+            "product purchase",
+            "commodity buy",
+            "commodity buys",
+        )
+    )
+
+
+def _explicit_feedback_targets(user_text: str, reward: int) -> dict[str, list[str]]:
+    text = _normalized_text(user_text)
+    targets = {
+        "accepted_facets": [],
+        "rejected_facets": [],
+        "accepted_mission_domains": [],
+        "rejected_mission_domains": [],
+        "accepted_delivery_models": [],
+        "rejected_delivery_models": [],
+        "accepted_postures": [],
+        "rejected_postures": [],
+    }
+    if reward == 0:
+        return targets
+
+    is_negative = reward < 0 and _has_negative_feedback_scope(text)
+    is_positive = reward > 0 and _has_positive_feedback_scope(text)
+    if not (is_negative or is_positive):
+        return targets
+
+    explicit_facets = _collect_explicit_marker_hits(text, EXPLICIT_SEMANTIC_FACET_MARKERS)
+    if _has_reseller_hardware_equipment_buy(text) and "reseller_hardware_equipment_buy" not in explicit_facets:
+        explicit_facets.append("reseller_hardware_equipment_buy")
+    explicit_mission_domains = _collect_explicit_marker_hits(text, MISSION_DOMAIN_MARKERS)
+    explicit_delivery_models = _collect_explicit_marker_hits(text, DELIVERY_MODEL_MARKERS)
+
+    if is_negative:
+        targets["rejected_facets"] = explicit_facets
+        targets["rejected_mission_domains"] = explicit_mission_domains
+        targets["rejected_delivery_models"] = explicit_delivery_models
+    elif is_positive:
+        targets["accepted_facets"] = explicit_facets
+        targets["accepted_mission_domains"] = explicit_mission_domains
+        targets["accepted_delivery_models"] = explicit_delivery_models
+    return {key: _dedupe_strings(value) for key, value in targets.items()}
+
+
+def _has_explicit_targets(targets: dict[str, list[str]]) -> bool:
+    return any(bool(values) for values in targets.values())
+
+
+def _mentions_learning_dimension(text: str, dimension: str) -> bool:
+    markers = {
+        "mission_domains": ("mission", "mission domain", "domain"),
+        "delivery_models": ("delivery", "delivery model", "work model"),
+        "semantic_facets": ("work", "work pattern", "pattern", "facet"),
+        "teaming_postures": ("teaming", "prime", "subcontract", "subcontracting", "sub only"),
+    }
+    return any(_has_marker(text, marker) for marker in markers.get(dimension, ()))
+
+
+def _set_interpretation_lists(
+    interpretation: FeedbackInterpretation,
+    *,
+    accepted_facets: list[str] | None = None,
+    rejected_facets: list[str] | None = None,
+    accepted_mission_domains: list[str] | None = None,
+    rejected_mission_domains: list[str] | None = None,
+    accepted_delivery_models: list[str] | None = None,
+    rejected_delivery_models: list[str] | None = None,
+    accepted_postures: list[str] | None = None,
+    rejected_postures: list[str] | None = None,
+) -> None:
+    if accepted_facets is not None:
+        interpretation["accepted_facets"] = _dedupe_strings(accepted_facets)
+    if rejected_facets is not None:
+        interpretation["rejected_facets"] = _dedupe_strings(rejected_facets)
+    if accepted_mission_domains is not None:
+        interpretation["accepted_mission_domains"] = _dedupe_strings(accepted_mission_domains)
+    if rejected_mission_domains is not None:
+        interpretation["rejected_mission_domains"] = _dedupe_strings(rejected_mission_domains)
+    if accepted_delivery_models is not None:
+        interpretation["accepted_delivery_models"] = _dedupe_strings(accepted_delivery_models)
+    if rejected_delivery_models is not None:
+        interpretation["rejected_delivery_models"] = _dedupe_strings(rejected_delivery_models)
+    if accepted_postures is not None:
+        interpretation["accepted_postures"] = _dedupe_strings(accepted_postures)
+    if rejected_postures is not None:
+        interpretation["rejected_postures"] = _dedupe_strings(rejected_postures)
+
+
+def _constrain_feedback_learning_targets(
+    *,
+    user_text: str,
+    reward: int,
+    payload: SemanticFeedbackPayload,
+) -> SemanticFeedbackPayload:
+    interpretation = dict(payload["feedback_interpretation"])
+    text = _normalized_text(user_text)
+    explicit_targets = _explicit_feedback_targets(user_text, reward)
+
+    if reward < 0 and _has_explicit_targets(explicit_targets):
+        _set_interpretation_lists(
+            interpretation,  # type: ignore[arg-type]
+            accepted_facets=[],
+            rejected_facets=explicit_targets["rejected_facets"],
+            accepted_mission_domains=[],
+            rejected_mission_domains=explicit_targets["rejected_mission_domains"],
+            accepted_delivery_models=[],
+            rejected_delivery_models=explicit_targets["rejected_delivery_models"],
+            accepted_postures=[],
+            rejected_postures=explicit_targets["rejected_postures"],
+        )
+        if explicit_targets["rejected_mission_domains"]:
+            interpretation["primary_reason"] = "wrong_mission_domain"
+        elif explicit_targets["rejected_delivery_models"]:
+            interpretation["primary_reason"] = "wrong_delivery_model"
+        elif explicit_targets["rejected_facets"]:
+            interpretation["primary_reason"] = "commodity_support_work"
+        interpretation["reason_confidence"] = "high"
+        interpretation["generalizable"] = True
+        if explicit_targets["rejected_facets"]:
+            interpretation["reasoning"] = [
+                "Negative feedback explicitly names the rejected work pattern."
+            ]
+        elif explicit_targets["rejected_mission_domains"] or explicit_targets["rejected_delivery_models"]:
+            interpretation["reasoning"] = [
+                "Negative feedback explicitly names the rejected semantic dimension."
+            ]
+    elif reward > 0 and _has_explicit_targets(explicit_targets):
+        _set_interpretation_lists(
+            interpretation,  # type: ignore[arg-type]
+            accepted_facets=explicit_targets["accepted_facets"],
+            rejected_facets=[],
+            accepted_mission_domains=explicit_targets["accepted_mission_domains"],
+            rejected_mission_domains=[],
+            accepted_delivery_models=explicit_targets["accepted_delivery_models"],
+            rejected_delivery_models=[],
+            accepted_postures=explicit_targets["accepted_postures"],
+            rejected_postures=[],
+        )
+        interpretation["reason_confidence"] = "high"
+        interpretation["generalizable"] = True
+    elif reward < 0 and interpretation.get("reason_confidence") != "high":
+        if not (
+            interpretation.get("primary_reason") == "wrong_mission_domain"
+            and _mentions_learning_dimension(text, "mission_domains")
+        ):
+            interpretation["rejected_mission_domains"] = []
+        if not (
+            interpretation.get("primary_reason") == "wrong_delivery_model"
+            and _mentions_learning_dimension(text, "delivery_models")
+        ):
+            interpretation["rejected_delivery_models"] = []
+        if not _mentions_learning_dimension(text, "semantic_facets"):
+            interpretation["rejected_facets"] = []
+        if not _mentions_learning_dimension(text, "teaming_postures"):
+            interpretation["rejected_postures"] = []
+
+    interpretation["accepted_facets"] = _dedupe_strings(interpretation.get("accepted_facets", []))
+    interpretation["rejected_facets"] = _dedupe_strings(interpretation.get("rejected_facets", []))
+    interpretation["accepted_postures"] = _dedupe_strings(interpretation.get("accepted_postures", []))
+    interpretation["rejected_postures"] = _dedupe_strings(interpretation.get("rejected_postures", []))
+    interpretation["accepted_mission_domains"] = _dedupe_strings(interpretation.get("accepted_mission_domains", []))
+    interpretation["rejected_mission_domains"] = _dedupe_strings(interpretation.get("rejected_mission_domains", []))
+    interpretation["accepted_delivery_models"] = _dedupe_strings(interpretation.get("accepted_delivery_models", []))
+    interpretation["rejected_delivery_models"] = _dedupe_strings(interpretation.get("rejected_delivery_models", []))
+    interpretation["generalizable"] = bool(
+        interpretation.get("generalizable")
+        and (
+            interpretation["accepted_facets"]
+            or interpretation["rejected_facets"]
+            or interpretation["accepted_postures"]
+            or interpretation["rejected_postures"]
+            or interpretation["accepted_mission_domains"]
+            or interpretation["rejected_mission_domains"]
+            or interpretation["accepted_delivery_models"]
+            or interpretation["rejected_delivery_models"]
+        )
+    )
+
+    constrained = dict(payload)
+    constrained["feedback_interpretation"] = interpretation  # type: ignore[typeddict-item]
+    return constrained  # type: ignore[return-value]
 
 
 def _first_quote_for_markers(text: str, markers: tuple[str, ...]) -> str:
@@ -392,6 +665,8 @@ def _extract_semantic_entities(record: dict[str, Any], hydrated_text: str) -> tu
         entities["semantic_negative_facets"].append("commodity_support")
     if "operations_maintenance" in technical_motions:
         entities["semantic_negative_facets"].append("operations_maintenance")
+    if _has_reseller_hardware_equipment_buy(text):
+        entities["semantic_negative_facets"].append("reseller_hardware_equipment_buy")
     if "migration" in technical_motions or "platform_modernization" in technical_motions:
         entities["semantic_positive_facets"].append("platform_modernization")
 
@@ -671,12 +946,13 @@ def _heuristic_feedback_interpretation(
         "evidence_spans": evidence_spans[:3],
     }
 
-    return {
+    payload: SemanticFeedbackPayload = {
         "schema_version": SCHEMA_VERSION,
         "feedback_interpretation": interpretation,
         "resolved_entities": entities,
         "reasoning_summary": reasoning[0],
     }
+    return _constrain_feedback_learning_targets(user_text=user_text, reward=reward, payload=payload)
 
 
 def _sanitize_vendor_profile(vendor_profile: dict[str, Any]) -> dict[str, Any]:
@@ -926,7 +1202,8 @@ def interpret_feedback(
         model=model,
         timeout_seconds=timeout_seconds,
     )
-    return _coerce_semantic_feedback_payload(model_result, heuristic)
+    payload = _coerce_semantic_feedback_payload(model_result, heuristic)
+    return _constrain_feedback_learning_targets(user_text=user_text, reward=reward, payload=payload)
 
 
 def _score_rows(score_map: dict[str, float], count_map: dict[str, int]) -> list[SemanticAggregateRow]:
@@ -941,6 +1218,20 @@ def _score_rows(score_map: dict[str, float], count_map: dict[str, int]) -> list[
         )
     rows.sort(key=lambda item: (abs(float(item["score"])), int(item["event_count"]), item["value"]), reverse=True)
     return rows
+
+
+def _add_semantic_scores(
+    score_maps: dict[str, dict[str, float]],
+    count_maps: dict[str, dict[str, int]],
+    dimension: str,
+    values: Any,
+    score: float,
+) -> None:
+    if not isinstance(values, list):
+        return
+    for value in _dedupe_strings(values):
+        score_maps[dimension][value] += score
+        count_maps[dimension][value] += 1
 
 
 def aggregate_semantic_feedback(
@@ -978,36 +1269,84 @@ def aggregate_semantic_feedback(
         resolved_entities = semantic_feedback.get("resolved_entities", {})
         if not isinstance(interpretation, dict) or not isinstance(resolved_entities, dict):
             continue
+        constrained_payload: SemanticFeedbackPayload = {
+            "schema_version": str(semantic_feedback.get("schema_version") or SCHEMA_VERSION),
+            "feedback_interpretation": interpretation,  # type: ignore[typeddict-item]
+            "resolved_entities": resolved_entities,  # type: ignore[typeddict-item]
+            "reasoning_summary": str(semantic_feedback.get("reasoning_summary") or ""),
+        }
+        constrained_payload = _constrain_feedback_learning_targets(
+            user_text=str(event.get("user_utterance") or event.get("free_text") or ""),
+            reward=int(event.get("reward") or 0),
+            payload=constrained_payload,
+        )
+        interpretation = constrained_payload["feedback_interpretation"]
         if not interpretation.get("generalizable", False):
             continue
         weighted_reward = _decayed_reward(event, decay_rate_monthly, now_utc)
         if weighted_reward == 0:
             continue
         multiplier = _confidence_multiplier(interpretation.get("reason_confidence"))
-        adjusted_reward = weighted_reward * multiplier
+        magnitude = abs(weighted_reward * multiplier)
+        if magnitude == 0:
+            continue
 
-        for dimension in (
+        _add_semantic_scores(
+            semantic_dimensions,
+            semantic_counts,
             "mission_domains",
+            interpretation.get("accepted_mission_domains", []),
+            magnitude,
+        )
+        _add_semantic_scores(
+            semantic_dimensions,
+            semantic_counts,
+            "mission_domains",
+            interpretation.get("rejected_mission_domains", []),
+            -magnitude,
+        )
+        _add_semantic_scores(
+            semantic_dimensions,
+            semantic_counts,
             "delivery_models",
-            "contract_postures",
-            "competitive_shapes",
-            "set_aside_signals",
-            "vehicle_signals",
+            interpretation.get("accepted_delivery_models", []),
+            magnitude,
+        )
+        _add_semantic_scores(
+            semantic_dimensions,
+            semantic_counts,
+            "delivery_models",
+            interpretation.get("rejected_delivery_models", []),
+            -magnitude,
+        )
+        _add_semantic_scores(
+            semantic_dimensions,
+            semantic_counts,
+            "semantic_facets",
+            interpretation.get("accepted_facets", []),
+            magnitude,
+        )
+        _add_semantic_scores(
+            semantic_dimensions,
+            semantic_counts,
+            "semantic_facets",
+            interpretation.get("rejected_facets", []),
+            -magnitude,
+        )
+        _add_semantic_scores(
+            semantic_dimensions,
+            semantic_counts,
             "teaming_postures",
-        ):
-            values = resolved_entities.get(dimension, [])
-            if not isinstance(values, list):
-                continue
-            for value in _dedupe_strings(values):
-                semantic_dimensions[dimension][value] += adjusted_reward
-                semantic_counts[dimension][value] += 1
-
-        for value in _dedupe_strings(resolved_entities.get("semantic_positive_facets", [])):
-            semantic_dimensions["semantic_facets"][value] += abs(adjusted_reward)
-            semantic_counts["semantic_facets"][value] += 1
-        for value in _dedupe_strings(resolved_entities.get("semantic_negative_facets", [])):
-            semantic_dimensions["semantic_facets"][value] -= abs(adjusted_reward)
-            semantic_counts["semantic_facets"][value] += 1
+            interpretation.get("accepted_postures", []),
+            magnitude,
+        )
+        _add_semantic_scores(
+            semantic_dimensions,
+            semantic_counts,
+            "teaming_postures",
+            interpretation.get("rejected_postures", []),
+            -magnitude,
+        )
 
     for value, score in semantic_dimensions["mission_domains"].items():
         if score >= promotion_threshold:
