@@ -48,6 +48,22 @@ class FakeGovTribeBootstrapProvider:
                 "govtribe_url": "https://govtribe.com/vendors/halvik-corp-5grr4",
                 "name": "Halvik, LLC",
                 "uei": "VMRTJLWMQRH7",
+                "parent_or_child": "Child",
+                "parent_vendor": {
+                    "name": "Halvik Parent Inc.",
+                    "uei": "PARENTUEI123",
+                    "govtribe_id": "parent-123",
+                    "govtribe_url": "https://govtribe.com/vendors/halvik-parent",
+                },
+                "vendor_hierarchy": {
+                    "parent_or_child": "Child",
+                    "parent": {
+                        "name": "Halvik Parent Inc.",
+                        "uei": "PARENTUEI123",
+                        "govtribe_id": "parent-123",
+                        "govtribe_url": "https://govtribe.com/vendors/halvik-parent",
+                    },
+                },
                 "summary": (
                     "Halvik provides software engineering, cloud services, cybersecurity, data analytics, "
                     "and program management support to federal agencies.\n"
@@ -65,6 +81,78 @@ class FakeGovTribeBootstrapProvider:
                 "contract_vehicles": ["True", "GSA MAS"],
                 "expired_contract_vehicles": ["One Acquisition Solution for Integrated Services - Small Business (OASIS SB)"],
                 "buyers": ["Department of Veterans Affairs"],
+                "places_of_performance": ["Vienna, VA 22182, USA", "Washington, DC 20001, USA"],
+                "preferred_states": ["VA", "DC"],
+                "set_asides": ["No Set-Aside Used", "Total Small Business", "Competitive 8(a)"],
+                "contract_types": ["Delivery Order", "Definitive Contract"],
+                "pricing_types": ["Firm Fixed Price", "Time and Materials"],
+                "prime_or_sub": ["prime"],
+                "psc_codes": ["D399"],
+                "service_contract_roles": ["prime", "sub"],
+                "contract_vehicle_subcategories": ["Multiple Award Schedule: 54151S"],
+                "teaming_preferences": ["Historical sub-award prime: Large Prime Integrator"],
+                "govtribe_award_profile": {
+                    "top_naics": [
+                        {
+                            "code": "541512",
+                            "label": "Computer Systems Design Services",
+                            "doc_count": 22,
+                            "dollars_obligated": 25000000,
+                        },
+                        {
+                            "code": "541519",
+                            "label": "Other Computer Related Services",
+                            "doc_count": 8,
+                            "dollars_obligated": 5000000,
+                        },
+                    ],
+                    "top_locations": [
+                        {"name": "Vienna, VA 22182, USA", "state": "VA", "doc_count": 12, "dollars_obligated": 22000000},
+                        {"name": "Washington, DC 20001, USA", "state": "DC", "doc_count": 3, "dollars_obligated": 3000000},
+                    ],
+                    "top_set_asides": [
+                        {"name": "No Set-Aside Used", "doc_count": 15, "dollars_obligated": 20000000},
+                        {"name": "Total Small Business", "doc_count": 4, "dollars_obligated": 4000000},
+                    ],
+                    "top_contract_types": [
+                        {"name": "Delivery Order", "doc_count": 17, "dollars_obligated": 21000000},
+                    ],
+                    "top_pricing_types": [
+                        {"name": "Firm Fixed Price", "doc_count": 14, "dollars_obligated": 18000000},
+                    ],
+                    "value_stats": {
+                        "dollars_obligated": {"count": 24, "min": 1000, "max": 10000000, "avg": 1250000, "sum": 30000000},
+                        "ceiling_value": {"count": 10, "min": 50000, "max": 50000000, "avg": 5000000, "sum": 50000000},
+                        "base_and_exercised_options_value": {"count": 12, "min": 25000, "max": 12000000, "avg": 2000000, "sum": 24000000},
+                    },
+                },
+                "govtribe_service_contract_inventory_profile": {
+                    "value_stats": {
+                        "derived_hourly_rate": {"count": 9, "min": 82.5, "max": 156.75, "avg": 118.4},
+                        "total_dollar_amount_invoiced": {"count": 9, "sum": 2450000, "avg": 272222.22},
+                        "hours_invoiced": {"count": 9, "sum": 20692, "avg": 2299.1},
+                    },
+                    "top_roles": [{"name": "prime", "doc_count": 7}, {"name": "sub", "doc_count": 2}],
+                    "top_naics": [{"code": "541513", "label": "Computer Facilities Management Services", "doc_count": 3}],
+                    "top_psc": [{"code": "D399", "label": "IT and Telecom Other IT and Telecommunications", "doc_count": 5}],
+                    "top_states": [{"name": "MD", "doc_count": 4}],
+                },
+                "govtribe_vehicle_subcategory_profile": {
+                    "subcategories": [
+                        {
+                            "name": "Information Technology Professional Services",
+                            "short_name": "54151S",
+                            "display_name": "Multiple Award Schedule: 54151S",
+                            "vehicle": "Multiple Award Schedule",
+                        }
+                    ]
+                },
+                "govtribe_sub_award_profile": {
+                    "top_prime_contractors": [{"name": "Large Prime Integrator"}],
+                    "sub_award_signals": [
+                        "Cloud migration support subaward - Large Prime Integrator - Halvik, LLC - 2024-02-01"
+                    ],
+                },
                 "award_signals": ["VA Modernization Support - VA-1 - Department of Veterans Affairs"],
                 "keywords": [
                     "True",
@@ -230,8 +318,12 @@ def main() -> int:
         assert govtribe_vendor_profile["company"]["name"] == "Halvik, LLC", govtribe_vendor_profile["company"]
         assert govtribe_vendor_profile["company"]["uei"] == "VMRTJLWMQRH7", govtribe_vendor_profile["company"]
         assert govtribe_vendor_profile["company"]["govtribe_url"] == "https://govtribe.com/vendors/halvik-corp-5grr4", govtribe_vendor_profile["company"]
+        assert govtribe_vendor_profile["company"]["parent"]["name"] == "Halvik Parent Inc.", govtribe_vendor_profile["company"]
+        assert govtribe_vendor_profile["govtribe_vendor_hierarchy"]["parent_or_child"] == "Child", govtribe_vendor_profile
         assert "OASIS SB" not in govtribe_vendor_profile["company"]["summary"], govtribe_vendor_profile["company"]
-        assert "519290" in govtribe_vendor_profile["naics"]["candidates"], govtribe_vendor_profile["naics"]
+        assert "541512" in govtribe_vendor_profile["naics"]["candidates"], govtribe_vendor_profile["naics"]
+        assert "541519" in govtribe_vendor_profile["naics"]["candidates"], govtribe_vendor_profile["naics"]
+        assert "541513" in govtribe_vendor_profile["naics"]["candidates"], govtribe_vendor_profile["naics"]
         assert "cybersecurity" in govtribe_vendor_profile["core_competencies"], govtribe_vendor_profile
         assert "cloud modernization" in govtribe_vendor_profile["core_competencies"], govtribe_vendor_profile
         assert "Self Certified Small Disadvantaged Business" in govtribe_vendor_profile["commercial_constraints"]["certifications"], govtribe_vendor_profile
@@ -241,34 +333,81 @@ def main() -> int:
         assert "GSA MAS" in govtribe_vendor_profile["contract_vehicles"], govtribe_vendor_profile
         assert "True" not in govtribe_vendor_profile["contract_vehicles"], govtribe_vendor_profile
         assert "Department of Veterans Affairs" in govtribe_vendor_profile["buyers"]["notes"], govtribe_vendor_profile
-        assert "519290" in govtribe_preferences["soft_preferences"]["preferred_naics"], govtribe_preferences
+        assert "Vienna, VA 22182, USA" in govtribe_vendor_profile["geography"]["place_of_performance"], govtribe_vendor_profile
+        assert "VA" in govtribe_vendor_profile["geography"]["preferred_states"], govtribe_vendor_profile
+        assert "Total Small Business" in govtribe_vendor_profile["commercial_constraints"]["set_aside_programs"], govtribe_vendor_profile
+        assert "No Set-Aside Used" not in govtribe_vendor_profile["commercial_constraints"]["set_aside_programs"], govtribe_vendor_profile
+        assert "prime" in govtribe_vendor_profile["commercial_constraints"]["prime_or_sub"], govtribe_vendor_profile
+        assert "Historical sub-award prime: Large Prime Integrator" in govtribe_vendor_profile["commercial_constraints"]["teaming_preferences"], govtribe_vendor_profile
+        assert govtribe_vendor_profile["commercial_constraints"]["min_award_value"] is None, govtribe_vendor_profile
+        assert govtribe_vendor_profile["commercial_constraints"]["max_award_value"] is None, govtribe_vendor_profile
+        observed_award_value_range = govtribe_vendor_profile["commercial_constraints"]["observed_award_value_range"]
+        assert observed_award_value_range["constraint_status"] == "observed_history_not_user_constraint", observed_award_value_range
+        assert observed_award_value_range["source_field"] == "govtribe_award_profile.value_stats", observed_award_value_range
+        assert observed_award_value_range["dollars_obligated"]["min"] == 1000, observed_award_value_range
+        assert observed_award_value_range["dollars_obligated"]["max"] == 10000000, observed_award_value_range
+        assert observed_award_value_range["ceiling_value"]["max"] == 50000000, observed_award_value_range
+        assert observed_award_value_range["base_and_exercised_options_value"]["min"] == 25000, observed_award_value_range
+        assert "govtribe_award_profile" in govtribe_vendor_profile, govtribe_vendor_profile
+        assert "govtribe_service_contract_inventory_profile" in govtribe_vendor_profile, govtribe_vendor_profile
+        assert govtribe_vendor_profile["govtribe_service_contract_inventory_profile"]["value_stats"]["derived_hourly_rate"]["avg"] == 118.4, govtribe_vendor_profile
+        assert "govtribe_vehicle_subcategory_profile" in govtribe_vendor_profile, govtribe_vendor_profile
+        assert "govtribe_sub_award_profile" in govtribe_vendor_profile, govtribe_vendor_profile
+        assert "D399" in govtribe_vendor_profile["other_taxonomy_tags"]["psc"], govtribe_vendor_profile
+        assert "Multiple Award Schedule: 54151S" in govtribe_vendor_profile["contract_vehicle_subcategories"], govtribe_vendor_profile
+        assert "541512" in govtribe_preferences["soft_preferences"]["preferred_naics"], govtribe_preferences
+        assert "541519" in govtribe_preferences["soft_preferences"]["preferred_naics"], govtribe_preferences
+        assert "541513" in govtribe_preferences["soft_preferences"]["preferred_naics"], govtribe_preferences
+        assert "VA" in govtribe_preferences["soft_preferences"]["preferred_states"], govtribe_preferences
+        assert "Total Small Business" in govtribe_preferences["soft_preferences"]["preferred_set_asides"], govtribe_preferences
+        assert "Delivery Order" in govtribe_preferences["soft_preferences"]["preferred_contract_types"], govtribe_preferences
+        assert "Firm Fixed Price" in govtribe_preferences["soft_preferences"]["preferred_pricing_types"], govtribe_preferences
+        assert "D399" in govtribe_preferences["soft_preferences"]["preferred_psc"], govtribe_preferences
+        assert "Multiple Award Schedule: 54151S" in govtribe_preferences["soft_preferences"]["preferred_contract_vehicle_subcategories"], govtribe_preferences
+        assert "Historical sub-award prime: Large Prime Integrator" in govtribe_preferences["soft_preferences"]["preferred_teaming_partners"], govtribe_preferences
         noisy_payload = json.dumps(
             {
                 "keywords": govtribe_vendor_profile.get("other_taxonomy_tags", {}).get("keywords", []),
                 "certifications": govtribe_vendor_profile.get("commercial_constraints", {}).get("certifications", []),
                 "positive_keywords": govtribe_preferences.get("soft_preferences", {}).get("positive_keywords", []),
                 "preferred_contract_vehicles": govtribe_preferences.get("soft_preferences", {}).get("preferred_contract_vehicles", []),
+                "preferred_contract_vehicle_subcategories": govtribe_preferences.get("soft_preferences", {}).get("preferred_contract_vehicle_subcategories", []),
                 "starter": govtribe_starter,
             }
         )
         for bad_value in ("True", "For Profit Organization", "Business or Organization", "Limited Liability Company"):
             assert bad_value not in noisy_payload, noisy_payload
         assert "OASIS SB" not in noisy_payload, noisy_payload
-        assert "519290 - Web Search Portals and All Other Information Services" in govtribe_starter, govtribe_starter
+        assert "541512 - Computer Systems Design Services" in govtribe_starter, govtribe_starter
         assert "GovTribe vendor: https://govtribe.com/vendors/halvik-corp-5grr4" in govtribe_starter, govtribe_starter
         assert "GSA MAS" in govtribe_starter, govtribe_starter
+        assert "Vienna, VA 22182, USA" in govtribe_starter, govtribe_starter
+        assert "Total Small Business" in govtribe_starter, govtribe_starter
+        assert "Delivery Order" in govtribe_starter, govtribe_starter
+        assert "Firm Fixed Price" in govtribe_starter, govtribe_starter
+        assert "Multiple Award Schedule: 54151S" in govtribe_starter, govtribe_starter
+        assert "Historical sub-award prime: Large Prime Integrator" in govtribe_starter, govtribe_starter
+        assert "GovTribe award-history signal" in govtribe_starter, govtribe_starter
+        assert "min obligated $1.0K" in govtribe_starter, govtribe_starter
+        assert "GovTribe Service Contract Inventory signal" in govtribe_starter, govtribe_starter
+        assert "move up the vendor chain to Halvik Parent Inc." in govtribe_starter, govtribe_starter
         assert "Company URL: https://govtribe.com/vendors/halvik-corp-5grr4" not in govtribe_starter, govtribe_starter
         assert "User-supplied NAICS: None provided" in govtribe_starter, govtribe_starter
         assert "User-supplied NAICS: 519290" not in govtribe_starter, govtribe_starter
         assert "GovTribe-derived facts remain provisional until the user confirms them." in govtribe_starter, govtribe_starter
         assert "GovTribe subscription-derived facts" in govtribe_starter, govtribe_starter
         assert "GovTribe subscription-derived facts" in govtribe_memory, govtribe_memory
+        assert "move up the vendor chain to Halvik Parent Inc." in govtribe_memory, govtribe_memory
+        assert "Service contract pricing signal" in govtribe_memory, govtribe_memory
         assert "GOVTRIBE_MCP_API_KEY" not in govtribe_payload, govtribe_payload
         provenance = govtribe_vendor_profile["provenance"]["facts"]
         assert any(item.get("field") == "company.uei" for item in provenance), provenance
+        assert any(item.get("field") == "company.parent" for item in provenance), provenance
+        assert any(item.get("field") == "commercial_constraints.observed_award_value_range" for item in provenance), provenance
         assert all(item.get("source") == "govtribe_mcp_commercial_intel" for item in provenance if item.get("provenance") == "govtribe_subscription_derived"), provenance
         govtribe_source = next(item for item in govtribe_registry["sources"] if item.get("id") == "govtribe_mcp_commercial_intel")
         assert govtribe_source["enabled"] is True, govtribe_source
+        assert govtribe_result["recommended_next_moves"][0].startswith("GovTribe resolved Halvik, LLC as a child entity"), govtribe_result
 
         name_workspace = root / "govtribe-name-workspace"
         name_provider = FakeGovTribeBootstrapProvider()

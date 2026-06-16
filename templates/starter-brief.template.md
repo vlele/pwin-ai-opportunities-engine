@@ -19,6 +19,30 @@
 - Candidate NAICS:
   - {{NAICS_1}}
   - {{NAICS_2}}
+- Candidate places of performance:
+  - {{LOCATION_1}}
+  - {{LOCATION_2}}
+- Candidate states:
+  - {{STATE_1}}
+  - {{STATE_2}}
+- Candidate set-aside posture:
+  - {{SET_ASIDE_1}}
+  - {{SET_ASIDE_2}}
+- Candidate contract types:
+  - {{CONTRACT_TYPE_1}}
+  - {{CONTRACT_TYPE_2}}
+- Candidate pricing types:
+  - {{PRICING_TYPE_1}}
+  - {{PRICING_TYPE_2}}
+- Candidate vehicle subcategories:
+  - {{VEHICLE_SUBCATEGORY_1}}
+  - {{VEHICLE_SUBCATEGORY_2}}
+- Candidate teaming signals:
+  - {{TEAMING_1}}
+  - {{TEAMING_2}}
+- Award value signal: {{AWARD_VALUE_SIGNAL}}
+- Service contract pricing signal: {{SCI_PRICING_SIGNAL}}
+- Vendor hierarchy check: {{HIERARCHY_CONFIRMATION}}
 
 ## Initial exclusions
 - {{EXCLUSION_1}}

@@ -65,9 +65,12 @@ FAMILY_TOOL_GUIDE: dict[str, dict[str, Any]] = {
             "address",
             "sba_certifications",
             "business_types",
+            "parent_or_child",
+            "parent",
             "naics_category",
             "federal_contract_awards",
             "federal_contract_idvs",
+            "federal_contract_sub_awards",
             "awarded_federal_contract_vehicle",
         ),
     },
@@ -181,6 +184,84 @@ FAMILY_TOOL_GUIDE: dict[str, dict[str, Any]] = {
             "parent_record",
         ),
     },
+    "service_contract_inventory": {
+        "preferred_names": ("Search_Service_Contract_Inventory",),
+        "required_terms": ("service", "contract", "inventory"),
+        "fields_to_return": (
+            "govtribe_id",
+            "govtribe_type",
+            "fiscal_year",
+            "coverage_scope",
+            "role",
+            "contract_number",
+            "piid",
+            "idv_piid",
+            "description",
+            "place_of_performance",
+            "date_signed",
+            "base_effective_date",
+            "accepted_at",
+            "hours_invoiced",
+            "ftes",
+            "total_dollar_amount_invoiced",
+            "total_contractor_hours_invoiced",
+            "total_ftes",
+            "total_dollars_obligated",
+            "total_base_and_all_options_value",
+            "subcontractor_count",
+            "sub_hours_share",
+            "derived_hourly_rate",
+            "additional_reporting",
+            "inherently_governmental_functions",
+            "source_url",
+            "source_filename",
+            "source_publication_title",
+            "source_publication_fiscal_year",
+            "source_locator",
+            "vendor",
+            "federal_contract_award",
+            "federal_contract_idv",
+            "psc_category",
+            "naics_category",
+            "contracting_federal_agency",
+            "funding_federal_agency",
+        ),
+    },
+    "fcv_subcategories": {
+        "preferred_names": ("Search_FCV_Subcategories",),
+        "required_terms": ("vehicle", "subcategor"),
+        "fields_to_return": (
+            "govtribe_id",
+            "govtribe_type",
+            "name",
+            "short_name",
+            "alternate_name",
+            "description",
+            "descriptions",
+            "shared_ceiling",
+            "updated_at",
+            "federal_contract_vehicle",
+            "awardees",
+            "federal_contract_idvs",
+            "funding_federal_agencies",
+        ),
+    },
+    "sub_awards": {
+        "preferred_names": ("Search_Federal_Contract_Sub_Awards",),
+        "required_terms": ("federal", "contract", "sub", "award"),
+        "fields_to_return": (
+            "govtribe_id",
+            "govtribe_type",
+            "name",
+            "award_date",
+            "description",
+            "updated_at",
+            "sub_contractor",
+            "prime_contractor",
+            "contracting_federal_agency",
+            "funding_federal_agency",
+        ),
+    },
 }
 
 QUERY_COMPATIBLE_REQUIRED_FIELDS = {
@@ -213,6 +294,44 @@ VENDOR_AWARD_AGGREGATIONS = (
     "top_contracting_federal_agencies_by_dollars_obligated",
     "top_funding_federal_agencies_by_dollars_obligated",
     "top_federal_contract_vehicles_by_dollars_obligated",
+    "top_naics_codes_by_dollars_obligated",
+    "top_locations_by_dollars_obligated",
+    "top_set_aside_types_by_dollars_obligated",
+    "top_contract_types_by_dollars_obligated",
+    "top_pricing_types_by_dollars_obligated",
+    "dollars_obligated_stats",
+    "ceiling_value_stats",
+    "base_and_exercised_options_value_stats",
+)
+
+VENDOR_SCI_AGGREGATIONS = (
+    "hours_invoiced_stats",
+    "ftes_stats",
+    "total_dollar_amount_invoiced_stats",
+    "total_contractor_hours_invoiced_stats",
+    "total_ftes_stats",
+    "total_dollars_obligated_stats",
+    "total_base_and_all_options_value_stats",
+    "subcontractor_count_stats",
+    "sub_hours_share_stats",
+    "derived_hourly_rate_stats",
+    "top_fiscal_years_by_doc_count",
+    "top_coverage_scopes_by_doc_count",
+    "top_roles_by_doc_count",
+    "top_additional_reporting_by_doc_count",
+    "top_psc_categories_by_doc_count",
+    "top_naics_categories_by_doc_count",
+    "top_contracting_agencies_by_doc_count",
+    "top_funding_agencies_by_doc_count",
+    "top_place_of_performance_states_by_doc_count",
+    "top_place_of_performance_countries_by_doc_count",
+    "top_contract_numbers_by_doc_count",
+)
+
+VENDOR_SUB_AWARD_AGGREGATIONS = (
+    "top_awardees_by_doc_count",
+    "top_funding_federal_agencies_by_doc_count",
+    "top_contracting_federal_agencies_by_doc_count",
 )
 
 
@@ -951,7 +1070,9 @@ def _tool_result_records_and_errors(tool_result: dict[str, Any]) -> tuple[list[d
     return records, dedupe_strings(errors)
 
 
-def _first_text(record: dict[str, Any], *keys: str) -> str:
+def _first_text(record: Any, *keys: str) -> str:
+    if not isinstance(record, dict):
+        return str(record or "").strip()
     for key in keys:
         value = record.get(key)
         if isinstance(value, dict):
@@ -1284,7 +1405,7 @@ def _record_naics_items(record: dict[str, Any]) -> list[dict[str, str]]:
         if isinstance(value, dict):
             code_values: list[str] = []
             label_values: list[str] = []
-            for key in ("code", "naics", "naics_code", "id", "value"):
+            for key in ("code", "naics", "n_a_i_c_s", "naics_code", "naicsCode", "id", "value"):
                 if key in value:
                     direct = value.get(key)
                     if isinstance(direct, (dict, list)):
@@ -1323,7 +1444,7 @@ def _record_naics_items(record: dict[str, Any]) -> list[dict[str, str]]:
             return
         append_item(_naics_item_from_text(value))
 
-    for key in ("naics", "naics_code", "naics_codes", "naicsCategory", "naics_category"):
+    for key in ("naics", "n_a_i_c_s", "naics_code", "naics_codes", "naicsCode", "naicsCategory", "naics_category"):
         if key in record:
             collect(record.get(key))
     return items
@@ -1465,6 +1586,19 @@ def _vendor_record_location(record: dict[str, Any]) -> str:
     return _first_text(record, "location", "address")
 
 
+def _vendor_parent_record(record: dict[str, Any]) -> dict[str, str]:
+    parent = record.get("parent")
+    if not isinstance(parent, dict):
+        return {}
+    parent_record = {
+        "name": _first_text(parent, "name", "vendor_name", "recipient_name", "awardee"),
+        "uei": _record_uei(parent),
+        "govtribe_id": _record_identifier(parent),
+        "govtribe_url": _record_url(parent, ""),
+    }
+    return {key: value for key, value in parent_record.items() if value}
+
+
 def _vendor_record_buyers(record: dict[str, Any]) -> list[str]:
     buyers: list[str] = []
     for key in ("federal_contract_awards", "federal_contract_idvs", "awarded_federal_contract_vehicle"):
@@ -1570,16 +1704,56 @@ def _set_common_search_controls(args: dict[str, Any], tool: dict[str, Any], *, l
                 args[name] = "keyword"
 
 
+def _args_have_vendor_or_query_filter(args: dict[str, Any]) -> bool:
+    for name, value in args.items():
+        key = _normalize_key(name)
+        if key in {"vendor ids", "awardee vendor ids", "awardee ids", "uei values", "govtribe ids"}:
+            if isinstance(value, list) and value:
+                return True
+            if str(value or "").strip():
+                return True
+        if key in {"query", "q", "search", "search query"} and str(value or "").strip():
+            return True
+    return False
+
+
+def _vendor_award_aggregation_selection(tool: dict[str, Any]) -> tuple[list[str], list[str]]:
+    aggregation_spec = _schema_properties(tool).get("aggregations")
+    if not _is_array_prop(aggregation_spec):
+        return [], []
+    allowed = set(_enum_values(aggregation_spec))
+    selected = [item for item in VENDOR_AWARD_AGGREGATIONS if not allowed or item in allowed]
+    skipped = [item for item in VENDOR_AWARD_AGGREGATIONS if allowed and item not in allowed]
+    return selected, skipped
+
+
+def _vendor_sci_aggregation_selection(tool: dict[str, Any]) -> tuple[list[str], list[str]]:
+    aggregation_spec = _schema_properties(tool).get("aggregations")
+    if not _is_array_prop(aggregation_spec):
+        return [], []
+    allowed = set(_enum_values(aggregation_spec))
+    selected = [item for item in VENDOR_SCI_AGGREGATIONS if not allowed or item in allowed]
+    skipped = [item for item in VENDOR_SCI_AGGREGATIONS if allowed and item not in allowed]
+    return selected, skipped
+
+
+def _vendor_sub_award_aggregation_selection(tool: dict[str, Any]) -> tuple[list[str], list[str]]:
+    aggregation_spec = _schema_properties(tool).get("aggregations")
+    if not _is_array_prop(aggregation_spec):
+        return [], []
+    allowed = set(_enum_values(aggregation_spec))
+    selected = [item for item in VENDOR_SUB_AWARD_AGGREGATIONS if not allowed or item in allowed]
+    skipped = [item for item in VENDOR_SUB_AWARD_AGGREGATIONS if allowed and item not in allowed]
+    return selected, skipped
+
+
 def _vendor_award_aggregation_arguments(tool: dict[str, Any], vendor_record: dict[str, Any]) -> dict[str, Any]:
     properties = _schema_properties(tool)
     args: dict[str, Any] = {}
     has_vendor_filter = _set_vendor_filter_args(args, tool, vendor_record)
-    aggregation_spec = properties.get("aggregations")
-    if _is_array_prop(aggregation_spec):
-        allowed = set(_enum_values(aggregation_spec))
-        aggregations = [item for item in VENDOR_AWARD_AGGREGATIONS if not allowed or item in allowed]
-        if aggregations:
-            args["aggregations"] = aggregations
+    aggregations, _skipped = _vendor_award_aggregation_selection(tool)
+    if aggregations:
+        args["aggregations"] = aggregations
     _set_common_search_controls(args, tool, limit=0, per_page=0)
     if not has_vendor_filter:
         query = _vendor_query_text(vendor_record)
@@ -1587,7 +1761,46 @@ def _vendor_award_aggregation_arguments(tool: dict[str, Any], vendor_record: dic
             if _normalize_key(name) in {"query", "q", "search", "search query"} and _is_string_prop(spec) and query:
                 args[name] = query
                 break
-    return args if args.get("aggregations") else {}
+    return args if args.get("aggregations") and _args_have_vendor_or_query_filter(args) else {}
+
+
+def _vendor_sci_aggregation_arguments(tool: dict[str, Any], vendor_record: dict[str, Any]) -> dict[str, Any]:
+    properties = _schema_properties(tool)
+    args: dict[str, Any] = {}
+    has_vendor_filter = _set_vendor_filter_args(args, tool, vendor_record)
+    aggregations, _skipped = _vendor_sci_aggregation_selection(tool)
+    if aggregations:
+        args["aggregations"] = aggregations
+    _set_common_search_controls(args, tool, limit=0, per_page=0)
+    if not has_vendor_filter:
+        query = _vendor_query_text(vendor_record)
+        for name, spec in properties.items():
+            if _normalize_key(name) in {"query", "q", "search", "search query"} and _is_string_prop(spec) and query:
+                args[name] = query
+                break
+    return args if args.get("aggregations") and _args_have_vendor_or_query_filter(args) else {}
+
+
+def _vendor_sub_award_search_arguments(tool: dict[str, Any], vendor_record: dict[str, Any], *, limit: int = 10) -> dict[str, Any]:
+    properties = _schema_properties(tool)
+    args: dict[str, Any] = {}
+    has_vendor_filter = _set_vendor_filter_args(args, tool, vendor_record)
+    aggregations, _skipped = _vendor_sub_award_aggregation_selection(tool)
+    if aggregations:
+        args["aggregations"] = aggregations
+    fields_spec = properties.get("fields_to_return")
+    if _is_array_prop(fields_spec):
+        fields = _fields_for_tool(tool)
+        if fields:
+            args["fields_to_return"] = fields
+    _set_common_search_controls(args, tool, limit=limit)
+    if not has_vendor_filter:
+        query = _vendor_query_text(vendor_record)
+        for name, spec in properties.items():
+            if _normalize_key(name) in {"query", "q", "search", "search query"} and _is_string_prop(spec) and query:
+                args[name] = query
+                break
+    return args if _args_have_vendor_or_query_filter(args) else {}
 
 
 def _vendor_vehicle_search_arguments(tool: dict[str, Any], vendor_record: dict[str, Any], *, limit: int = 15) -> dict[str, Any]:
@@ -1606,7 +1819,26 @@ def _vendor_vehicle_search_arguments(tool: dict[str, Any], vendor_record: dict[s
             if _normalize_key(name) in {"query", "q", "search", "search query"} and _is_string_prop(spec) and query:
                 args[name] = query
                 break
-    return args
+    return args if _args_have_vendor_or_query_filter(args) else {}
+
+
+def _vendor_fcv_subcategory_search_arguments(tool: dict[str, Any], vendor_record: dict[str, Any], *, limit: int = 20) -> dict[str, Any]:
+    properties = _schema_properties(tool)
+    args: dict[str, Any] = {}
+    has_vendor_filter = _set_vendor_filter_args(args, tool, vendor_record)
+    fields_spec = properties.get("fields_to_return")
+    if _is_array_prop(fields_spec):
+        fields = _fields_for_tool(tool)
+        if fields:
+            args["fields_to_return"] = fields
+    _set_common_search_controls(args, tool, limit=limit)
+    if not has_vendor_filter:
+        query = _vendor_query_text(vendor_record)
+        for name, spec in properties.items():
+            if _normalize_key(name) in {"query", "q", "search", "search query"} and _is_string_prop(spec) and query:
+                args[name] = query
+                break
+    return args if _args_have_vendor_or_query_filter(args) else {}
 
 
 def _aggregation_maps(value: Any) -> list[dict[str, Any]]:
@@ -1652,6 +1884,479 @@ def _bucket_key(bucket: Any) -> dict[str, Any]:
 def _bucket_name(bucket: Any) -> str:
     key = _bucket_key(bucket)
     return _first_text(key, "name", "title", "value", "key") or _first_text(bucket, "name", "title", "value", "key")
+
+
+def _number_value(value: Any) -> int | float | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value
+    if isinstance(value, dict):
+        for key in ("value", "amount", "sum", "avg", "min", "max", "count"):
+            parsed = _number_value(value.get(key))
+            if parsed is not None:
+                return parsed
+        return None
+    text = str(value or "").strip().replace(",", "").replace("$", "")
+    if not text:
+        return None
+    try:
+        parsed = float(text)
+    except ValueError:
+        return None
+    return int(parsed) if parsed.is_integer() else parsed
+
+
+def _bucket_doc_count(bucket: Any) -> int | None:
+    if not isinstance(bucket, dict):
+        return None
+    parsed = _number_value(bucket.get("doc_count"))
+    return int(parsed) if parsed is not None else None
+
+
+def _bucket_sum_value(bucket: Any) -> int | float | None:
+    if not isinstance(bucket, dict):
+        return None
+    return _number_value(bucket.get("sum_value"))
+
+
+def _compact_bucket_item(bucket: Any, *, name: str | None = None) -> dict[str, Any]:
+    item: dict[str, Any] = {}
+    display_name = name if name is not None else _bucket_name(bucket)
+    if display_name:
+        item["name"] = display_name
+    doc_count = _bucket_doc_count(bucket)
+    if doc_count is not None:
+        item["doc_count"] = doc_count
+    dollars_obligated = _bucket_sum_value(bucket)
+    if dollars_obligated is not None:
+        item["dollars_obligated"] = dollars_obligated
+    key = _bucket_key(bucket)
+    govtribe_id = _first_text(key, "govtribe_id", "gov_tribe_i_d", "id")
+    if govtribe_id:
+        item["govtribe_id"] = govtribe_id
+    url = _first_text(key, "govtribe_url", "url", "u_r_l", "link", "permalink")
+    if url:
+        item["govtribe_url"] = url
+    return item
+
+
+def _aggregation_buckets(aggregation_maps: list[dict[str, Any]], name: str) -> list[Any]:
+    buckets: list[Any] = []
+    for aggregation_map in aggregation_maps:
+        aggregation = aggregation_map.get(name)
+        if not isinstance(aggregation, dict):
+            continue
+        raw_buckets = aggregation.get("buckets")
+        if isinstance(raw_buckets, list):
+            buckets.extend(raw_buckets)
+    return buckets
+
+
+def _aggregation_named_items(aggregation_maps: list[dict[str, Any]], name: str, *, max_items: int = 10) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for bucket in _aggregation_buckets(aggregation_maps, name):
+        item = _compact_bucket_item(bucket)
+        display_name = str(item.get("name") or "").strip()
+        if not display_name or display_name in seen:
+            continue
+        seen.add(display_name)
+        items.append(item)
+    return items[:max_items]
+
+
+def _location_state_code(location: Any) -> str:
+    key = _bucket_key(location)
+    direct = _first_text(key, "state", "state_code", "stateCode")
+    if direct:
+        cleaned = re.sub(r"[^A-Za-z]", "", direct).upper()
+        return cleaned if len(cleaned) == 2 else ""
+    text = _bucket_name(location)
+    match = re.search(r",\s*([A-Z]{2})(?:\s+\d{5}(?:-\d{4})?)?\s*,?\s*(?:USA|United States)?\s*$", text)
+    return match.group(1) if match else ""
+
+
+def _aggregation_location_items(aggregation_maps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for bucket in _aggregation_buckets(aggregation_maps, "top_locations_by_dollars_obligated"):
+        item = _compact_bucket_item(bucket)
+        location_name = str(item.get("name") or "").strip()
+        if not location_name or location_name in seen:
+            continue
+        state = _location_state_code(bucket)
+        if state:
+            item["state"] = state
+        seen.add(location_name)
+        items.append(item)
+    return items[:10]
+
+
+def _aggregation_naics_items(aggregation_maps: list[dict[str, Any]], aggregation_name: str = "top_naics_codes_by_dollars_obligated") -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for bucket in _aggregation_buckets(aggregation_maps, aggregation_name):
+        key = _bucket_key(bucket)
+        naics_items = _record_naics_items(key)
+        if not naics_items:
+            naics_items = [item for item in [_naics_item_from_text(_bucket_name(bucket))] if item]
+        for naics_item in naics_items:
+            code = str(naics_item.get("code") or "").strip()
+            label = str(naics_item.get("label") or "").strip()
+            if not code and not label:
+                continue
+            identity = code or label
+            if identity in seen:
+                continue
+            seen.add(identity)
+            item = _compact_bucket_item(bucket, name=label or code)
+            item["code"] = code
+            item["label"] = label
+            items.append(item)
+            break
+    return items[:10]
+
+
+def _category_code_item_from_bucket(bucket: Any, *, code_keys: tuple[str, ...]) -> dict[str, Any]:
+    key = _bucket_key(bucket)
+    name = _bucket_name(bucket)
+    code = _first_text(key, *code_keys)
+    if not code:
+        match = re.search(r"\b([A-Z]\d{3}|[A-Z]{1,2}\d{2,4}|\d{4,6})\b", name)
+        if match:
+            code = match.group(1)
+    label = name
+    if code and label:
+        label = re.sub(rf"^\s*{re.escape(code)}\s*[-:–—]?\s*", "", label).strip()
+    item = _compact_bucket_item(bucket, name=label or code)
+    if code:
+        item["code"] = code
+    if label:
+        item["label"] = label
+    return item
+
+
+def _aggregation_category_items(
+    aggregation_maps: list[dict[str, Any]],
+    aggregation_name: str,
+    *,
+    code_keys: tuple[str, ...],
+    max_items: int = 10,
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for bucket in _aggregation_buckets(aggregation_maps, aggregation_name):
+        item = _category_code_item_from_bucket(bucket, code_keys=code_keys)
+        identity = str(item.get("code") or item.get("name") or item.get("label") or "").strip()
+        if not identity or identity in seen:
+            continue
+        seen.add(identity)
+        items.append(item)
+    return items[:max_items]
+
+
+def _aggregation_stats(
+    aggregation_maps: list[dict[str, Any]],
+    stat_names: dict[str, str],
+) -> dict[str, dict[str, int | float]]:
+    output: dict[str, dict[str, int | float]] = {}
+    for aggregation_map in aggregation_maps:
+        for raw_name, normalized_name in stat_names.items():
+            stats = aggregation_map.get(raw_name)
+            if not isinstance(stats, dict):
+                continue
+            normalized_stats: dict[str, int | float] = {}
+            for key in ("count", "min", "max", "avg", "sum"):
+                parsed = _number_value(stats.get(key))
+                if parsed is not None:
+                    normalized_stats[key] = parsed
+            if normalized_stats:
+                output[normalized_name] = normalized_stats
+    return output
+
+
+def _aggregation_value_stats(aggregation_maps: list[dict[str, Any]]) -> dict[str, dict[str, int | float]]:
+    return _aggregation_stats(
+        aggregation_maps,
+        {
+            "dollars_obligated_stats": "dollars_obligated",
+            "ceiling_value_stats": "ceiling_value",
+            "base_and_exercised_options_value_stats": "base_and_exercised_options_value",
+        },
+    )
+
+
+def _vendor_award_profile_from_aggregations(aggregation_maps: list[dict[str, Any]]) -> dict[str, Any]:
+    profile: dict[str, Any] = {}
+    top_naics = _aggregation_naics_items(aggregation_maps)
+    top_locations = _aggregation_location_items(aggregation_maps)
+    top_set_asides = _aggregation_named_items(aggregation_maps, "top_set_aside_types_by_dollars_obligated")
+    top_contract_types = _aggregation_named_items(aggregation_maps, "top_contract_types_by_dollars_obligated")
+    top_pricing_types = _aggregation_named_items(aggregation_maps, "top_pricing_types_by_dollars_obligated")
+    top_buyers = _aggregation_named_items(aggregation_maps, "top_contracting_federal_agencies_by_dollars_obligated")
+    top_funding_buyers = _aggregation_named_items(aggregation_maps, "top_funding_federal_agencies_by_dollars_obligated")
+    top_vehicles = _aggregation_named_items(aggregation_maps, "top_federal_contract_vehicles_by_dollars_obligated")
+    value_stats = _aggregation_value_stats(aggregation_maps)
+    for key, value in (
+        ("top_naics", top_naics),
+        ("top_locations", top_locations),
+        ("top_set_asides", top_set_asides),
+        ("top_contract_types", top_contract_types),
+        ("top_pricing_types", top_pricing_types),
+        ("top_contracting_buyers", top_buyers),
+        ("top_funding_buyers", top_funding_buyers),
+        ("top_contract_vehicles", top_vehicles),
+        ("value_stats", value_stats),
+    ):
+        if value:
+            profile[key] = value
+    return profile
+
+
+def _sci_value_stats(aggregation_maps: list[dict[str, Any]]) -> dict[str, dict[str, int | float]]:
+    return _aggregation_stats(
+        aggregation_maps,
+        {
+            "hours_invoiced_stats": "hours_invoiced",
+            "ftes_stats": "ftes",
+            "total_dollar_amount_invoiced_stats": "total_dollar_amount_invoiced",
+            "total_contractor_hours_invoiced_stats": "total_contractor_hours_invoiced",
+            "total_ftes_stats": "total_ftes",
+            "total_dollars_obligated_stats": "total_dollars_obligated",
+            "total_base_and_all_options_value_stats": "total_base_and_all_options_value",
+            "subcontractor_count_stats": "subcontractor_count",
+            "sub_hours_share_stats": "sub_hours_share",
+            "derived_hourly_rate_stats": "derived_hourly_rate",
+        },
+    )
+
+
+def _sci_profile_from_aggregations(aggregation_maps: list[dict[str, Any]]) -> dict[str, Any]:
+    profile: dict[str, Any] = {}
+    top_naics = _aggregation_naics_items(aggregation_maps, "top_naics_categories_by_doc_count")
+    top_psc = _aggregation_category_items(
+        aggregation_maps,
+        "top_psc_categories_by_doc_count",
+        code_keys=("psc", "psc_code", "p_s_c", "code", "id", "value"),
+    )
+    for key, value in (
+        ("value_stats", _sci_value_stats(aggregation_maps)),
+        ("top_fiscal_years", _aggregation_named_items(aggregation_maps, "top_fiscal_years_by_doc_count")),
+        ("top_coverage_scopes", _aggregation_named_items(aggregation_maps, "top_coverage_scopes_by_doc_count")),
+        ("top_roles", _aggregation_named_items(aggregation_maps, "top_roles_by_doc_count")),
+        ("top_additional_reporting", _aggregation_named_items(aggregation_maps, "top_additional_reporting_by_doc_count")),
+        ("top_contracting_buyers", _aggregation_named_items(aggregation_maps, "top_contracting_agencies_by_doc_count")),
+        ("top_funding_buyers", _aggregation_named_items(aggregation_maps, "top_funding_agencies_by_doc_count")),
+        ("top_states", _aggregation_named_items(aggregation_maps, "top_place_of_performance_states_by_doc_count")),
+        ("top_countries", _aggregation_named_items(aggregation_maps, "top_place_of_performance_countries_by_doc_count")),
+        ("top_contract_numbers", _aggregation_named_items(aggregation_maps, "top_contract_numbers_by_doc_count")),
+        ("top_naics", top_naics),
+        ("top_psc", top_psc),
+    ):
+        if value:
+            profile[key] = value
+    return profile
+
+
+def _profile_codes(profile: dict[str, Any], key: str, *, max_items: int = 10) -> list[str]:
+    values: list[str] = []
+    items = profile.get(key)
+    if not isinstance(items, list):
+        return []
+    for item in items:
+        if isinstance(item, dict):
+            values.append(str(item.get("code") or "").strip())
+    return dedupe_strings([value for value in values if value])[:max_items]
+
+
+def _normalized_prime_or_sub(values: list[str]) -> list[str]:
+    roles: list[str] = []
+    for value in values:
+        normalized = _normalize_key(value)
+        if normalized == "prime" or "prime" in normalized:
+            roles.append("prime")
+        if normalized == "sub" or "subcontract" in normalized:
+            roles.append("subcontractor")
+    return dedupe_strings(roles)
+
+
+def _party_name(value: Any) -> str:
+    return _first_text(value, "name", "vendor_name", "recipient_name", "awardee", "title", "value")
+
+
+def _vendor_matches_party(vendor_record: dict[str, Any], value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    vendor_names = [
+        str(vendor_record.get("name") or ""),
+        str(vendor_record.get("dba") or ""),
+    ]
+    vendor_ids = [
+        str(vendor_record.get("uei") or ""),
+        str(vendor_record.get("govtribe_id") or ""),
+        str(vendor_record.get("external_record_id") or ""),
+    ]
+    party_names = [
+        _party_name(value),
+        _first_text(value, "dba", "doing_business_as"),
+    ]
+    party_ids = [
+        _first_text(value, "uei", "uei_value", "ueiValue"),
+        _first_text(value, "govtribe_id", "gov_tribe_i_d", "id"),
+    ]
+    normalized_vendor_ids = {_normalize_identifier(item) for item in vendor_ids if item}
+    normalized_party_ids = {_normalize_identifier(item) for item in party_ids if item}
+    if normalized_vendor_ids.intersection(normalized_party_ids):
+        return True
+    normalized_vendor_names = {_normalize_match_text(item) for item in vendor_names if item}
+    normalized_party_names = {_normalize_match_text(item) for item in party_names if item}
+    return bool(normalized_vendor_names.intersection(normalized_party_names))
+
+
+def _sub_award_profile_from_records(
+    records: list[dict[str, Any]],
+    aggregation_maps: list[dict[str, Any]],
+    vendor_record: dict[str, Any],
+) -> tuple[dict[str, Any], list[str], list[str]]:
+    profile: dict[str, Any] = {}
+    prime_names: list[str] = []
+    sub_names: list[str] = []
+    buyers: list[str] = []
+    signals: list[str] = []
+    roles: list[str] = []
+    for record in records[:12]:
+        prime = record.get("prime_contractor")
+        sub = record.get("sub_contractor")
+        prime_name = _party_name(prime)
+        sub_name = _party_name(sub)
+        if prime_name:
+            prime_names.append(prime_name)
+        if sub_name:
+            sub_names.append(sub_name)
+        buyers.extend(
+            _collect_text_values(
+                [
+                    record.get("contracting_federal_agency"),
+                    record.get("funding_federal_agency"),
+                ],
+                keys=("name", "title", "value"),
+            )
+        )
+        title = _record_title(record)
+        award_date = _first_text(record, "award_date", "awardDate")
+        parts = [part for part in (title if title != "GovTribe record" else "", prime_name, sub_name, award_date) if part]
+        if parts:
+            signals.append(" - ".join(parts[:4]))
+        if _vendor_matches_party(vendor_record, sub):
+            roles.append("subcontractor")
+        if _vendor_matches_party(vendor_record, prime):
+            roles.append("prime")
+    top_awardees = _aggregation_named_items(aggregation_maps, "top_awardees_by_doc_count")
+    top_contracting = _aggregation_named_items(aggregation_maps, "top_contracting_federal_agencies_by_doc_count")
+    top_funding = _aggregation_named_items(aggregation_maps, "top_funding_federal_agencies_by_doc_count")
+    for key, value in (
+        ("top_prime_contractors", [{"name": item} for item in _signal_values(prime_names)]),
+        ("top_subcontractors", [{"name": item} for item in _signal_values(sub_names)]),
+        ("top_awardees", top_awardees),
+        ("top_contracting_buyers", top_contracting),
+        ("top_funding_buyers", top_funding),
+        ("sub_award_signals", _signal_values(signals)),
+    ):
+        if value:
+            profile[key] = value
+    profile_buyers = _signal_values([*buyers, *_award_profile_names(profile, "top_contracting_buyers"), *_award_profile_names(profile, "top_funding_buyers")])
+    return profile, _signal_values(profile_buyers)[:10], dedupe_strings(roles)
+
+
+def _award_profile_names(profile: dict[str, Any], key: str, *, max_items: int = 10) -> list[str]:
+    values: list[str] = []
+    items = profile.get(key)
+    if not isinstance(items, list):
+        return []
+    for item in items:
+        if isinstance(item, dict):
+            values.append(str(item.get("name") or item.get("label") or "").strip())
+        else:
+            values.append(str(item or "").strip())
+    return _signal_values(values)[:max_items]
+
+
+def _award_profile_naics_codes(profile: dict[str, Any], *, max_items: int = 10) -> list[str]:
+    values: list[str] = []
+    items = profile.get("top_naics")
+    if not isinstance(items, list):
+        return []
+    for item in items:
+        if isinstance(item, dict):
+            values.append(str(item.get("code") or "").strip())
+    return dedupe_strings([value for value in values if value])[:max_items]
+
+
+def _award_profile_naics_items(profile: dict[str, Any], *, max_items: int = 10) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    raw_items = profile.get("top_naics")
+    if not isinstance(raw_items, list):
+        return []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        code = str(raw_item.get("code") or "").strip()
+        label = str(raw_item.get("label") or raw_item.get("name") or "").strip()
+        if code or label:
+            item = {"code": code, "label": label}
+            if item not in items:
+                items.append(item)
+    return items[:max_items]
+
+
+def _fcv_subcategory_item(record: dict[str, Any]) -> dict[str, Any]:
+    vehicle = record.get("federal_contract_vehicle")
+    vehicle_name = _party_name(vehicle) if isinstance(vehicle, dict) else _first_text(record, "federal_contract_vehicle")
+    name = _first_text(record, "name", "short_name", "alternate_name", "title")
+    short_name = _first_text(record, "short_name", "shortName")
+    alternate_name = _first_text(record, "alternate_name", "alternateName")
+    display = short_name or name or alternate_name
+    if vehicle_name and display and _normalize_identifier(vehicle_name) not in _normalize_identifier(display):
+        display = f"{vehicle_name}: {display}"
+    item: dict[str, Any] = {}
+    for key, value in (
+        ("name", name),
+        ("short_name", short_name),
+        ("alternate_name", alternate_name),
+        ("display_name", display),
+        ("vehicle", vehicle_name),
+        ("govtribe_id", _record_identifier(record)),
+        ("govtribe_url", _record_url(record, "")),
+    ):
+        if value:
+            item[key] = value
+    shared_ceiling = _number_value(record.get("shared_ceiling"))
+    if shared_ceiling is not None:
+        item["shared_ceiling"] = shared_ceiling
+    return item
+
+
+def _fcv_subcategory_profile_from_records(records: list[dict[str, Any]]) -> dict[str, Any]:
+    subcategories: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for record in records:
+        item = _fcv_subcategory_item(record)
+        identity = str(item.get("govtribe_id") or item.get("display_name") or item.get("name") or "").strip()
+        if not identity or identity in seen:
+            continue
+        seen.add(identity)
+        subcategories.append(item)
+    return {"subcategories": subcategories[:15]} if subcategories else {}
+
+
+def _fcv_subcategory_names(profile: dict[str, Any], *, max_items: int = 15) -> list[str]:
+    values: list[str] = []
+    items = profile.get("subcategories")
+    if not isinstance(items, list):
+        return []
+    for item in items:
+        if isinstance(item, dict):
+            values.append(str(item.get("display_name") or item.get("name") or item.get("short_name") or "").strip())
+    return _signal_values(values)[:max_items]
 
 
 def _vehicle_url(value: Any) -> str:
@@ -1842,11 +2547,51 @@ def _enrich_vendor_record_from_awards_and_vehicles(
         if args:
             tool_name = _tool_name(award_tool)
             try:
+                _selected_aggregations, skipped_aggregations = _vendor_award_aggregation_selection(award_tool)
+                if skipped_aggregations:
+                    notes.append(
+                        "GovTribe award aggregations unavailable in tool schema: "
+                        + ", ".join(skipped_aggregations)
+                    )
                 result = client.call_tool(tool_name, args)
                 aggregation_maps = _tool_result_aggregation_maps(result)
+                award_profile = _vendor_award_profile_from_aggregations(aggregation_maps)
                 buyers = _vendor_aggregation_buyers(aggregation_maps)
                 vehicles = _vendor_aggregation_vehicles(aggregation_maps)
                 expired_vehicles = _vendor_aggregation_expired_vehicles(aggregation_maps)
+                award_naics_items = _award_profile_naics_items(award_profile)
+                award_naics = _award_profile_naics_codes(award_profile)
+                locations = _award_profile_names(award_profile, "top_locations")
+                states = dedupe_strings(
+                    [
+                        str(item.get("state") or "").strip()
+                        for item in award_profile.get("top_locations", [])
+                        if isinstance(item, dict) and str(item.get("state") or "").strip()
+                    ]
+                )
+                set_asides = _award_profile_names(award_profile, "top_set_asides")
+                contract_types = _award_profile_names(award_profile, "top_contract_types")
+                pricing_types = _award_profile_names(award_profile, "top_pricing_types")
+                if award_profile:
+                    enriched["govtribe_award_profile"] = award_profile
+                    enriched["prime_or_sub"] = _signal_values(
+                        [*coerce_string_list(enriched.get("prime_or_sub"), max_items=10), "prime"]
+                    )[:4]
+                if award_naics_items:
+                    existing_items = [item for item in enriched.get("naics_items", []) if isinstance(item, dict)]
+                    enriched["naics_items"] = [*existing_items]
+                    seen_items = {json.dumps(item, ensure_ascii=True, sort_keys=True) for item in existing_items}
+                    for item in award_naics_items:
+                        key = json.dumps(item, ensure_ascii=True, sort_keys=True)
+                        if key in seen_items:
+                            continue
+                        seen_items.add(key)
+                        enriched["naics_items"].append(item)
+                    enriched["naics_items"] = enriched["naics_items"][:12]
+                if award_naics:
+                    enriched["naics"] = dedupe_strings(
+                        [*coerce_string_list(enriched.get("naics"), max_items=20), *award_naics]
+                    )[:12]
                 if buyers:
                     enriched["buyers"] = _signal_values([*coerce_string_list(enriched.get("buyers"), max_items=20), *buyers])[:12]
                 if vehicles:
@@ -1857,6 +2602,26 @@ def _enrich_vendor_record_from_awards_and_vehicles(
                     enriched["expired_contract_vehicles"] = _signal_values(
                         [*coerce_string_list(enriched.get("expired_contract_vehicles"), max_items=20), *expired_vehicles]
                     )[:15]
+                if locations:
+                    enriched["places_of_performance"] = _signal_values(
+                        [*coerce_string_list(enriched.get("places_of_performance"), max_items=20), *locations]
+                    )[:12]
+                if states:
+                    enriched["preferred_states"] = dedupe_strings(
+                        [*coerce_string_list(enriched.get("preferred_states"), max_items=20), *states]
+                    )[:12]
+                if set_asides:
+                    enriched["set_asides"] = _signal_values(
+                        [*coerce_string_list(enriched.get("set_asides"), max_items=20), *set_asides]
+                    )[:12]
+                if contract_types:
+                    enriched["contract_types"] = _signal_values(
+                        [*coerce_string_list(enriched.get("contract_types"), max_items=20), *contract_types]
+                    )[:12]
+                if pricing_types:
+                    enriched["pricing_types"] = _signal_values(
+                        [*coerce_string_list(enriched.get("pricing_types"), max_items=20), *pricing_types]
+                    )[:12]
                 records, call_errors = _tool_result_records_and_errors(result)
                 if records:
                     enriched["award_signals"] = _signal_values(
@@ -1868,28 +2633,170 @@ def _enrich_vendor_record_from_awards_and_vehicles(
             except (MCPResponseError, MCPHTTPError) as exc:
                 errors.append(f"{tool_name}: {exc}")
 
+    sci_tool = families.get("service_contract_inventory")
+    if sci_tool:
+        args = _vendor_sci_aggregation_arguments(sci_tool, vendor_record)
+        if args:
+            tool_name = _tool_name(sci_tool)
+            try:
+                _selected_aggregations, skipped_aggregations = _vendor_sci_aggregation_selection(sci_tool)
+                if skipped_aggregations:
+                    notes.append(
+                        "GovTribe Service Contract Inventory aggregations unavailable in tool schema: "
+                        + ", ".join(skipped_aggregations)
+                    )
+                result = client.call_tool(tool_name, args)
+                aggregation_maps = _tool_result_aggregation_maps(result)
+                sci_profile = _sci_profile_from_aggregations(aggregation_maps)
+                roles = _award_profile_names(sci_profile, "top_roles")
+                prime_or_sub = _normalized_prime_or_sub(roles)
+                buyers = _signal_values(
+                    [
+                        *_award_profile_names(sci_profile, "top_contracting_buyers"),
+                        *_award_profile_names(sci_profile, "top_funding_buyers"),
+                    ]
+                )
+                states = _award_profile_names(sci_profile, "top_states")
+                sci_naics_items = _award_profile_naics_items(sci_profile)
+                sci_naics = _award_profile_naics_codes(sci_profile)
+                psc_codes = _profile_codes(sci_profile, "top_psc")
+                if sci_profile:
+                    enriched["govtribe_service_contract_inventory_profile"] = sci_profile
+                if roles:
+                    enriched["service_contract_roles"] = _signal_values(
+                        [*coerce_string_list(enriched.get("service_contract_roles"), max_items=20), *roles]
+                    )[:12]
+                if prime_or_sub:
+                    enriched["prime_or_sub"] = _signal_values(
+                        [*coerce_string_list(enriched.get("prime_or_sub"), max_items=10), *prime_or_sub]
+                    )[:4]
+                if buyers:
+                    enriched["buyers"] = _signal_values([*coerce_string_list(enriched.get("buyers"), max_items=20), *buyers])[:12]
+                if states:
+                    enriched["preferred_states"] = dedupe_strings(
+                        [*coerce_string_list(enriched.get("preferred_states"), max_items=20), *states]
+                    )[:12]
+                if sci_naics_items:
+                    existing_items = [item for item in enriched.get("naics_items", []) if isinstance(item, dict)]
+                    enriched["naics_items"] = [*existing_items]
+                    seen_items = {json.dumps(item, ensure_ascii=True, sort_keys=True) for item in existing_items}
+                    for item in sci_naics_items:
+                        key = json.dumps(item, ensure_ascii=True, sort_keys=True)
+                        if key in seen_items:
+                            continue
+                        seen_items.add(key)
+                        enriched["naics_items"].append(item)
+                    enriched["naics_items"] = enriched["naics_items"][:12]
+                if sci_naics:
+                    enriched["naics"] = dedupe_strings(
+                        [*coerce_string_list(enriched.get("naics"), max_items=20), *sci_naics]
+                    )[:12]
+                if psc_codes:
+                    enriched["psc_codes"] = dedupe_strings(
+                        [*coerce_string_list(enriched.get("psc_codes"), max_items=20), *psc_codes]
+                    )[:12]
+                records, call_errors = _tool_result_records_and_errors(result)
+                errors.extend(f"{tool_name}: {error}" for error in call_errors)
+                if records:
+                    enriched["service_contract_inventory_signals"] = _signal_values(
+                        [
+                            *coerce_string_list(enriched.get("service_contract_inventory_signals"), max_items=20),
+                            *[_record_title(record) for record in records[:8]],
+                        ]
+                    )[:10]
+                tool_names.append(tool_name)
+                notes.append(f"GovTribe Service Contract Inventory aggregations used: {tool_name}")
+            except (MCPResponseError, MCPHTTPError) as exc:
+                errors.append(f"{tool_name}: {exc}")
+
     vehicle_tool = families.get("vehicles")
     if vehicle_tool:
         args = _vendor_vehicle_search_arguments(vehicle_tool, vendor_record)
-        tool_name = _tool_name(vehicle_tool)
-        try:
-            result = client.call_tool(tool_name, args)
-            records, call_errors = _tool_result_records_and_errors(result)
-            vehicle_names = _vehicle_names_from_records(records)
-            expired_vehicle_names = _expired_vehicle_names_from_records(records)
-            if vehicle_names:
-                enriched["contract_vehicles"] = _signal_values(
-                    [*coerce_string_list(enriched.get("contract_vehicles"), max_items=20), *vehicle_names]
-                )[:15]
-            if expired_vehicle_names:
-                enriched["expired_contract_vehicles"] = _signal_values(
-                    [*coerce_string_list(enriched.get("expired_contract_vehicles"), max_items=20), *expired_vehicle_names]
-                )[:15]
-            errors.extend(f"{tool_name}: {error}" for error in call_errors)
-            tool_names.append(tool_name)
-            notes.append(f"GovTribe MCP vehicle search used: {tool_name}")
-        except (MCPResponseError, MCPHTTPError) as exc:
-            errors.append(f"{tool_name}: {exc}")
+        if args:
+            tool_name = _tool_name(vehicle_tool)
+            try:
+                result = client.call_tool(tool_name, args)
+                records, call_errors = _tool_result_records_and_errors(result)
+                vehicle_names = _vehicle_names_from_records(records)
+                expired_vehicle_names = _expired_vehicle_names_from_records(records)
+                if vehicle_names:
+                    enriched["contract_vehicles"] = _signal_values(
+                        [*coerce_string_list(enriched.get("contract_vehicles"), max_items=20), *vehicle_names]
+                    )[:15]
+                if expired_vehicle_names:
+                    enriched["expired_contract_vehicles"] = _signal_values(
+                        [*coerce_string_list(enriched.get("expired_contract_vehicles"), max_items=20), *expired_vehicle_names]
+                    )[:15]
+                errors.extend(f"{tool_name}: {error}" for error in call_errors)
+                tool_names.append(tool_name)
+                notes.append(f"GovTribe MCP vehicle search used: {tool_name}")
+            except (MCPResponseError, MCPHTTPError) as exc:
+                errors.append(f"{tool_name}: {exc}")
+
+    subcategory_tool = families.get("fcv_subcategories")
+    if subcategory_tool:
+        args = _vendor_fcv_subcategory_search_arguments(subcategory_tool, vendor_record)
+        if args:
+            tool_name = _tool_name(subcategory_tool)
+            try:
+                result = client.call_tool(tool_name, args)
+                records, call_errors = _tool_result_records_and_errors(result)
+                subcategory_profile = _fcv_subcategory_profile_from_records(records)
+                subcategory_names = _fcv_subcategory_names(subcategory_profile)
+                if subcategory_profile:
+                    enriched["govtribe_vehicle_subcategory_profile"] = subcategory_profile
+                if subcategory_names:
+                    enriched["contract_vehicle_subcategories"] = _signal_values(
+                        [*coerce_string_list(enriched.get("contract_vehicle_subcategories"), max_items=20), *subcategory_names]
+                    )[:15]
+                errors.extend(f"{tool_name}: {error}" for error in call_errors)
+                tool_names.append(tool_name)
+                notes.append(f"GovTribe vehicle subcategory search used: {tool_name}")
+            except (MCPResponseError, MCPHTTPError) as exc:
+                errors.append(f"{tool_name}: {exc}")
+
+    sub_award_tool = families.get("sub_awards")
+    if sub_award_tool:
+        args = _vendor_sub_award_search_arguments(sub_award_tool, vendor_record)
+        if args:
+            tool_name = _tool_name(sub_award_tool)
+            try:
+                _selected_aggregations, skipped_aggregations = _vendor_sub_award_aggregation_selection(sub_award_tool)
+                if skipped_aggregations:
+                    notes.append(
+                        "GovTribe sub-award aggregations unavailable in tool schema: "
+                        + ", ".join(skipped_aggregations)
+                    )
+                result = client.call_tool(tool_name, args)
+                records, call_errors = _tool_result_records_and_errors(result)
+                aggregation_maps = _tool_result_aggregation_maps(result)
+                sub_award_profile, buyers, roles = _sub_award_profile_from_records(records, aggregation_maps, vendor_record)
+                if sub_award_profile:
+                    enriched["govtribe_sub_award_profile"] = sub_award_profile
+                if buyers:
+                    enriched["buyers"] = _signal_values([*coerce_string_list(enriched.get("buyers"), max_items=20), *buyers])[:12]
+                if roles:
+                    enriched["prime_or_sub"] = _signal_values(
+                        [*coerce_string_list(enriched.get("prime_or_sub"), max_items=10), *roles]
+                    )[:4]
+                prime_partners = _award_profile_names(sub_award_profile, "top_prime_contractors")
+                if "subcontractor" in roles and prime_partners:
+                    enriched["teaming_preferences"] = _signal_values(
+                        [
+                            *coerce_string_list(enriched.get("teaming_preferences"), max_items=20),
+                            *[f"Historical sub-award prime: {name}" for name in prime_partners],
+                        ]
+                    )[:12]
+                sub_award_signals = coerce_string_list(sub_award_profile.get("sub_award_signals"), max_items=10)
+                if sub_award_signals:
+                    enriched["award_signals"] = _signal_values(
+                        [*coerce_string_list(enriched.get("award_signals"), max_items=20), *sub_award_signals]
+                    )[:10]
+                errors.extend(f"{tool_name}: {error}" for error in call_errors)
+                tool_names.append(tool_name)
+                notes.append(f"GovTribe sub-award search used: {tool_name}")
+            except (MCPResponseError, MCPHTTPError) as exc:
+                errors.append(f"{tool_name}: {exc}")
 
     return enriched, dedupe_strings([*notes, *errors]), dedupe_strings(tool_names)
 
@@ -1913,6 +2820,17 @@ def _normalize_vendor_record(record: dict[str, Any], *, source_config: dict[str,
     buyers = _vendor_record_buyers(record)
     award_signals = _vendor_record_award_signals(record)
     keywords = _signal_values([*naics_codes, *vehicles, *buyers])[:12]
+    prime_or_sub = ["subcontractor"] if record.get("federal_contract_sub_awards") else []
+    parent_or_child = _first_text(record, "parent_or_child", "parentOrChild")
+    parent_vendor = _vendor_parent_record(record)
+    vendor_hierarchy = {
+        key: value
+        for key, value in {
+            "parent_or_child": parent_or_child,
+            "parent": parent_vendor,
+        }.items()
+        if value
+    }
     return {
         "source_id": str(source_config.get("id") or SOURCE_ID).strip(),
         "source_name": str(source_config.get("name") or SOURCE_NAME).strip(),
@@ -1933,6 +2851,10 @@ def _normalize_vendor_record(record: dict[str, Any], *, source_config: dict[str,
         "buyers": buyers,
         "award_signals": award_signals,
         "keywords": keywords,
+        "prime_or_sub": prime_or_sub,
+        "parent_or_child": parent_or_child,
+        "parent_vendor": parent_vendor,
+        "vendor_hierarchy": vendor_hierarchy,
         "raw_record": record,
     }
 

@@ -178,6 +178,13 @@ class FakeGovTribeVendorClient:
                 "govtribe_url": "https://govtribe.com/vendors/halvik-corp-5grr4",
                 "uei": "ABC123DEF456",
                 "name": "Halvik, LLC",
+                "parent_or_child": "Child",
+                "parent": {
+                    "govtribe_id": "parent-123",
+                    "uei": "PARENTUEI123",
+                    "name": "Halvik Parent Inc.",
+                    "govtribe_url": "https://govtribe.com/vendors/halvik-parent",
+                },
                 "govtribe_ai_summary": "Halvik provides federal IT modernization and cybersecurity services.",
                 "location": {"city": "Vienna", "state": "VA", "country": "USA"},
                 "sba_certifications": ["SBA Certified 8A Program Participant"],
@@ -238,9 +245,12 @@ class FakeGovTribeVendorClient:
                                     "address",
                                     "sba_certifications",
                                     "business_types",
+                                    "parent_or_child",
+                                    "parent",
                                     "naics_category",
                                     "federal_contract_awards",
                                     "federal_contract_idvs",
+                                    "federal_contract_sub_awards",
                                     "awarded_federal_contract_vehicle",
                                 ],
                             },
@@ -279,6 +289,14 @@ class FakeGovTribeVendorIntelClient(FakeGovTribeVendorClient):
                                     "top_contracting_federal_agencies_by_dollars_obligated",
                                     "top_funding_federal_agencies_by_dollars_obligated",
                                     "top_federal_contract_vehicles_by_dollars_obligated",
+                                    "top_naics_codes_by_dollars_obligated",
+                                    "top_locations_by_dollars_obligated",
+                                    "top_set_aside_types_by_dollars_obligated",
+                                    "top_contract_types_by_dollars_obligated",
+                                    "top_pricing_types_by_dollars_obligated",
+                                    "dollars_obligated_stats",
+                                    "ceiling_value_stats",
+                                    "base_and_exercised_options_value_stats",
                                 ],
                             },
                         },
@@ -309,6 +327,122 @@ class FakeGovTribeVendorIntelClient(FakeGovTribeVendorClient):
                                     "last_date_to_order",
                                     "federal_agency",
                                     "federal_contract_awards",
+                                ],
+                            },
+                        },
+                    },
+                    "required": [],
+                },
+            },
+            {
+                "name": "Search_Service_Contract_Inventory",
+                "description": "Searches GovTribe Service Contract Inventory records for pricing and workforce analysis.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "per_page": {"type": "number"},
+                        "page": {"type": "number"},
+                        "vendor_ids": {"type": "array", "items": {"type": "string"}},
+                        "aggregations": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "hours_invoiced_stats",
+                                    "ftes_stats",
+                                    "total_dollar_amount_invoiced_stats",
+                                    "total_contractor_hours_invoiced_stats",
+                                    "total_ftes_stats",
+                                    "total_dollars_obligated_stats",
+                                    "total_base_and_all_options_value_stats",
+                                    "subcontractor_count_stats",
+                                    "sub_hours_share_stats",
+                                    "derived_hourly_rate_stats",
+                                    "top_fiscal_years_by_doc_count",
+                                    "top_coverage_scopes_by_doc_count",
+                                    "top_roles_by_doc_count",
+                                    "top_additional_reporting_by_doc_count",
+                                    "top_psc_categories_by_doc_count",
+                                    "top_naics_categories_by_doc_count",
+                                    "top_contracting_agencies_by_doc_count",
+                                    "top_funding_agencies_by_doc_count",
+                                    "top_place_of_performance_states_by_doc_count",
+                                    "top_place_of_performance_countries_by_doc_count",
+                                    "top_contract_numbers_by_doc_count",
+                                ],
+                            },
+                        },
+                    },
+                    "required": [],
+                },
+            },
+            {
+                "name": "Search_FCV_Subcategories",
+                "description": "Searches federal contract vehicle subcategories, including GSA MAS SINs and pools.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "search_mode": {"type": "string", "enum": ["keyword", "semantic"]},
+                        "per_page": {"type": "number"},
+                        "page": {"type": "number"},
+                        "vendor_ids": {"type": "array", "items": {"type": "string"}},
+                        "fields_to_return": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "govtribe_id",
+                                    "name",
+                                    "short_name",
+                                    "alternate_name",
+                                    "shared_ceiling",
+                                    "federal_contract_vehicle",
+                                    "awardees",
+                                    "federal_contract_idvs",
+                                ],
+                            },
+                        },
+                    },
+                    "required": [],
+                },
+            },
+            {
+                "name": "Search_Federal_Contract_Sub_Awards",
+                "description": "Searches GovTribe federal contract sub-awards and returns prime and subcontractor records.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "search_mode": {"type": "string", "enum": ["keyword", "semantic"]},
+                        "per_page": {"type": "number"},
+                        "page": {"type": "number"},
+                        "vendor_ids": {"type": "array", "items": {"type": "string"}},
+                        "fields_to_return": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "govtribe_id",
+                                    "name",
+                                    "award_date",
+                                    "description",
+                                    "sub_contractor",
+                                    "prime_contractor",
+                                    "contracting_federal_agency",
+                                    "funding_federal_agency",
+                                ],
+                            },
+                        },
+                        "aggregations": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "top_awardees_by_doc_count",
+                                    "top_funding_federal_agencies_by_doc_count",
+                                    "top_contracting_federal_agencies_by_doc_count",
                                 ],
                             },
                         },
@@ -373,6 +507,82 @@ class FakeGovTribeVendorIntelClient(FakeGovTribeVendorClient):
                                 }
                             ]
                         },
+                        "top_naics_codes_by_dollars_obligated": {
+                            "buckets": [
+                                {
+                                    "key": {
+                                        "gov_tribe_i_d": "541512-N",
+                                        "name": "Computer Systems Design Services",
+                                        "n_a_i_c_s": "541512",
+                                    },
+                                    "doc_count": 22,
+                                    "sum_value": {"value": 25000000},
+                                },
+                                {
+                                    "key": {
+                                        "gov_tribe_i_d": "541519-N",
+                                        "name": "Other Computer Related Services",
+                                        "n_a_i_c_s": "541519",
+                                    },
+                                    "doc_count": 8,
+                                    "sum_value": {"value": 5000000},
+                                },
+                            ]
+                        },
+                        "top_locations_by_dollars_obligated": {
+                            "buckets": [
+                                {
+                                    "key": {"type": "Location", "name": "Vienna, VA 22182, USA"},
+                                    "doc_count": 12,
+                                    "sum_value": {"value": 22000000},
+                                },
+                                {
+                                    "key": {"type": "Location", "name": "Washington, DC 20001, USA"},
+                                    "doc_count": 3,
+                                    "sum_value": {"value": 3000000},
+                                },
+                            ]
+                        },
+                        "top_set_aside_types_by_dollars_obligated": {
+                            "buckets": [
+                                {"key": "No Set-Aside Used", "doc_count": 15, "sum_value": {"value": 20000000}},
+                                {"key": "Total Small Business", "doc_count": 4, "sum_value": {"value": 4000000}},
+                                {"key": "Competitive 8(a)", "doc_count": 2, "sum_value": {"value": 1000000}},
+                            ]
+                        },
+                        "top_contract_types_by_dollars_obligated": {
+                            "buckets": [
+                                {"key": "Delivery Order", "doc_count": 17, "sum_value": {"value": 21000000}},
+                                {"key": "Definitive Contract", "doc_count": 2, "sum_value": {"value": 3000000}},
+                            ]
+                        },
+                        "top_pricing_types_by_dollars_obligated": {
+                            "buckets": [
+                                {"key": "Firm Fixed Price", "doc_count": 14, "sum_value": {"value": 18000000}},
+                                {"key": "Time and Materials", "doc_count": 5, "sum_value": {"value": 7000000}},
+                            ]
+                        },
+                        "dollars_obligated_stats": {
+                            "count": 24,
+                            "min": 1000,
+                            "max": 10000000,
+                            "avg": 1250000,
+                            "sum": 30000000,
+                        },
+                        "ceiling_value_stats": {
+                            "count": 24,
+                            "min": 0,
+                            "max": 40000000,
+                            "avg": 3000000,
+                            "sum": 72000000,
+                        },
+                        "base_and_exercised_options_value_stats": {
+                            "count": 24,
+                            "min": 500,
+                            "max": 11000000,
+                            "avg": 1350000,
+                            "sum": 32400000,
+                        },
                     },
                 }
             }
@@ -395,6 +605,86 @@ class FakeGovTribeVendorIntelClient(FakeGovTribeVendorClient):
                             "last_date_to_order": "2120-07-02T04:00:00Z",
                         }
                     ]
+                }
+            }
+        if name == "Search_Service_Contract_Inventory":
+            return {
+                "structuredContent": {
+                    "total": 9,
+                    "aggregations": {
+                        "derived_hourly_rate_stats": {"count": 9, "min": 82.5, "max": 156.75, "avg": 118.4},
+                        "total_dollar_amount_invoiced_stats": {"count": 9, "sum": 2450000, "avg": 272222.22},
+                        "hours_invoiced_stats": {"count": 9, "sum": 20692, "avg": 2299.1},
+                        "ftes_stats": {"count": 9, "sum": 10.4, "avg": 1.15},
+                        "top_roles_by_doc_count": {
+                            "buckets": [
+                                {"key": "prime", "doc_count": 7},
+                                {"key": "sub", "doc_count": 2},
+                            ]
+                        },
+                        "top_psc_categories_by_doc_count": {
+                            "buckets": [
+                                {
+                                    "key": {"code": "D399", "name": "D399 - IT and Telecom Other IT and Telecommunications"},
+                                    "doc_count": 5,
+                                }
+                            ]
+                        },
+                        "top_naics_categories_by_doc_count": {
+                            "buckets": [
+                                {
+                                    "key": {"n_a_i_c_s": "541513", "name": "Computer Facilities Management Services"},
+                                    "doc_count": 3,
+                                }
+                            ]
+                        },
+                        "top_contracting_agencies_by_doc_count": {
+                            "buckets": [{"key": {"name": "Department of Health and Human Services"}, "doc_count": 4}]
+                        },
+                        "top_place_of_performance_states_by_doc_count": {
+                            "buckets": [{"key": "MD", "doc_count": 4}]
+                        },
+                        "top_fiscal_years_by_doc_count": {
+                            "buckets": [{"key": 2024, "doc_count": 5}]
+                        },
+                    },
+                }
+            }
+        if name == "Search_FCV_Subcategories":
+            return {
+                "structuredContent": {
+                    "records": [
+                        {
+                            "govtribe_id": "SIN-54151S",
+                            "name": "Information Technology Professional Services",
+                            "short_name": "54151S",
+                            "shared_ceiling": 50000000,
+                            "federal_contract_vehicle": {"name": "Multiple Award Schedule"},
+                        }
+                    ]
+                }
+            }
+        if name == "Search_Federal_Contract_Sub_Awards":
+            return {
+                "structuredContent": {
+                    "records": [
+                        {
+                            "govtribe_id": "SUB-1",
+                            "name": "Cloud migration support subaward",
+                            "award_date": "2024-02-01",
+                            "prime_contractor": {"name": "Large Prime Integrator"},
+                            "sub_contractor": {"name": "Halvik, LLC", "uei": "ABC123DEF456"},
+                            "funding_federal_agency": {"name": "Department of Treasury"},
+                        }
+                    ],
+                    "aggregations": {
+                        "top_awardees_by_doc_count": {
+                            "buckets": [{"key": {"name": "Large Prime Integrator"}, "doc_count": 1}]
+                        },
+                        "top_funding_federal_agencies_by_doc_count": {
+                            "buckets": [{"key": {"name": "Department of Treasury"}, "doc_count": 1}]
+                        },
+                    },
                 }
             }
         return {"structuredContent": {"records": self._records}}
@@ -630,6 +920,10 @@ def main() -> int:
             failures.append("govtribe_vendor_naics_items_normalized")
         if isinstance(vendor_record, dict) and "SBA Certified 8A Program Participant" not in vendor_record.get("certifications", []):
             failures.append("govtribe_vendor_certifications_normalized")
+        if isinstance(vendor_record, dict) and vendor_record.get("parent_or_child") != "Child":
+            failures.append("govtribe_vendor_parent_or_child_normalized")
+        if isinstance(vendor_record, dict) and vendor_record.get("parent_vendor", {}).get("name") != "Halvik Parent Inc.":
+            failures.append("govtribe_vendor_parent_normalized")
         if isinstance(vendor_record, dict) and "GSA MAS" not in vendor_record.get("contract_vehicles", []):
             failures.append("govtribe_vendor_vehicle_normalized")
         if isinstance(vendor_record, dict) and "Expired Vendor Vehicle" in vendor_record.get("contract_vehicles", []):
@@ -649,6 +943,8 @@ def main() -> int:
         fields = uei_args.get("fields_to_return", [])
         if not isinstance(fields, list) or "uei" not in fields or "federal_contract_awards" not in fields:
             failures.append("govtribe_vendor_fields_to_return")
+        if isinstance(fields, list) and ("parent_or_child" not in fields or "parent" not in fields):
+            failures.append("govtribe_vendor_hierarchy_fields_to_return")
 
         name_result = provider.resolve_vendor_profile(lookup="Halvik, LLC")
         if name_result.get("status") != "ok":
@@ -725,19 +1021,127 @@ def main() -> int:
                 failures.append("govtribe_vendor_tracks_expired_search_vehicle")
             if "Department of Commerce US Patent and Trademark Office" in intel_record.get("keywords", []):
                 failures.append("govtribe_vendor_intel_buyers_not_keywords")
+            if "541512" not in intel_record.get("naics", []):
+                failures.append("govtribe_vendor_award_aggregation_naics")
+            if "Vienna, VA 22182, USA" not in intel_record.get("places_of_performance", []):
+                failures.append("govtribe_vendor_award_aggregation_location")
+            if "VA" not in intel_record.get("preferred_states", []):
+                failures.append("govtribe_vendor_award_aggregation_state")
+            if "Total Small Business" not in intel_record.get("set_asides", []):
+                failures.append("govtribe_vendor_award_aggregation_set_aside")
+            if "Delivery Order" not in intel_record.get("contract_types", []):
+                failures.append("govtribe_vendor_award_aggregation_contract_type")
+            if "Firm Fixed Price" not in intel_record.get("pricing_types", []):
+                failures.append("govtribe_vendor_award_aggregation_pricing_type")
+            if "prime" not in intel_record.get("prime_or_sub", []):
+                failures.append("govtribe_vendor_award_aggregation_prime_posture")
+            if "subcontractor" not in intel_record.get("prime_or_sub", []):
+                failures.append("govtribe_vendor_sub_award_or_sci_sub_posture")
+            if "541513" not in intel_record.get("naics", []):
+                failures.append("govtribe_vendor_sci_naics")
+            if "D399" not in intel_record.get("psc_codes", []):
+                failures.append("govtribe_vendor_sci_psc")
+            if "prime" not in intel_record.get("service_contract_roles", []):
+                failures.append("govtribe_vendor_sci_role")
+            if "Multiple Award Schedule: 54151S" not in intel_record.get("contract_vehicle_subcategories", []):
+                failures.append("govtribe_vendor_fcv_subcategory")
+            if "Historical sub-award prime: Large Prime Integrator" not in intel_record.get("teaming_preferences", []):
+                failures.append("govtribe_vendor_sub_award_teaming_preference")
+            award_profile = intel_record.get("govtribe_award_profile", {})
+            if not isinstance(award_profile, dict) or "value_stats" not in award_profile:
+                failures.append("govtribe_vendor_award_profile_value_stats")
+            sci_profile = intel_record.get("govtribe_service_contract_inventory_profile", {})
+            if not isinstance(sci_profile, dict) or sci_profile.get("value_stats", {}).get("derived_hourly_rate", {}).get("avg") != 118.4:
+                failures.append("govtribe_vendor_sci_profile_rate_stats")
+            if "govtribe_vehicle_subcategory_profile" not in intel_record:
+                failures.append("govtribe_vendor_fcv_subcategory_profile")
+            if "govtribe_sub_award_profile" not in intel_record:
+                failures.append("govtribe_vendor_sub_award_profile")
         intel_call_args = {name: args for name, args in intel_client.calls}
         award_args = intel_call_args.get("Search_Federal_Contract_Awards", {})
         vehicle_args = intel_call_args.get("Search_Federal_Contract_Vehicles", {})
+        sci_args = intel_call_args.get("Search_Service_Contract_Inventory", {})
+        subcategory_args = intel_call_args.get("Search_FCV_Subcategories", {})
+        sub_award_args = intel_call_args.get("Search_Federal_Contract_Sub_Awards", {})
         if award_args.get("vendor_ids") != ["ABC123DEF456", "vendor-123"]:
             failures.append("govtribe_vendor_award_aggregation_vendor_filter")
         if award_args.get("per_page") != 0:
             failures.append("govtribe_vendor_award_aggregation_per_page_zero")
         if "top_contracting_federal_agencies_by_dollars_obligated" not in award_args.get("aggregations", []):
             failures.append("govtribe_vendor_award_aggregation_requested_buyers")
+        for expected_aggregation in (
+            "top_naics_codes_by_dollars_obligated",
+            "top_locations_by_dollars_obligated",
+            "top_set_aside_types_by_dollars_obligated",
+            "top_contract_types_by_dollars_obligated",
+            "top_pricing_types_by_dollars_obligated",
+            "dollars_obligated_stats",
+            "ceiling_value_stats",
+            "base_and_exercised_options_value_stats",
+        ):
+            if expected_aggregation not in award_args.get("aggregations", []):
+                failures.append(f"govtribe_vendor_award_aggregation_requested_{expected_aggregation}")
         if vehicle_args.get("vendor_ids") != ["ABC123DEF456", "vendor-123"]:
             failures.append("govtribe_vendor_vehicle_vendor_filter")
         if vehicle_args.get("per_page") != 15:
             failures.append("govtribe_vendor_vehicle_per_page")
+        if sci_args.get("vendor_ids") != ["ABC123DEF456", "vendor-123"]:
+            failures.append("govtribe_vendor_sci_vendor_filter")
+        if sci_args.get("per_page") != 0:
+            failures.append("govtribe_vendor_sci_per_page_zero")
+        for expected_aggregation in (
+            "derived_hourly_rate_stats",
+            "total_dollar_amount_invoiced_stats",
+            "top_roles_by_doc_count",
+            "top_psc_categories_by_doc_count",
+            "top_naics_categories_by_doc_count",
+        ):
+            if expected_aggregation not in sci_args.get("aggregations", []):
+                failures.append(f"govtribe_vendor_sci_aggregation_requested_{expected_aggregation}")
+        if subcategory_args.get("vendor_ids") != ["ABC123DEF456", "vendor-123"]:
+            failures.append("govtribe_vendor_fcv_subcategory_vendor_filter")
+        if subcategory_args.get("per_page") != 20:
+            failures.append("govtribe_vendor_fcv_subcategory_per_page")
+        if sub_award_args.get("vendor_ids") != ["ABC123DEF456", "vendor-123"]:
+            failures.append("govtribe_vendor_sub_award_vendor_filter")
+        if sub_award_args.get("per_page") != 10:
+            failures.append("govtribe_vendor_sub_award_per_page")
+
+        limited_client = FakeGovTribeVendorIntelClient()
+        limited_tools = limited_client.list_tools()
+        for tool in limited_tools:
+            if tool.get("name") != "Search_Federal_Contract_Awards":
+                continue
+            aggregations = tool["inputSchema"]["properties"]["aggregations"]["items"]["enum"]
+            tool["inputSchema"]["properties"]["aggregations"]["items"]["enum"] = aggregations[:3]
+        for tool in limited_tools:
+            if tool.get("name") != "Search_Service_Contract_Inventory":
+                continue
+            aggregations = tool["inputSchema"]["properties"]["aggregations"]["items"]["enum"]
+            tool["inputSchema"]["properties"]["aggregations"]["items"]["enum"] = aggregations[:3]
+        limited_client.list_tools = lambda: limited_tools  # type: ignore[method-assign]
+        limited_provider = GovTribeMCPCommercialIntelProvider(
+            {
+                "id": "govtribe_mcp_commercial_intel",
+                "name": "GovTribe MCP Commercial Intelligence",
+                "homepage": "https://govtribe.com/mcp",
+            },
+            client=limited_client,  # type: ignore[arg-type]
+        )
+        limited_result = limited_provider.resolve_vendor_profile(lookup="ABC123DEF456")
+        if limited_result.get("status") != "ok":
+            failures.append("govtribe_vendor_limited_aggregation_status")
+        limited_award_args = {name: args for name, args in limited_client.calls}.get("Search_Federal_Contract_Awards", {})
+        if "top_naics_codes_by_dollars_obligated" in limited_award_args.get("aggregations", []):
+            failures.append("govtribe_vendor_limited_aggregation_skips_unsupported")
+        limited_sci_args = {name: args for name, args in limited_client.calls}.get("Search_Service_Contract_Inventory", {})
+        if "derived_hourly_rate_stats" in limited_sci_args.get("aggregations", []):
+            failures.append("govtribe_vendor_limited_sci_aggregation_skips_unsupported")
+        limited_notes = " ".join(str(item) for item in limited_result.get("notes", []))
+        if "unavailable in tool schema" not in limited_notes:
+            failures.append("govtribe_vendor_limited_aggregation_note")
+        if "Service Contract Inventory aggregations unavailable" not in limited_notes:
+            failures.append("govtribe_vendor_limited_sci_aggregation_note")
 
     with patch.dict(os.environ, {"GOVTRIBE_MCP_API_KEY": "test-key"}, clear=True):
         fake_client = FakeGovTribeClient()

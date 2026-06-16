@@ -594,6 +594,226 @@ def _govtribe_fit_narrative(vendor_record: dict[str, Any]) -> str:
     return f"Prioritize opportunities involving {', '.join(parts)}{buyer_note}{vehicle_note}. Avoid grants until the user explicitly opts in."
 
 
+def _govtribe_award_profile(vendor_record: dict[str, Any]) -> dict[str, Any]:
+    value = vendor_record.get("govtribe_award_profile")
+    return value if isinstance(value, dict) else {}
+
+
+def _govtribe_sci_profile(vendor_record: dict[str, Any]) -> dict[str, Any]:
+    value = vendor_record.get("govtribe_service_contract_inventory_profile")
+    return value if isinstance(value, dict) else {}
+
+
+def _govtribe_vehicle_subcategory_profile(vendor_record: dict[str, Any]) -> dict[str, Any]:
+    value = vendor_record.get("govtribe_vehicle_subcategory_profile")
+    return value if isinstance(value, dict) else {}
+
+
+def _govtribe_sub_award_profile(vendor_record: dict[str, Any]) -> dict[str, Any]:
+    value = vendor_record.get("govtribe_sub_award_profile")
+    return value if isinstance(value, dict) else {}
+
+
+def _govtribe_parent_vendor(vendor_record: dict[str, Any]) -> dict[str, str]:
+    parent = vendor_record.get("parent_vendor")
+    if not isinstance(parent, dict):
+        hierarchy = vendor_record.get("vendor_hierarchy")
+        parent = hierarchy.get("parent") if isinstance(hierarchy, dict) else {}
+    if not isinstance(parent, dict):
+        return {}
+    output = {
+        "name": _clean_text(str(parent.get("name") or "")),
+        "uei": _clean_text(str(parent.get("uei") or "")),
+        "govtribe_id": _clean_text(str(parent.get("govtribe_id") or "")),
+        "govtribe_url": _clean_text(str(parent.get("govtribe_url") or "")),
+    }
+    return {key: value for key, value in output.items() if value}
+
+
+def _govtribe_vendor_hierarchy(vendor_record: dict[str, Any]) -> dict[str, Any]:
+    parent = _govtribe_parent_vendor(vendor_record)
+    relationship = _clean_text(str(vendor_record.get("parent_or_child") or ""))
+    if not relationship:
+        hierarchy = vendor_record.get("vendor_hierarchy")
+        if isinstance(hierarchy, dict):
+            relationship = _clean_text(str(hierarchy.get("parent_or_child") or ""))
+    output: dict[str, Any] = {}
+    if relationship:
+        output["parent_or_child"] = relationship
+    if parent:
+        output["parent"] = parent
+    return output
+
+
+def _govtribe_hierarchy_confirmation_prompt(vendor_name: str, vendor_record: dict[str, Any]) -> str:
+    parent = _govtribe_parent_vendor(vendor_record)
+    if not parent:
+        return ""
+    relationship = normalize_profile_term(str(vendor_record.get("parent_or_child") or ""))
+    if relationship and relationship != "child":
+        return ""
+    parent_name = parent.get("name") or "the parent vendor"
+    parent_uei = f" ({parent.get('uei')})" if parent.get("uei") else ""
+    return (
+        f"GovTribe resolved {vendor_name} as a child entity of {parent_name}{parent_uei}. "
+        f"Confirm whether this workspace should stay on {vendor_name} or move up the vendor chain to {parent_name} before scanning."
+    )
+
+
+def _govtribe_profile_naics_codes(profile: dict[str, Any], *, max_items: int = 5) -> list[str]:
+    values: list[str] = []
+    for item in profile.get("top_naics", []):
+        if isinstance(item, dict):
+            code = _clean_text(str(item.get("code") or ""))
+            if code:
+                values.append(code)
+    return _merge_unique([], values)[:max_items]
+
+
+def _govtribe_award_naics_codes(vendor_record: dict[str, Any], *, max_items: int = 5) -> list[str]:
+    return _govtribe_profile_naics_codes(_govtribe_award_profile(vendor_record), max_items=max_items)
+
+
+def _govtribe_set_aside_programs(values: list[Any]) -> list[str]:
+    programs = _clean_govtribe_values(values)
+    return [item for item in programs if normalize_profile_term(item) != "no set aside used"]
+
+
+def _format_money(value: Any) -> str:
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return ""
+    sign = "-" if amount < 0 else ""
+    amount = abs(amount)
+    for suffix, divisor in (("B", 1_000_000_000), ("M", 1_000_000), ("K", 1_000)):
+        if amount >= divisor:
+            return f"{sign}${amount / divisor:.1f}{suffix}"
+    return f"{sign}${amount:,.0f}"
+
+
+def _format_number(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if number.is_integer():
+        return f"{int(number):,}"
+    return f"{number:,.1f}"
+
+
+def _stat_number(value: Any) -> int | float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number.is_integer():
+        return int(number)
+    return number
+
+
+def _govtribe_stat_snapshot(stats: Any) -> dict[str, int | float]:
+    if not isinstance(stats, dict):
+        return {}
+    snapshot: dict[str, int | float] = {}
+    for key in ("count", "min", "max", "avg", "sum"):
+        number = _stat_number(stats.get(key))
+        if number is not None:
+            snapshot[key] = number
+    if "min" not in snapshot and "max" not in snapshot:
+        return {}
+    return snapshot
+
+
+def _govtribe_observed_award_value_range(vendor_record: dict[str, Any]) -> dict[str, Any]:
+    value_stats = _govtribe_award_profile(vendor_record).get("value_stats")
+    if not isinstance(value_stats, dict):
+        return {}
+    observed: dict[str, Any] = {
+        "basis": "historical_govtribe_award_aggregations",
+        "constraint_status": "observed_history_not_user_constraint",
+        "source_field": "govtribe_award_profile.value_stats",
+    }
+    for key in ("dollars_obligated", "ceiling_value", "base_and_exercised_options_value"):
+        snapshot = _govtribe_stat_snapshot(value_stats.get(key))
+        if snapshot:
+            observed[key] = snapshot
+    if len(observed) == 3:
+        return {}
+    return observed
+
+
+def _govtribe_value_stats_note(vendor_record: dict[str, Any]) -> str:
+    value_stats = _govtribe_award_profile(vendor_record).get("value_stats")
+    if not isinstance(value_stats, dict):
+        return "Needs confirmation"
+    obligated = value_stats.get("dollars_obligated")
+    if isinstance(obligated, dict):
+        count = obligated.get("count")
+        min_value = _format_money(obligated.get("min"))
+        avg = _format_money(obligated.get("avg"))
+        max_value = _format_money(obligated.get("max"))
+        total = _format_money(obligated.get("sum"))
+        parts = []
+        if count not in (None, ""):
+            parts.append(f"{count} award records")
+        if min_value:
+            parts.append(f"min obligated {min_value}")
+        if avg:
+            parts.append(f"average obligated {avg}")
+        if max_value:
+            parts.append(f"max obligated {max_value}")
+        if total:
+            parts.append(f"total obligated {total}")
+        if parts:
+            return "GovTribe award-history signal: " + ", ".join(parts) + "."
+    ceiling = value_stats.get("ceiling_value")
+    if isinstance(ceiling, dict):
+        max_ceiling = _format_money(ceiling.get("max"))
+        if max_ceiling:
+            return f"GovTribe award-history signal: max reported ceiling {max_ceiling}."
+    return "Needs confirmation"
+
+
+def _govtribe_sci_pricing_note(vendor_record: dict[str, Any]) -> str:
+    value_stats = _govtribe_sci_profile(vendor_record).get("value_stats")
+    if not isinstance(value_stats, dict):
+        return "Needs confirmation"
+    parts: list[str] = []
+    derived_rate = value_stats.get("derived_hourly_rate")
+    if isinstance(derived_rate, dict):
+        avg_rate = _format_money(derived_rate.get("avg"))
+        min_rate = _format_money(derived_rate.get("min"))
+        max_rate = _format_money(derived_rate.get("max"))
+        count = derived_rate.get("count")
+        if avg_rate:
+            rate_note = f"average derived hourly rate {avg_rate}"
+            bounds = [value for value in (min_rate, max_rate) if value]
+            if len(bounds) == 2:
+                rate_note += f" ({bounds[0]} to {bounds[1]})"
+            parts.append(rate_note)
+        if count not in (None, ""):
+            parts.append(f"{count} SCI records")
+    invoiced = value_stats.get("total_dollar_amount_invoiced")
+    if isinstance(invoiced, dict):
+        total = _format_money(invoiced.get("sum"))
+        if total:
+            parts.append(f"total invoiced {total}")
+    hours = value_stats.get("hours_invoiced") or value_stats.get("total_contractor_hours_invoiced")
+    if isinstance(hours, dict):
+        total_hours = _format_number(hours.get("sum"))
+        if total_hours:
+            parts.append(f"{total_hours} invoiced hours")
+    ftes = value_stats.get("ftes") or value_stats.get("total_ftes")
+    if isinstance(ftes, dict):
+        total_ftes = _format_number(ftes.get("sum"))
+        if total_ftes:
+            parts.append(f"{total_ftes} FTEs")
+    if not parts:
+        return "Needs confirmation"
+    return "GovTribe Service Contract Inventory signal: " + ", ".join(parts) + "."
+
+
 def _naics_label(item: dict[str, str]) -> str:
     code = item.get("code", "").strip()
     label = item.get("label", "").strip()
@@ -614,9 +834,26 @@ def _render_starter_profile(
     buyers: list[str],
     candidate_naics: list[dict[str, str]],
     contract_vehicles: list[str] | None = None,
+    places_of_performance: list[str] | None = None,
+    preferred_states: list[str] | None = None,
+    set_aside_programs: list[str] | None = None,
+    contract_types: list[str] | None = None,
+    pricing_types: list[str] | None = None,
+    vehicle_subcategories: list[str] | None = None,
+    teaming_preferences: list[str] | None = None,
+    award_value_note: str = "Needs confirmation",
+    sci_pricing_note: str = "Needs confirmation",
+    hierarchy_confirmation: str = "",
     provisional_fact_note: str = "Website-derived facts remain provisional until the user confirms them.",
 ) -> str:
     vehicle_values = contract_vehicles or []
+    location_values = places_of_performance or []
+    state_values = preferred_states or []
+    set_aside_values = set_aside_programs or []
+    contract_type_values = contract_types or []
+    pricing_type_values = pricing_types or []
+    vehicle_subcategory_values = vehicle_subcategories or []
+    teaming_values = teaming_preferences or []
     replacements = {
         "{{DATE}}": utc_now_iso()[:10],
         "{{SOURCE_LABEL}}": source_label,
@@ -632,6 +869,23 @@ def _render_starter_profile(
         "{{VEHICLE_2}}": vehicle_values[1] if len(vehicle_values) > 1 else "Needs confirmation",
         "{{NAICS_1}}": _naics_label(candidate_naics[0]) if len(candidate_naics) > 0 else "Needs confirmation",
         "{{NAICS_2}}": _naics_label(candidate_naics[1]) if len(candidate_naics) > 1 else "Needs confirmation",
+        "{{LOCATION_1}}": location_values[0] if len(location_values) > 0 else "Needs confirmation",
+        "{{LOCATION_2}}": location_values[1] if len(location_values) > 1 else "Needs confirmation",
+        "{{STATE_1}}": state_values[0] if len(state_values) > 0 else "Needs confirmation",
+        "{{STATE_2}}": state_values[1] if len(state_values) > 1 else "Needs confirmation",
+        "{{SET_ASIDE_1}}": set_aside_values[0] if len(set_aside_values) > 0 else "Needs confirmation",
+        "{{SET_ASIDE_2}}": set_aside_values[1] if len(set_aside_values) > 1 else "Needs confirmation",
+        "{{CONTRACT_TYPE_1}}": contract_type_values[0] if len(contract_type_values) > 0 else "Needs confirmation",
+        "{{CONTRACT_TYPE_2}}": contract_type_values[1] if len(contract_type_values) > 1 else "Needs confirmation",
+        "{{PRICING_TYPE_1}}": pricing_type_values[0] if len(pricing_type_values) > 0 else "Needs confirmation",
+        "{{PRICING_TYPE_2}}": pricing_type_values[1] if len(pricing_type_values) > 1 else "Needs confirmation",
+        "{{VEHICLE_SUBCATEGORY_1}}": vehicle_subcategory_values[0] if len(vehicle_subcategory_values) > 0 else "Needs confirmation",
+        "{{VEHICLE_SUBCATEGORY_2}}": vehicle_subcategory_values[1] if len(vehicle_subcategory_values) > 1 else "Needs confirmation",
+        "{{TEAMING_1}}": teaming_values[0] if len(teaming_values) > 0 else "Needs confirmation",
+        "{{TEAMING_2}}": teaming_values[1] if len(teaming_values) > 1 else "Needs confirmation",
+        "{{AWARD_VALUE_SIGNAL}}": award_value_note or "Needs confirmation",
+        "{{SCI_PRICING_SIGNAL}}": sci_pricing_note or "Needs confirmation",
+        "{{HIERARCHY_CONFIRMATION}}": hierarchy_confirmation or "No GovTribe parent hierarchy signal detected.",
         "{{EXCLUSION_1}}": "Grants are excluded by default until the user opts in.",
         "{{EXCLUSION_2}}": provisional_fact_note,
         "{{QUESTION_1}}": "Which 2 to 3 capabilities above are truly core to the company?",
@@ -892,17 +1146,39 @@ def seed_workspace_from_govtribe(
         company_summary = "Vendor profile seeded from GovTribe subscription-derived fields. Review and confirm before scanning."
     govtribe_url = str(vendor_record.get("source_url") or vendor_record.get("govtribe_url") or govtribe_lookup).strip()
     display_source_url = govtribe_url or govtribe_lookup
+    parent_vendor = _govtribe_parent_vendor(vendor_record)
+    vendor_hierarchy = _govtribe_vendor_hierarchy(vendor_record)
+    hierarchy_confirmation = _govtribe_hierarchy_confirmation_prompt(vendor_name, vendor_record)
     display_naics_items = _govtribe_naics_items(vendor_record, _six_digit_codes([str(item) for item in vendor_record.get("naics", [])]))
-    vendor_naics = _merge_unique([], [item["code"] for item in display_naics_items if item.get("code")])
+    award_profile = _govtribe_award_profile(vendor_record)
+    sci_profile = _govtribe_sci_profile(vendor_record)
+    vehicle_subcategory_profile = _govtribe_vehicle_subcategory_profile(vendor_record)
+    sub_award_profile = _govtribe_sub_award_profile(vendor_record)
+    award_naics = _govtribe_award_naics_codes(vendor_record, max_items=5)
+    sci_naics = _govtribe_profile_naics_codes(sci_profile, max_items=5)
+    vendor_naics = _merge_unique(award_naics, sci_naics)[:5] or _merge_unique([], [item["code"] for item in display_naics_items if item.get("code")])[:5]
     confirmed_values = user_naics if naics_status == "confirmed" else []
     candidate_values = user_naics if naics_status != "confirmed" else []
     candidate_naics = _merge_unique(candidate_values, vendor_naics)
     capabilities = _govtribe_capabilities(vendor_record)
     buyers = _clean_govtribe_values(vendor_record.get("buyers", []))
     certifications = _clean_govtribe_values(vendor_record.get("certifications", []))
-    set_aside_programs = _clean_govtribe_values(
+    certification_set_asides = _clean_govtribe_values(
         [item for item in certifications if "certified" in normalize_profile_term(item) or "small disadvantaged" in normalize_profile_term(item)]
     )
+    places_of_performance = _clean_govtribe_values(vendor_record.get("places_of_performance", []))
+    preferred_states = _clean_govtribe_values(vendor_record.get("preferred_states", []))
+    set_asides = _clean_govtribe_values(vendor_record.get("set_asides", []))
+    set_aside_programs = _merge_unique(certification_set_asides, _govtribe_set_aside_programs(set_asides))
+    contract_types = _clean_govtribe_values(vendor_record.get("contract_types", []))
+    pricing_types = _clean_govtribe_values(vendor_record.get("pricing_types", []))
+    prime_or_sub = _clean_govtribe_values(vendor_record.get("prime_or_sub", []))
+    psc_codes = _clean_govtribe_values(vendor_record.get("psc_codes", []))
+    contract_vehicle_subcategories = _clean_govtribe_values(vendor_record.get("contract_vehicle_subcategories", []))
+    teaming_preferences = _clean_govtribe_values(vendor_record.get("teaming_preferences", []), allow_generic_metadata=True)
+    award_value_note = _govtribe_value_stats_note(vendor_record)
+    observed_award_value_range = _govtribe_observed_award_value_range(vendor_record)
+    sci_pricing_note = _govtribe_sci_pricing_note(vendor_record)
     contract_vehicles = _clean_govtribe_values(vendor_record.get("contract_vehicles", []))
     expired_contract_vehicles = _clean_govtribe_values(vendor_record.get("expired_contract_vehicles", []))
     if not explicit_summary_text:
@@ -942,16 +1218,32 @@ def seed_workspace_from_govtribe(
         vendor_profile["company"]["headquarters"] = vendor_record.get("location")
     if govtribe_url:
         vendor_profile["company"]["govtribe_url"] = govtribe_url
+    if parent_vendor:
+        vendor_profile["company"]["parent"] = parent_vendor
+    if vendor_hierarchy:
+        vendor_profile["govtribe_vendor_hierarchy"] = vendor_hierarchy
     vendor_profile["core_competencies"] = _merge_unique(vendor_profile.get("core_competencies", []), capabilities)
     if not _clean_text(str(vendor_profile.get("fit_narrative", ""))):
         vendor_profile["fit_narrative"] = _govtribe_fit_narrative(vendor_record)
     vendor_profile.setdefault("naics", {})
     vendor_profile["naics"]["confirmed"] = _merge_unique(vendor_profile["naics"].get("confirmed", []), confirmed_values)
     vendor_profile["naics"]["candidates"] = _merge_unique(vendor_profile["naics"].get("candidates", []), candidate_naics)
+    if award_profile:
+        vendor_profile["govtribe_award_profile"] = award_profile
+    if sci_profile:
+        vendor_profile["govtribe_service_contract_inventory_profile"] = sci_profile
+    if vehicle_subcategory_profile:
+        vendor_profile["govtribe_vehicle_subcategory_profile"] = vehicle_subcategory_profile
+    if sub_award_profile:
+        vendor_profile["govtribe_sub_award_profile"] = sub_award_profile
     vendor_profile.setdefault("other_taxonomy_tags", {})
     vendor_profile["other_taxonomy_tags"]["keywords"] = _merge_unique(
         vendor_profile["other_taxonomy_tags"].get("keywords", []),
         [*keywords, *capabilities],
+    )
+    vendor_profile["other_taxonomy_tags"]["psc"] = _merge_unique(
+        vendor_profile["other_taxonomy_tags"].get("psc", []),
+        psc_codes,
     )
     vendor_profile.setdefault("buyers", {})
     vendor_profile["buyers"]["notes"] = _merge_unique(vendor_profile["buyers"].get("notes", []), [*buyers, *award_signals])
@@ -959,6 +1251,17 @@ def seed_workspace_from_govtribe(
         vendor_profile.get("past_performance_highlights", []),
         award_signals,
     )
+    vendor_profile.setdefault("geography", {})
+    vendor_profile["geography"]["place_of_performance"] = _merge_unique(
+        vendor_profile["geography"].get("place_of_performance", []),
+        places_of_performance,
+    )
+    vendor_profile["geography"]["preferred_states"] = _merge_unique(
+        vendor_profile["geography"].get("preferred_states", []),
+        preferred_states,
+    )
+    vendor_profile["geography"].setdefault("excluded_states", [])
+    vendor_profile["geography"].setdefault("remote_ok", True)
     vendor_profile.setdefault("commercial_constraints", {})
     existing_certifications = _clean_govtribe_values(vendor_profile["commercial_constraints"].get("certifications", []))
     vendor_profile["commercial_constraints"]["certifications"] = _merge_unique(
@@ -969,12 +1272,31 @@ def seed_workspace_from_govtribe(
         vendor_profile["commercial_constraints"].get("set_aside_programs", []),
         set_aside_programs,
     )
+    vendor_profile["commercial_constraints"]["prime_or_sub"] = _merge_unique(
+        vendor_profile["commercial_constraints"].get("prime_or_sub", []),
+        prime_or_sub,
+    )
+    vendor_profile["commercial_constraints"]["teaming_preferences"] = _merge_unique(
+        vendor_profile["commercial_constraints"].get("teaming_preferences", []),
+        teaming_preferences,
+    )
+    if observed_award_value_range:
+        vendor_profile["commercial_constraints"]["observed_award_value_range"] = observed_award_value_range
     vendor_profile["contract_vehicles"] = _merge_unique(vendor_profile.get("contract_vehicles", []), contract_vehicles)
+    vendor_profile["contract_vehicle_subcategories"] = _merge_unique(
+        vendor_profile.get("contract_vehicle_subcategories", []),
+        contract_vehicle_subcategories,
+    )
     vendor_profile["notes"] = _merge_unique(
         vendor_profile.get("notes", []),
         [
-            "GovTribe subscription-derived facts remain provisional until the user confirms them.",
-            "GovTribe-derived facts are separate from website-derived facts.",
+            item
+            for item in (
+                "GovTribe subscription-derived facts remain provisional until the user confirms them.",
+                "GovTribe-derived facts are separate from website-derived facts.",
+                hierarchy_confirmation,
+            )
+            if item
         ],
     )
     vendor_profile.setdefault("provenance", {})
@@ -985,9 +1307,23 @@ def seed_workspace_from_govtribe(
         ("company.summary", company_summary),
         ("company.headquarters", vendor_record.get("location")),
         ("company.govtribe_url", govtribe_url),
+        ("company.parent", parent_vendor),
+        ("govtribe_vendor_hierarchy", vendor_hierarchy),
         ("naics.candidates", candidate_naics),
+        ("govtribe_award_profile", award_profile),
+        ("govtribe_service_contract_inventory_profile", sci_profile),
+        ("govtribe_vehicle_subcategory_profile", vehicle_subcategory_profile),
+        ("govtribe_sub_award_profile", sub_award_profile),
+        ("other_taxonomy_tags.psc", psc_codes),
+        ("geography.place_of_performance", places_of_performance),
+        ("geography.preferred_states", preferred_states),
         ("commercial_constraints.certifications", certifications),
+        ("commercial_constraints.set_aside_programs", set_aside_programs),
+        ("commercial_constraints.prime_or_sub", prime_or_sub),
+        ("commercial_constraints.teaming_preferences", teaming_preferences),
+        ("commercial_constraints.observed_award_value_range", observed_award_value_range),
         ("contract_vehicles", contract_vehicles),
+        ("contract_vehicle_subcategories", contract_vehicle_subcategories),
         ("buyers.notes", buyers),
         ("past_performance_highlights", award_signals),
     ):
@@ -1019,6 +1355,26 @@ def seed_workspace_from_govtribe(
         preferences["soft_preferences"].get("preferred_naics", []),
         [*confirmed_values, *candidate_naics],
     )
+    preferences["soft_preferences"]["preferred_states"] = _merge_unique(
+        preferences["soft_preferences"].get("preferred_states", []),
+        preferred_states,
+    )
+    preferences["soft_preferences"]["preferred_set_asides"] = _merge_unique(
+        preferences["soft_preferences"].get("preferred_set_asides", []),
+        set_aside_programs,
+    )
+    preferences["soft_preferences"]["preferred_contract_types"] = _merge_unique(
+        preferences["soft_preferences"].get("preferred_contract_types", []),
+        contract_types,
+    )
+    preferences["soft_preferences"]["preferred_pricing_types"] = _merge_unique(
+        preferences["soft_preferences"].get("preferred_pricing_types", []),
+        pricing_types,
+    )
+    preferences["soft_preferences"]["preferred_psc"] = _merge_unique(
+        preferences["soft_preferences"].get("preferred_psc", []),
+        psc_codes,
+    )
     preferences["soft_preferences"]["preferred_buyers"] = _merge_unique(
         preferences["soft_preferences"].get("preferred_buyers", []),
         buyers,
@@ -1026,6 +1382,14 @@ def seed_workspace_from_govtribe(
     preferences["soft_preferences"]["preferred_contract_vehicles"] = _merge_unique(
         preferences["soft_preferences"].get("preferred_contract_vehicles", []),
         contract_vehicles,
+    )
+    preferences["soft_preferences"]["preferred_contract_vehicle_subcategories"] = _merge_unique(
+        preferences["soft_preferences"].get("preferred_contract_vehicle_subcategories", []),
+        contract_vehicle_subcategories,
+    )
+    preferences["soft_preferences"]["preferred_teaming_partners"] = _merge_unique(
+        preferences["soft_preferences"].get("preferred_teaming_partners", []),
+        teaming_preferences,
     )
     preferences.setdefault("provenance", {})
     preferences["provenance"]["seed_type"] = "govtribe_vendor_bootstrap_script_v1"
@@ -1050,6 +1414,16 @@ def seed_workspace_from_govtribe(
         capabilities=capabilities,
         buyers=buyers,
         contract_vehicles=contract_vehicles,
+        places_of_performance=places_of_performance,
+        preferred_states=preferred_states,
+        set_aside_programs=set_aside_programs,
+        contract_types=contract_types,
+        pricing_types=pricing_types,
+        vehicle_subcategories=contract_vehicle_subcategories,
+        teaming_preferences=teaming_preferences,
+        award_value_note=award_value_note,
+        sci_pricing_note=sci_pricing_note,
+        hierarchy_confirmation=hierarchy_confirmation,
         candidate_naics=_govtribe_naics_items(vendor_record, candidate_naics),
         provisional_fact_note="GovTribe-derived facts remain provisional until the user confirms them.",
     )
@@ -1071,6 +1445,10 @@ def seed_workspace_from_govtribe(
             f"- Candidate competencies: {', '.join(capabilities[:4]) if capabilities else 'Needs confirmation'}",
             f"- Candidate buyers: {', '.join(buyers[:3]) if buyers else 'Needs confirmation'}",
             f"- Candidate NAICS: {', '.join(candidate_naics) if candidate_naics else 'Needs confirmation'}",
+            f"- Vendor hierarchy check: {hierarchy_confirmation or 'No GovTribe parent hierarchy signal detected.'}",
+            f"- Candidate vehicle subcategories: {', '.join(contract_vehicle_subcategories[:3]) if contract_vehicle_subcategories else 'Needs confirmation'}",
+            f"- Award value signal: {award_value_note}",
+            f"- Service contract pricing signal: {sci_pricing_note}",
             "- GovTribe subscription-derived facts remain provisional and separate from website-derived facts.",
             "",
             "Next confirmations:",
@@ -1084,10 +1462,12 @@ def seed_workspace_from_govtribe(
     write_text(memory_path, memory_text)
 
     recommended_next_moves = [
+        hierarchy_confirmation,
         f"Review {starter_profile_path.as_posix()} and confirm the GovTribe-derived profile facts.",
         "Confirm or adjust NAICS before relying on them as hard filters.",
         "Run the 30-45 day federal scan after the starter profile looks right.",
     ]
+    recommended_next_moves = [item for item in recommended_next_moves if item]
     return {
         "status": "OK",
         "bootstrap_source": "govtribe",
