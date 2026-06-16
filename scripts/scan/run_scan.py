@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import date, datetime
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
 import re
 import sys
 from pathlib import Path
@@ -18,7 +19,7 @@ from common.evidence_model import (
     evidence_model_scan_notes,
     merge_evidence_models,
 )
-from common.paths import load_json, today_local_str, utc_now_iso, write_json
+from common.paths import LOCAL_TIMEZONE, load_json, utc_now_iso, write_json
 from common.runtime import NOT_IMPLEMENTED_IN_BUNDLE_STATUS
 from common.commercial_intel import COMMERCIAL_INTEL_SOURCE_IDS, GovTribeMCPCommercialIntelProvider, enrich_scan_records
 from common.source_registry import (
@@ -168,6 +169,12 @@ SEMANTIC_REASONING_MAX_RECORDS_PER_RUN = 12
 SEMANTIC_REASONING_MIN_SCORE = 55
 
 
+@dataclass(frozen=True)
+class ParsedDueDate:
+    source_date: date
+    due_at_utc: datetime | None = None
+
+
 def parse_horizon(raw: str) -> tuple[int, int]:
     cleaned = raw.lower().replace("days", "").replace("day", "").replace("to", "-").replace(" ", "")
     if "-" in cleaned:
@@ -223,23 +230,49 @@ def ensure_today_artifacts(workspace: Path, date_str: str) -> tuple[Path, Path]:
     return opportunities_path, explanations_path
 
 
-def _today_date(date_str: str) -> date:
-    return datetime.strptime(date_str, "%Y-%m-%d").date()
+def _scan_now_utc() -> datetime:
+    return datetime.now(timezone.utc).replace(microsecond=0)
 
 
-def _parse_any_date(value: Any) -> date | None:
+def _utc_iso(value: datetime) -> str:
+    normalized = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return normalized.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _looks_like_timestamp(text: str) -> bool:
+    return bool(re.match(r"^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}", text))
+
+
+def _parse_due_date(value: Any) -> ParsedDueDate | None:
     if value in (None, "", "N/A"):
         return None
     text = str(value).strip()
-    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ", "%m/%d/%Y"):
+    if not text:
+        return None
+
+    if _looks_like_timestamp(text):
         try:
-            return datetime.strptime(text[: len(fmt)], fmt).date()
+            due_at = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if due_at.tzinfo is None:
+            due_at = due_at.replace(tzinfo=timezone.utc)
+        else:
+            due_at = due_at.astimezone(timezone.utc)
+        source_date = datetime.strptime(text[:10], "%Y-%m-%d").date()
+        return ParsedDueDate(source_date=source_date, due_at_utc=due_at)
+
+    for fmt, prefix_length in (("%Y-%m-%d", 10), ("%m/%d/%Y", 10)):
+        try:
+            return ParsedDueDate(source_date=datetime.strptime(text[:prefix_length], fmt).date())
         except ValueError:
             continue
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
-    except ValueError:
-        return None
+    return None
+
+
+def _parse_any_date(value: Any) -> date | None:
+    parsed = _parse_due_date(value)
+    return parsed.source_date if parsed else None
 
 
 def _vendor_name(profile: dict[str, Any]) -> str:
@@ -668,12 +701,34 @@ def _timing_settings(preferences: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _timing_band(due_date: date | None, today: date, preferences: dict[str, Any]) -> tuple[str, int | None]:
+def _normalized_utc(value: datetime) -> datetime:
+    normalized = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return normalized.astimezone(timezone.utc)
+
+
+def _timing_band(
+    due_date: ParsedDueDate | date | None,
+    today: date,
+    preferences: dict[str, Any],
+    *,
+    scan_now: datetime | None = None,
+) -> tuple[str, int | None]:
     if due_date is None:
         return "missing", None
 
     timing = _timing_settings(preferences)
-    delta = (due_date - today).days
+    due_at_utc = due_date.due_at_utc if isinstance(due_date, ParsedDueDate) else None
+    if due_at_utc is not None:
+        now_utc = _normalized_utc(scan_now or _scan_now_utc())
+        due_local_date = due_at_utc.astimezone(LOCAL_TIMEZONE).date()
+        today = now_utc.astimezone(LOCAL_TIMEZONE).date()
+        delta = (due_local_date - today).days
+        if timing["only_open"] and due_at_utc <= now_utc:
+            return "expired", delta
+    else:
+        due_calendar_date = due_date.source_date if isinstance(due_date, ParsedDueDate) else due_date
+        delta = (due_calendar_date - today).days
+
     if timing["only_open"] and delta < 0:
         return "expired", delta
     if delta < timing["retrieval_min"] or delta > timing["retrieval_max"]:
@@ -1311,11 +1366,13 @@ def _write_scan_outputs(
     explanations_path: Path,
     records: list[dict[str, Any]],
     source_statuses: list[dict[str, Any]],
+    generated_at: str | None = None,
 ) -> None:
+    generated_at = generated_at or utc_now_iso()
     write_json(
         opportunities_path,
         {
-            "generated_at": utc_now_iso(),
+            "generated_at": generated_at,
             "records": records,
             "source_statuses": source_statuses,
         },
@@ -1323,7 +1380,7 @@ def _write_scan_outputs(
     write_json(
         explanations_path,
         {
-            "generated_at": utc_now_iso(),
+            "generated_at": generated_at,
             "items": _normalize_explanations(records),
         },
     )
@@ -1338,8 +1395,10 @@ def main() -> int:
 
     bundle_root = Path(__file__).resolve().parents[2]
     workspace = Path(args.workspace)
-    date_str = today_local_str()
-    today = _today_date(date_str)
+    scan_now = _scan_now_utc()
+    generated_at = _utc_iso(scan_now)
+    today = scan_now.astimezone(LOCAL_TIMEZONE).date()
+    date_str = today.isoformat()
 
     registry_path, registry, refreshed, refresh_reasons = refresh_runtime_registry(bundle_root, workspace)
     preferences_path = ensure_preferences(bundle_root, workspace, args.horizon)
@@ -1450,8 +1509,8 @@ def main() -> int:
     candidate_records = []
     semantic_reasoning_remaining = SEMANTIC_REASONING_MAX_RECORDS_PER_RUN
     for record in retrieval_records:
-        due_date = _parse_any_date(record.get("due_date"))
-        timing_band, days_until_due = _timing_band(due_date, today, preferences)
+        due_date = _parse_due_date(record.get("due_date"))
+        timing_band, days_until_due = _timing_band(due_date, today, preferences, scan_now=scan_now)
         if timing_band in {"expired", "out_of_window"}:
             continue
         if timing_band == "missing" and not timing["allow_missing"]:
@@ -1613,8 +1672,8 @@ def main() -> int:
                 }
             )
 
-    _write_scan_outputs(opportunities_path, explanations_path, records, source_statuses)
-    digest_entry_map = build_digest_entry_map(workspace, date_str)
+    _write_scan_outputs(opportunities_path, explanations_path, records, source_statuses, generated_at=generated_at)
+    digest_entry_map = build_digest_entry_map(workspace, date_str, generated_at=generated_at)
     configured_enabled_summary = enabled_sources_summary(registry)
     enabled_summary = sources_summary(enabled_sources)
     scan_period_label = (

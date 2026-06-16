@@ -110,7 +110,7 @@ def build_entries(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], 
     return entries, counts
 
 
-def build_digest_entry_map(workspace: Path, date_str: str) -> dict[str, Any]:
+def build_digest_entry_map(workspace: Path, date_str: str, generated_at: str | None = None) -> dict[str, Any]:
     paths = standard_procurement_paths(workspace, date_str)
     opportunities_raw = load_json(paths["opportunities"], default=[])
     vendor_profile = load_json(paths["vendor_profile"], default={})
@@ -130,7 +130,7 @@ def build_digest_entry_map(workspace: Path, date_str: str) -> dict[str, Any]:
 
     digest_entry_map = {
         "digest_date": date_str,
-        "generated_at": utc_now_iso(),
+        "generated_at": generated_at or utc_now_iso(),
         "run_status": run_status,
         "vendor_name": vendor_name,
         "digest_path": str(paths["digest"]).replace("\\", "/"),

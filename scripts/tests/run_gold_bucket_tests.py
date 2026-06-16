@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import sys
 from pathlib import Path
@@ -141,6 +141,51 @@ def _evaluate_case(
     }
 
 
+def _evaluate_timing_regressions(preferences: dict[str, Any]) -> list[dict[str, Any]]:
+    scan_now = datetime(2026, 6, 16, 19, 39, 6, tzinfo=timezone.utc)
+    today = scan_now.astimezone(scan_run.LOCAL_TIMEZONE).date()
+    cases = [
+        {
+            "id": "expired_same_day_timestamp",
+            "due_date": "2026-06-16T14:00:00Z",
+            "expected_timing_band": "expired",
+            "expected_days_until_due": 0,
+        },
+        {
+            "id": "open_later_same_day_timestamp",
+            "due_date": "2026-06-16T23:00:00Z",
+            "expected_timing_band": "urgent",
+            "expected_days_until_due": 0,
+        },
+        {
+            "id": "date_only_same_day_remains_open",
+            "due_date": "2026-06-16",
+            "expected_timing_band": "urgent",
+            "expected_days_until_due": 0,
+        },
+    ]
+    results: list[dict[str, Any]] = []
+    for case in cases:
+        parsed = scan_run._parse_due_date(case["due_date"])
+        timing_band, days_until_due = scan_run._timing_band(parsed, today, preferences, scan_now=scan_now)
+        passed = (
+            timing_band == case["expected_timing_band"]
+            and days_until_due == case["expected_days_until_due"]
+        )
+        results.append(
+            {
+                "id": case["id"],
+                "passed": passed,
+                "due_date": case["due_date"],
+                "expected_timing_band": case["expected_timing_band"],
+                "actual_timing_band": timing_band,
+                "expected_days_until_due": case["expected_days_until_due"],
+                "actual_days_until_due": days_until_due,
+            }
+        )
+    return results
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -161,18 +206,22 @@ def main() -> int:
         _evaluate_case(case, profile, preferences, fit_guidance, keywords, negative_keywords, today)
         for case in payload.get("cases", [])
     ]
+    timing_regressions = _evaluate_timing_regressions(preferences)
     failed_case_ids = [item["id"] for item in results if not item["passed"]]
+    failed_timing_regression_ids = [item["id"] for item in timing_regressions if not item["passed"]]
     output = {
-        "status": "OK" if not failed_case_ids else "FAILED",
+        "status": "OK" if not failed_case_ids and not failed_timing_regression_ids else "FAILED",
         "generated_at": utc_now_iso(),
         "case_count": len(results),
         "passed": len(results) - len(failed_case_ids),
         "failed": len(failed_case_ids),
         "failed_case_ids": failed_case_ids,
         "results": results,
+        "timing_regressions": timing_regressions,
+        "failed_timing_regression_ids": failed_timing_regression_ids,
     }
     print(json.dumps(output, ensure_ascii=True))
-    return 0 if not failed_case_ids else 10
+    return 0 if not failed_case_ids and not failed_timing_regression_ids else 10
 
 
 if __name__ == "__main__":
