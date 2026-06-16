@@ -309,6 +309,13 @@ def main() -> int:
         if "fields_to_return" not in first_call_args:
             failures.append("govtribe_fields_to_return")
 
+        calls_before_empty_retrieval = len(fake_client.calls)
+        empty_retrieval = provider.search_scan_opportunities(vendor_profile={}, preferences={})
+        if empty_retrieval.get("status") != "no_match":
+            failures.append("govtribe_retrieval_empty_profile_no_match")
+        if fake_client.calls[calls_before_empty_retrieval:]:
+            failures.append("govtribe_retrieval_empty_profile_no_call")
+
         retrieval = provider.search_scan_opportunities(
             vendor_profile={
                 "company": {"name": "Acme Federal", "summary": "Cloud modernization for civilian agencies."},

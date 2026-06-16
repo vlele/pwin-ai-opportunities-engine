@@ -472,7 +472,7 @@ def _scan_retrieval_queries(vendor_profile: dict[str, Any], preferences: dict[st
             (" | ".join(keyword_terms), "keyword"),
             (semantic_query, "semantic"),
         ]
-    return [(vendor_name if vendor_name != "Vendor" else "federal contract opportunities", "keyword")]
+    return [(vendor_name, "keyword")] if vendor_name != "Vendor" else []
 
 
 def _scan_record_brief(record: dict[str, Any], hydrated_text: str) -> dict[str, Any]:
@@ -1060,6 +1060,16 @@ class GovTribeMCPCommercialIntelProvider:
         default_url = str(self.source_config.get("homepage") or govtribe_mcp_url()).strip()
         queried_naics = _vendor_retrieval_naics(vendor_profile, preferences)
         queries = _scan_retrieval_queries(vendor_profile, preferences)
+        if not queries and not queried_naics:
+            return {
+                "status": "no_match",
+                "records": [],
+                "notes": ["No vendor-specific GovTribe scan retrieval terms or NAICS were available."],
+                "queried_naics": [],
+                "tool_name": "",
+            }
+        if not queries:
+            queries = [(" ".join(queried_naics), "keyword")]
         try:
             families = self._tool_families(client)
             tool = families.get("opportunities")

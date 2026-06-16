@@ -119,6 +119,23 @@ class FakeGovTribeRetrievalProvider:
         }
 
 
+class FakeGovTribeNoMatchProvider:
+    called = False
+
+    def __init__(self, source_config: dict):
+        self.source_config = source_config
+
+    def search_scan_opportunities(self, *, vendor_profile: dict, preferences: dict, limit: int = 25) -> dict:
+        FakeGovTribeNoMatchProvider.called = True
+        return {
+            "status": "no_match",
+            "notes": ["No vendor-specific GovTribe scan retrieval terms or NAICS were available."],
+            "queried_naics": [],
+            "tool_name": "",
+            "records": [],
+        }
+
+
 def main() -> int:
     original_sam_api_key = os.environ.get("SAM_API_KEY")
     os.environ["SAM_API_KEY"] = "test-sam-key"
@@ -198,6 +215,23 @@ def main() -> int:
             if item.get("source_id") == "govtribe_mcp_commercial_intel" and item.get("mode") == "scan_retrieval"
         )
         assert govtribe_retrieval_status["status"] == "not_configured", payload
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        workspace = Path(tmp_dir) / "workspace"
+        _write_workspace(workspace, govtribe_enabled=True, govtribe_retrieval=True)
+        _write_json(workspace / "procurement" / "vendor-profile.json", {"company": {}})
+        FakeGovTribeNoMatchProvider.called = False
+        with patch.dict(os.environ, {}, clear=True), patch.object(run_scan, "GovTribeMCPCommercialIntelProvider", FakeGovTribeNoMatchProvider):
+            payload = _run_scan_main(workspace)
+        assert FakeGovTribeNoMatchProvider.called is True, payload
+        govtribe_retrieval_status = next(
+            item
+            for item in payload["source_statuses"]
+            if item.get("source_id") == "govtribe_mcp_commercial_intel" and item.get("mode") == "scan_retrieval"
+        )
+        assert govtribe_retrieval_status["status"] == "no_match", payload
+        opportunities = json.loads(Path(payload["opportunities_path"]).read_text(encoding="utf-8")).get("records", [])
+        assert opportunities == [], opportunities
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         workspace = Path(tmp_dir) / "workspace"
