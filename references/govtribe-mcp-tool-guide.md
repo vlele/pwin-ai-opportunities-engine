@@ -17,6 +17,7 @@ Use this reference when working on the optional GovTribe MCP commercial-intellig
 
 | Need | Primary tool | Use |
 | --- | --- | --- |
+| Vendor profile, vendor name, UEI, certifications, vendor NAICS, or vendor award/vehicle context | `Search_Vendors` | Workspace bootstrap from GovTribe vendor records. Use `uei_values` for exact UEI lookups, `query` for names or GovTribe vendor URL slugs, and focused vendor fields. |
 | Federal solicitation, sources-sought notice, special notice, or pre-award opportunity | `Search_Federal_Contract_Opportunities` | Scan enrichment and opportunity lookup. Use `solicitation_numbers` for raw solicitation numbers and `govtribe_ids` for GovTribe opportunity IDs. |
 | Incumbent, award history, recompete timing, contract number, obligations, awardee | `Search_Federal_Contract_Awards` | Capture enrichment around prior work and incumbent/value signals. Use `piids` for PIIDs or combined federal contract numbers. |
 | IDIQ, BPA, GWAC, schedule, task-order parent, ceiling, awardee, ordering vehicle | `Search_Federal_Contract_IDVs` | Capture enrichment for IDV parent instruments and task-order lineage. Use `piids` for public vehicle or IDV numbers. |
@@ -28,6 +29,25 @@ Use this reference when working on the optional GovTribe MCP commercial-intellig
 ## Default Fields
 
 Use these fields as a compact default projection when the schema supports them.
+
+### `Search_Vendors`
+
+- `govtribe_id`
+- `govtribe_type`
+- `govtribe_url`
+- `uei`
+- `name`
+- `dba`
+- `division`
+- `govtribe_ai_summary`
+- `location`
+- `address`
+- `sba_certifications`
+- `business_types`
+- `naics_category`
+- `federal_contract_awards`
+- `federal_contract_idvs`
+- `awarded_federal_contract_vehicle`
 
 ### `Search_Federal_Contract_Opportunities`
 
@@ -159,6 +179,16 @@ Semantic guidance:
 6. Run GovTribe-only retrieval as keyword/structured-filter first. Apply active opportunity states and a future-facing `due_date_range` before any semantic expansion; do not rank expired semantic matches as open opportunities.
 7. Use semantic mode only as a controlled broadening fallback after the keyword/structured-filter pass returns no usable records. Keep the strongest structured filters in place, use a concise plain-language capability query, and sort semantic calls by `_score`.
 8. If GovTribe returns no match or a schema-compatible tool is unavailable, report `no_match` or `tool_contract_unavailable` and keep the scan output shape stable.
+
+## Vendor Bootstrap Pattern
+
+1. Use `Search_Vendors` when bootstrap input is a GovTribe vendor URL, vendor name, UEI, or vendor-search request.
+2. For exact UEI input, pass `uei_values: ["<UEI>"]`, `search_mode: "keyword"`, `per_page: 5`, and the vendor fields above.
+3. For GovTribe vendor URLs, parse the vendor slug for `query` and prefer returned records whose `govtribe_url` or ID matches the slug.
+4. For vendor names, pass the name as `query`, use keyword mode, and choose exact normalized name or DBA before falling back to the highest-ranked result.
+5. Normalize returned fields into `vendor-profile.json` with field-level provenance marked `govtribe_subscription_derived`.
+6. Never write API keys, bearer tokens, Authorization headers, or token fragments into workspace files.
+7. If GovTribe is not configured or returns no match, report that status and use website bootstrap only when a company URL is also available.
 
 ## Capture Enrichment Pattern
 

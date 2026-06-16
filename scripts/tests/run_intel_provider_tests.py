@@ -169,6 +169,87 @@ class FakeGovTribeClient:
         return {"structuredContent": {"records": self.records()}}
 
 
+class FakeGovTribeVendorClient:
+    def __init__(self, records: list[dict[str, object]] | None = None) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+        self._records = records if records is not None else [
+            {
+                "govtribe_id": "vendor-123",
+                "govtribe_url": "https://govtribe.com/vendors/halvik-corp-5grr4",
+                "uei": "ABC123DEF456",
+                "name": "Halvik, LLC",
+                "govtribe_ai_summary": "Halvik provides federal IT modernization and cybersecurity services.",
+                "location": {"city": "Vienna", "state": "VA", "country": "USA"},
+                "sba_certifications": ["SBA Certified 8A Program Participant"],
+                "business_types": ["Service Disabled Veteran Owned Business"],
+                "naics_category": {"code": "541512", "name": "Computer Systems Design Services"},
+                "awarded_federal_contract_vehicle": [{"name": "GSA MAS"}],
+                "federal_contract_awards": [
+                    {
+                        "name": "VA Modernization Support",
+                        "contract_number": "VA-1",
+                        "contracting_federal_agency": {"name": "Department of Veterans Affairs"},
+                    }
+                ],
+                "federal_contract_idvs": [
+                    {
+                        "name": "IT Services IDIQ",
+                        "contract_number": "IDIQ-1",
+                        "contracting_federal_agency": {"name": "Department of Homeland Security"},
+                    }
+                ],
+            }
+        ]
+
+    def list_tools(self) -> list[dict[str, object]]:
+        return [
+            {
+                "name": "Search_Vendors",
+                "description": "Searches GovTribe vendor records and returns vendor profiles.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "search_mode": {"type": "string", "enum": ["keyword", "semantic"]},
+                        "per_page": {"type": "number"},
+                        "page": {"type": "number"},
+                        "uei_values": {"type": "array", "items": {"type": "string"}},
+                        "govtribe_ids": {"type": "array", "items": {"type": "string"}},
+                        "fields_to_return": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "govtribe_id",
+                                    "govtribe_type",
+                                    "govtribe_url",
+                                    "uei",
+                                    "name",
+                                    "dba",
+                                    "division",
+                                    "govtribe_ai_summary",
+                                    "location",
+                                    "address",
+                                    "sba_certifications",
+                                    "business_types",
+                                    "naics_category",
+                                    "federal_contract_awards",
+                                    "federal_contract_idvs",
+                                    "awarded_federal_contract_vehicle",
+                                ],
+                            },
+                        },
+                    },
+                    "required": [],
+                },
+            }
+        ]
+
+    def call_tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+        self.calls.append((name, arguments or {}))
+        return {"structuredContent": {"records": self._records}}
+
+
 class FakeGovTribeSemanticFallbackClient(FakeGovTribeClient):
     def call_tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
         args = arguments or {}
@@ -315,6 +396,17 @@ def main() -> int:
         failures.append("govtribe_broader_tool_discovery")
     if broader_discovery.get("opportunities", {}).get("name") != "Search_Federal_Contract_Opportunities":
         failures.append("govtribe_activity_not_opportunity")
+    vendor_discovery = discover_tool_families(
+        [
+            {
+                "name": "Search_Vendors",
+                "description": "Searches GovTribe vendor records and returns vendor profiles.",
+                "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": []},
+            }
+        ]
+    )
+    if vendor_discovery.get("vendors", {}).get("name") != "Search_Vendors":
+        failures.append("govtribe_vendor_tool_discovery")
 
     with patch.dict(os.environ, {}, clear=True):
         provider = GovTribeMCPCommercialIntelProvider({"id": "govtribe_mcp_commercial_intel"})
@@ -327,6 +419,9 @@ def main() -> int:
         missing_retrieval = provider.search_scan_opportunities(vendor_profile={}, preferences={})
         if missing_retrieval.get("status") != "not_configured":
             failures.append("govtribe_retrieval_missing_key_status")
+        missing_vendor = provider.resolve_vendor_profile(lookup="Halvik, LLC")
+        if missing_vendor.get("status") != "not_configured":
+            failures.append("govtribe_vendor_missing_key_status")
 
     with patch.dict(os.environ, {"GOVTRIBE_MCP_API_KEY": "test-key"}, clear=True):
         provider = GovTribeMCPCommercialIntelProvider({"id": "govtribe_mcp_commercial_intel"}, client=FakeNoToolsClient())  # type: ignore[arg-type]
@@ -347,6 +442,68 @@ def main() -> int:
         )
         if no_tool_retrieval.get("status") != "tool_contract_unavailable":
             failures.append("govtribe_retrieval_no_tool_contract_status")
+        no_tool_vendor = provider.resolve_vendor_profile(lookup="Halvik, LLC")
+        if no_tool_vendor.get("status") != "tool_contract_unavailable":
+            failures.append("govtribe_vendor_no_tool_contract_status")
+
+    with patch.dict(os.environ, {"GOVTRIBE_MCP_API_KEY": "test-key"}, clear=True):
+        vendor_client = FakeGovTribeVendorClient()
+        provider = GovTribeMCPCommercialIntelProvider(
+            {
+                "id": "govtribe_mcp_commercial_intel",
+                "name": "GovTribe MCP Commercial Intelligence",
+                "homepage": "https://govtribe.com/mcp",
+            },
+            client=vendor_client,  # type: ignore[arg-type]
+        )
+        vendor_result = provider.resolve_vendor_profile(lookup="ABC123DEF456")
+        if vendor_result.get("status") != "ok" or not vendor_result.get("matched"):
+            failures.append("govtribe_vendor_uei_status")
+        vendor_record = vendor_result.get("vendor_record", {})
+        if not isinstance(vendor_record, dict) or vendor_record.get("uei") != "ABC123DEF456":
+            failures.append("govtribe_vendor_uei_normalized")
+        if isinstance(vendor_record, dict) and "541512" not in vendor_record.get("naics", []):
+            failures.append("govtribe_vendor_naics_normalized")
+        if isinstance(vendor_record, dict) and "SBA Certified 8A Program Participant" not in vendor_record.get("certifications", []):
+            failures.append("govtribe_vendor_certifications_normalized")
+        if isinstance(vendor_record, dict) and "GSA MAS" not in vendor_record.get("contract_vehicles", []):
+            failures.append("govtribe_vendor_vehicle_normalized")
+        uei_args = vendor_client.calls[-1][1]
+        if vendor_client.calls[-1][0] != "Search_Vendors":
+            failures.append("govtribe_vendor_typed_tool")
+        if uei_args.get("uei_values") != ["ABC123DEF456"]:
+            failures.append("govtribe_vendor_uei_filter")
+        if uei_args.get("search_mode") != "keyword":
+            failures.append("govtribe_vendor_keyword_mode")
+        if uei_args.get("per_page") != 5:
+            failures.append("govtribe_vendor_per_page")
+        fields = uei_args.get("fields_to_return", [])
+        if not isinstance(fields, list) or "uei" not in fields or "federal_contract_awards" not in fields:
+            failures.append("govtribe_vendor_fields_to_return")
+
+        name_result = provider.resolve_vendor_profile(lookup="Halvik, LLC")
+        if name_result.get("status") != "ok":
+            failures.append("govtribe_vendor_name_status")
+        name_args = vendor_client.calls[-1][1]
+        if name_args.get("query") != "Halvik, LLC":
+            failures.append("govtribe_vendor_name_query")
+
+        url_result = provider.resolve_vendor_profile(lookup="https://govtribe.com/vendors/halvik-corp-5grr4")
+        if url_result.get("status") != "ok":
+            failures.append("govtribe_vendor_url_status")
+        url_args = vendor_client.calls[-1][1]
+        if url_args.get("query") != "halvik corp 5grr4":
+            failures.append("govtribe_vendor_url_query")
+        if "govtribe_ids" in url_args:
+            failures.append("govtribe_vendor_url_no_slug_id_filter")
+
+        no_match_provider = GovTribeMCPCommercialIntelProvider(
+            {"id": "govtribe_mcp_commercial_intel"},
+            client=FakeGovTribeVendorClient(records=[]),  # type: ignore[arg-type]
+        )
+        no_match_vendor = no_match_provider.resolve_vendor_profile(lookup="Missing Vendor")
+        if no_match_vendor.get("status") != "no_match":
+            failures.append("govtribe_vendor_no_match_status")
 
     with patch.dict(os.environ, {"GOVTRIBE_MCP_API_KEY": "test-key"}, clear=True):
         fake_client = FakeGovTribeClient()

@@ -27,6 +27,7 @@ from common.paths import (  # type: ignore
 )
 from common.profile_terms import is_low_signal_profile_term, normalize_profile_term  # type: ignore
 from common.source_registry import refresh_runtime_registry  # type: ignore
+from intel.providers.govtribe_mcp import GovTribeMCPCommercialIntelProvider, SOURCE_ID as GOVTRIBE_SOURCE_ID  # type: ignore
 
 
 USER_AGENT = "pwin-ai-opportunities-bootstrap/1.0"
@@ -76,6 +77,7 @@ BUYER_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("General Services Administration", ("shared services", "federal modernization", "acquisition", "gsa")),
 ]
 GENERIC_NAME_SEGMENTS = {"home", "welcome", "homepage"}
+GOVTRIBE_BOOTSTRAP_PROVENANCE = "govtribe_subscription_derived"
 
 
 @dataclass
@@ -169,6 +171,10 @@ def _normalize_url(raw_value: str) -> str:
     if value.startswith(("http://", "https://", "file://")):
         return value
     return f"https://{value}"
+
+
+def _is_govtribe_vendor_url(raw_value: str) -> bool:
+    return bool(re.search(r"https?://(?:www\.)?govtribe\.com/vendors/[^/\s]+", str(raw_value or ""), re.I))
 
 
 def _parse_html(url: str, html: str) -> PageSignals:
@@ -377,6 +383,98 @@ def _merge_unique(existing: list[Any], additions: list[Any]) -> list[Any]:
         seen.add(key)
         result.append(item)
     return result
+
+
+def _source_config(registry: dict[str, Any], source_id: str) -> dict[str, Any]:
+    for source in registry.get("sources", []):
+        if source.get("id") == source_id:
+            return source if isinstance(source, dict) else {}
+    return {"id": source_id}
+
+
+def _enable_govtribe_source(registry_path: Path, registry: dict[str, Any], now: str) -> None:
+    changed = False
+    for source in registry.get("sources", []):
+        if not isinstance(source, dict) or source.get("id") != GOVTRIBE_SOURCE_ID:
+            continue
+        source["enabled"] = True
+        notes = source.get("notes", [])
+        if not isinstance(notes, list):
+            notes = [str(notes)] if str(notes or "").strip() else []
+        source["notes"] = _merge_unique(
+            notes,
+            [f"Enabled by GovTribe vendor bootstrap on {now[:10]}."],
+        )
+        changed = True
+    if changed:
+        write_json(registry_path, registry)
+
+
+def _six_digit_codes(values: list[str]) -> list[str]:
+    codes: list[str] = []
+    for value in values:
+        for match in re.findall(r"\b\d{6}\b", str(value or "")):
+            if match not in codes:
+                codes.append(match)
+    return codes
+
+
+def _naics_items(values: list[str]) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        match = re.search(r"\b\d{6}\b", text)
+        code = match.group(0) if match else text
+        label = text if match and text != code else ""
+        item = {"code": code, "label": label}
+        if item not in items:
+            items.append(item)
+    return items
+
+
+def _govtribe_provenance(field: str, value: Any, vendor_record: dict[str, Any], now: str) -> dict[str, Any]:
+    return {
+        "field": field,
+        "value": value,
+        "source": GOVTRIBE_SOURCE_ID,
+        "source_url": vendor_record.get("source_url", ""),
+        "external_record_id": vendor_record.get("external_record_id", ""),
+        "provenance": GOVTRIBE_BOOTSTRAP_PROVENANCE,
+        "captured_at": now,
+    }
+
+
+def _append_govtribe_provenance(
+    facts: list[Any],
+    *,
+    field: str,
+    value: Any,
+    vendor_record: dict[str, Any],
+    now: str,
+) -> list[Any]:
+    if value in (None, "", [], {}):
+        return facts
+    return _merge_unique(facts, [_govtribe_provenance(field, value, vendor_record, now)])
+
+
+def _govtribe_capabilities(vendor_record: dict[str, Any]) -> list[str]:
+    values = [
+        *[item for item in vendor_record.get("naics", []) if not re.fullmatch(r"\d{6}", str(item or "").strip())],
+        *vendor_record.get("certifications", []),
+    ]
+    return [item for item in values if not is_low_signal_profile_term(str(item))][:6]
+
+
+def _govtribe_fit_narrative(vendor_record: dict[str, Any]) -> str:
+    capabilities = _govtribe_capabilities(vendor_record)[:3]
+    buyers = vendor_record.get("buyers", [])[:2]
+    vehicles = vendor_record.get("contract_vehicles", [])[:2]
+    parts = capabilities or ["GovTribe-reported NAICS, certifications, and award signals"]
+    buyer_note = f" for buyers such as {', '.join(buyers)}" if buyers else ""
+    vehicle_note = f" through vehicles such as {', '.join(vehicles)}" if vehicles else ""
+    return f"Prioritize opportunities involving {', '.join(parts)}{buyer_note}{vehicle_note}. Avoid grants until the user explicitly opts in."
 
 
 def _naics_label(item: dict[str, str]) -> str:
@@ -601,25 +699,311 @@ def seed_workspace(
     }
 
 
+def seed_workspace_from_govtribe(
+    *,
+    bundle_root: Path,
+    workspace: Path,
+    govtribe_lookup: str,
+    company_url: str = "",
+    user_naics: list[str],
+    naics_status: str,
+    explicit_name: str,
+    explicit_summary: str,
+    provider: Any | None = None,
+) -> dict[str, Any]:
+    now = utc_now_iso()
+    procurement = procurement_dir(workspace)
+    source_registry_path, registry, _, _ = refresh_runtime_registry(bundle_root, workspace)
+    source_config = _source_config(registry, GOVTRIBE_SOURCE_ID)
+    resolver = provider or GovTribeMCPCommercialIntelProvider(source_config)
+    lookup_result = resolver.resolve_vendor_profile(lookup=govtribe_lookup)
+    lookup_status = str(lookup_result.get("status") or "error").strip()
+
+    if not lookup_result.get("matched"):
+        mapped_status = {
+            "not_configured": "GOVTRIBE_NOT_CONFIGURED",
+            "no_match": "GOVTRIBE_NO_MATCH",
+            "tool_contract_unavailable": "GOVTRIBE_TOOL_CONTRACT_UNAVAILABLE",
+        }.get(lookup_status, "GOVTRIBE_ERROR")
+        fallback_url = company_url.strip()
+        if fallback_url and not _is_govtribe_vendor_url(fallback_url):
+            fallback = seed_workspace(
+                bundle_root=bundle_root,
+                workspace=workspace,
+                company_url=fallback_url,
+                user_naics=user_naics,
+                naics_status=naics_status,
+                explicit_name=explicit_name,
+                explicit_summary=explicit_summary,
+            )
+            fallback["bootstrap_source"] = "website"
+            fallback["fallback_source"] = "website"
+            fallback["govtribe_status"] = mapped_status
+            fallback["govtribe_notes"] = lookup_result.get("notes", [])
+            return fallback
+        return {
+            "status": mapped_status,
+            "bootstrap_source": "govtribe",
+            "govtribe_status": mapped_status,
+            "govtribe_notes": lookup_result.get("notes", []),
+            "vendor_lookup": govtribe_lookup,
+            "source_registry_path": source_registry_path.as_posix(),
+            "recommended_next_moves": [
+                "Export GOVTRIBE_MCP_API_KEY or provide a company website URL for website bootstrap fallback."
+                if mapped_status == "GOVTRIBE_NOT_CONFIGURED"
+                else "Provide a more specific vendor name, UEI, or company website URL."
+            ],
+        }
+
+    vendor_record = lookup_result.get("vendor_record", {})
+    if not isinstance(vendor_record, dict):
+        vendor_record = {}
+    _enable_govtribe_source(source_registry_path, registry, now)
+
+    vendor_name = explicit_name.strip() or str(vendor_record.get("name") or "Vendor").strip()
+    company_summary = explicit_summary.strip() or str(vendor_record.get("summary") or "").strip()
+    if not company_summary:
+        company_summary = "Vendor profile seeded from GovTribe subscription-derived fields. Review and confirm before scanning."
+    govtribe_url = str(vendor_record.get("source_url") or vendor_record.get("govtribe_url") or govtribe_lookup).strip()
+    display_source_url = govtribe_url or govtribe_lookup
+    vendor_naics = _six_digit_codes([str(item) for item in vendor_record.get("naics", [])])
+    confirmed_values = user_naics if naics_status == "confirmed" else []
+    candidate_values = user_naics if naics_status != "confirmed" else []
+    candidate_naics = _merge_unique(candidate_values, vendor_naics)
+    capabilities = _govtribe_capabilities(vendor_record)
+    buyers = [str(item) for item in vendor_record.get("buyers", []) if str(item or "").strip()]
+    certifications = [str(item) for item in vendor_record.get("certifications", []) if str(item or "").strip()]
+    contract_vehicles = [str(item) for item in vendor_record.get("contract_vehicles", []) if str(item or "").strip()]
+    award_signals = [str(item) for item in vendor_record.get("award_signals", []) if str(item or "").strip()]
+    keywords = [str(item) for item in vendor_record.get("keywords", []) if str(item or "").strip()]
+
+    vendor_profile_path = procurement / "vendor-profile.json"
+    vendor_profile = load_json(bundle_root / "templates" / "vendor-profile.template.json", default={}) or {}
+    existing_vendor = load_json(vendor_profile_path, default={}) or {}
+    if isinstance(existing_vendor, dict):
+        vendor_profile.update(existing_vendor)
+    vendor_profile["last_updated"] = now
+    vendor_profile.setdefault("bootstrap", {})
+    vendor_profile["bootstrap"]["method"] = "govtribe_vendor_bootstrap_script_v1"
+    vendor_profile["bootstrap"]["inputs"] = {
+        "company_url": company_url.strip(),
+        "govtribe_vendor_lookup": govtribe_lookup,
+        "user_supplied_naics": user_naics,
+        "plain_language_summary": explicit_summary.strip(),
+        "other_inputs": [],
+    }
+    vendor_profile["bootstrap"]["bootstrapped_on"] = now
+    vendor_profile["bootstrap"]["status"] = "needs_user_confirmation"
+    vendor_profile.setdefault("company", {})
+    vendor_profile["company"]["name"] = vendor_name
+    if company_url.strip() and not _is_govtribe_vendor_url(company_url):
+        vendor_profile["company"]["website"] = _normalize_url(company_url)
+    vendor_profile["company"]["summary"] = company_summary
+    if vendor_record.get("uei"):
+        vendor_profile["company"]["uei"] = vendor_record.get("uei")
+    if vendor_record.get("location"):
+        vendor_profile["company"]["headquarters"] = vendor_record.get("location")
+    if govtribe_url:
+        vendor_profile["company"]["govtribe_url"] = govtribe_url
+    vendor_profile["core_competencies"] = _merge_unique(vendor_profile.get("core_competencies", []), capabilities)
+    if not _clean_text(str(vendor_profile.get("fit_narrative", ""))):
+        vendor_profile["fit_narrative"] = _govtribe_fit_narrative(vendor_record)
+    vendor_profile.setdefault("naics", {})
+    vendor_profile["naics"]["confirmed"] = _merge_unique(vendor_profile["naics"].get("confirmed", []), confirmed_values)
+    vendor_profile["naics"]["candidates"] = _merge_unique(vendor_profile["naics"].get("candidates", []), candidate_naics)
+    vendor_profile.setdefault("other_taxonomy_tags", {})
+    vendor_profile["other_taxonomy_tags"]["keywords"] = _merge_unique(
+        vendor_profile["other_taxonomy_tags"].get("keywords", []),
+        [*keywords, *capabilities],
+    )
+    vendor_profile.setdefault("buyers", {})
+    vendor_profile["buyers"]["notes"] = _merge_unique(vendor_profile["buyers"].get("notes", []), [*buyers, *award_signals])
+    vendor_profile["past_performance_highlights"] = _merge_unique(
+        vendor_profile.get("past_performance_highlights", []),
+        award_signals,
+    )
+    vendor_profile.setdefault("commercial_constraints", {})
+    vendor_profile["commercial_constraints"]["certifications"] = _merge_unique(
+        vendor_profile["commercial_constraints"].get("certifications", []),
+        certifications,
+    )
+    vendor_profile["commercial_constraints"]["set_aside_programs"] = _merge_unique(
+        vendor_profile["commercial_constraints"].get("set_aside_programs", []),
+        certifications,
+    )
+    vendor_profile["contract_vehicles"] = _merge_unique(vendor_profile.get("contract_vehicles", []), contract_vehicles)
+    vendor_profile["notes"] = _merge_unique(
+        vendor_profile.get("notes", []),
+        [
+            "GovTribe subscription-derived facts remain provisional until the user confirms them.",
+            "GovTribe-derived facts are separate from website-derived facts.",
+        ],
+    )
+    vendor_profile.setdefault("provenance", {})
+    facts = vendor_profile["provenance"].get("facts", [])
+    for field, value in (
+        ("company.name", vendor_name),
+        ("company.uei", vendor_record.get("uei")),
+        ("company.summary", company_summary),
+        ("company.headquarters", vendor_record.get("location")),
+        ("company.govtribe_url", govtribe_url),
+        ("naics.candidates", candidate_naics),
+        ("commercial_constraints.certifications", certifications),
+        ("contract_vehicles", contract_vehicles),
+        ("buyers.notes", buyers),
+        ("past_performance_highlights", award_signals),
+    ):
+        facts = _append_govtribe_provenance(facts, field=field, value=value, vendor_record=vendor_record, now=now)
+    vendor_profile["provenance"]["facts"] = facts
+    write_json(vendor_profile_path, vendor_profile)
+
+    preferences_path = procurement / "preferences.json"
+    preferences = load_json(bundle_root / "templates" / "preferences.template.json", default={}) or {}
+    existing_preferences = load_json(preferences_path, default={}) or {}
+    if isinstance(existing_preferences, dict):
+        preferences.update(existing_preferences)
+    preferences["last_updated"] = now
+    preferences.setdefault("hard_filters", {})
+    preferences["hard_filters"]["exclude_opportunity_classes"] = _merge_unique(
+        preferences["hard_filters"].get("exclude_opportunity_classes", []),
+        ["grants"],
+    )
+    preferences.setdefault("soft_preferences", {})
+    preferences["soft_preferences"]["positive_keywords"] = _merge_unique(
+        preferences["soft_preferences"].get("positive_keywords", []),
+        [*keywords, *capabilities],
+    )
+    preferences["soft_preferences"]["preferred_opportunity_classes"] = _merge_unique(
+        preferences["soft_preferences"].get("preferred_opportunity_classes", []),
+        ["contracts", "subcontracts", "forecasts"],
+    )
+    preferences["soft_preferences"]["preferred_naics"] = _merge_unique(
+        preferences["soft_preferences"].get("preferred_naics", []),
+        [*confirmed_values, *candidate_naics],
+    )
+    preferences["soft_preferences"]["preferred_buyers"] = _merge_unique(
+        preferences["soft_preferences"].get("preferred_buyers", []),
+        buyers,
+    )
+    preferences["soft_preferences"]["preferred_contract_vehicles"] = _merge_unique(
+        preferences["soft_preferences"].get("preferred_contract_vehicles", []),
+        contract_vehicles,
+    )
+    preferences.setdefault("provenance", {})
+    preferences["provenance"]["seed_type"] = "govtribe_vendor_bootstrap_script_v1"
+    preferences["provenance"]["notes"] = _merge_unique(
+        preferences["provenance"].get("notes", []),
+        [
+            f"Seeded from GovTribe vendor lookup: {govtribe_lookup}",
+            "GovTribe subscription-derived facts remain provisional until user confirmation.",
+            "Grants excluded by default until the user confirms interest.",
+        ],
+    )
+    write_json(preferences_path, preferences)
+
+    starter_profile_path = procurement / "STARTER_PROFILE.md"
+    starter_profile = _render_starter_profile(
+        read_text(bundle_root / "templates" / "starter-brief.template.md"),
+        company_url=display_source_url,
+        user_naics=[*confirmed_values, *candidate_naics],
+        summary=explicit_summary.strip(),
+        company_summary=company_summary,
+        capabilities=capabilities,
+        buyers=buyers,
+        candidate_naics=_naics_items([*vendor_record.get("naics", []), *candidate_naics]),
+    )
+    starter_profile += (
+        "\n\nGovTribe source note: GovTribe subscription-derived facts are provisional commercial intelligence. "
+        "Confirm them before treating them as user-confirmed or website-derived facts.\n"
+    )
+    write_text(starter_profile_path, starter_profile)
+
+    memory_path = workspace / "MEMORY.md"
+    memory_snapshot = "\n".join(
+        [
+            f"## Bootstrap snapshot - {now[:10]}",
+            "",
+            f"- Company: {vendor_name}",
+            f"- GovTribe vendor: {govtribe_url or govtribe_lookup}",
+            f"- UEI: {vendor_record.get('uei') or 'Not returned'}",
+            "- Seed method: govtribe_vendor_bootstrap_script_v1",
+            f"- Candidate competencies: {', '.join(capabilities[:4]) if capabilities else 'Needs confirmation'}",
+            f"- Candidate buyers: {', '.join(buyers[:3]) if buyers else 'Needs confirmation'}",
+            f"- Candidate NAICS: {', '.join(candidate_naics) if candidate_naics else 'Needs confirmation'}",
+            "- GovTribe subscription-derived facts remain provisional and separate from website-derived facts.",
+            "",
+            "Next confirmations:",
+            "1. Confirm the strongest capabilities and NAICS.",
+            "2. Confirm GovTribe-reported certifications, vehicles, and buyer signals.",
+            "3. Name buyers, work types, or opportunity classes that should never show up.",
+        ]
+    ).strip()
+    existing_memory = read_text(memory_path).rstrip()
+    memory_text = memory_snapshot if not existing_memory else f"{existing_memory}\n\n{memory_snapshot}"
+    write_text(memory_path, memory_text)
+
+    recommended_next_moves = [
+        f"Review {starter_profile_path.as_posix()} and confirm the GovTribe-derived profile facts.",
+        "Confirm or adjust NAICS before relying on them as hard filters.",
+        "Run the 30-45 day federal scan after the starter profile looks right.",
+    ]
+    return {
+        "status": "OK",
+        "bootstrap_source": "govtribe",
+        "govtribe_status": "ok",
+        "company_name": vendor_name,
+        "vendor_lookup": govtribe_lookup,
+        "govtribe_url": govtribe_url,
+        "vendor_profile_path": vendor_profile_path.as_posix(),
+        "preferences_path": preferences_path.as_posix(),
+        "source_registry_path": source_registry_path.as_posix(),
+        "starter_profile_path": starter_profile_path.as_posix(),
+        "memory_path": memory_path.as_posix(),
+        "candidate_naics": _naics_items([*vendor_record.get("naics", []), *candidate_naics]),
+        "govtribe_notes": lookup_result.get("notes", []),
+        "recommended_next_moves": recommended_next_moves,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workspace", required=True)
-    parser.add_argument("--company-url", required=True)
+    parser.add_argument("--company-url", default="")
+    parser.add_argument("--vendor-lookup", default="")
     parser.add_argument("--naics", default="")
     parser.add_argument("--naics-status", choices=("confirmed", "candidate"), default="confirmed")
     parser.add_argument("--company-name", default="")
     parser.add_argument("--summary", default="")
     args = parser.parse_args()
 
-    result = seed_workspace(
-        bundle_root=bundle_root_from_script(__file__),
-        workspace=Path(args.workspace),
-        company_url=args.company_url,
-        user_naics=_parse_naics(args.naics),
-        naics_status=args.naics_status,
-        explicit_name=args.company_name,
-        explicit_summary=args.summary,
-    )
+    bundle_root = bundle_root_from_script(__file__)
+    user_naics = _parse_naics(args.naics)
+    vendor_lookup = args.vendor_lookup.strip()
+    if not vendor_lookup and args.company_url.strip() and _is_govtribe_vendor_url(args.company_url):
+        vendor_lookup = args.company_url.strip()
+    if vendor_lookup:
+        result = seed_workspace_from_govtribe(
+            bundle_root=bundle_root,
+            workspace=Path(args.workspace),
+            govtribe_lookup=vendor_lookup,
+            company_url=args.company_url,
+            user_naics=user_naics,
+            naics_status=args.naics_status,
+            explicit_name=args.company_name,
+            explicit_summary=args.summary,
+        )
+    else:
+        if not args.company_url.strip():
+            parser.error("--company-url is required unless --vendor-lookup is provided")
+        result = seed_workspace(
+            bundle_root=bundle_root,
+            workspace=Path(args.workspace),
+            company_url=args.company_url,
+            user_naics=user_naics,
+            naics_status=args.naics_status,
+            explicit_name=args.company_name,
+            explicit_summary=args.summary,
+        )
     print(json.dumps(result, ensure_ascii=True))
     return 0
 

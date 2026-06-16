@@ -36,6 +36,28 @@ ERROR_TEXT_MARKERS = (
 ERROR_STATUS_VALUES = {"error", "failed", "failure"}
 
 FAMILY_TOOL_GUIDE: dict[str, dict[str, Any]] = {
+    "vendors": {
+        "preferred_names": ("Search_Vendors",),
+        "required_terms": ("vendor",),
+        "fields_to_return": (
+            "govtribe_id",
+            "govtribe_type",
+            "govtribe_url",
+            "uei",
+            "name",
+            "dba",
+            "division",
+            "govtribe_ai_summary",
+            "location",
+            "address",
+            "sba_certifications",
+            "business_types",
+            "naics_category",
+            "federal_contract_awards",
+            "federal_contract_idvs",
+            "awarded_federal_contract_vehicle",
+        ),
+    },
     "opportunities": {
         "preferred_names": ("Search_Federal_Contract_Opportunities",),
         "required_terms": ("federal", "contract", "opportunit"),
@@ -166,6 +188,8 @@ QUERY_COMPATIBLE_REQUIRED_FIELDS = {
     "solicitation_numbers",
     "piids",
     "govtribe_ids",
+    "uei_values",
+    "vendor_ids",
 }
 
 
@@ -183,6 +207,32 @@ def govtribe_authorization_token() -> str:
 
 def _normalize_key(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _normalize_match_text(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _normalize_identifier(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower()).strip()
+
+
+def _is_govtribe_vendor_url(value: str) -> bool:
+    return bool(re.search(r"https?://(?:www\.)?govtribe\.com/vendors/[^/\s]+", str(value or ""), re.I))
+
+
+def _lookup_url_slug(value: str) -> str:
+    match = re.search(r"https?://(?:www\.)?govtribe\.com/vendors/([^/?#\s]+)", str(value or ""), re.I)
+    return match.group(1).strip() if match else ""
+
+
+def _is_likely_uei(value: str) -> bool:
+    cleaned = re.sub(r"[^A-Za-z0-9]", "", str(value or "")).upper()
+    return len(cleaned) == 12 and cleaned.isalnum()
+
+
+def _clean_uei(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", str(value or "")).upper()
 
 
 def _tool_name(tool: dict[str, Any]) -> str:
@@ -219,6 +269,8 @@ def _tool_score(tool: dict[str, Any], family: str) -> int:
     preferred_names = [_normalize_tool_name(item) for item in guide.get("preferred_names", ())]
     if normalized_name in preferred_names:
         return 100 - preferred_names.index(normalized_name)
+    if family == "vendors":
+        return 0
 
     text = _tool_text(tool)
     required_terms = tuple(str(item).lower() for item in guide.get("required_terms", ()))
@@ -334,6 +386,64 @@ def _fields_for_tool(tool: dict[str, Any]) -> list[str]:
     if allowed:
         return [field for field in requested if field in allowed]
     return requested
+
+
+def _vendor_lookup_query(lookup: str) -> str:
+    raw = str(lookup or "").strip()
+    slug = _lookup_url_slug(raw)
+    if slug:
+        return slug.replace("-", " ")
+    return raw
+
+
+def _vendor_tool_arguments(tool: dict[str, Any], *, lookup: str, limit: int = 5) -> dict[str, Any]:
+    properties = _schema_properties(tool)
+    query = _vendor_lookup_query(lookup)
+    cleaned_uei = _clean_uei(lookup)
+    is_uei = _is_likely_uei(lookup)
+    if not properties:
+        args: dict[str, Any] = {"query": query, "per_page": limit, "search_mode": "keyword"}
+        if is_uei:
+            args["uei_values"] = [cleaned_uei]
+        return args
+
+    args = {}
+    string_fallbacks: list[str] = []
+    for name, spec in properties.items():
+        key = _normalize_key(name)
+        if _is_integer_prop(spec) and key in {"limit", "size", "page size", "per page", "max results"}:
+            args[name] = limit
+            continue
+        if _is_integer_prop(spec) and key == "page":
+            args[name] = 1
+            continue
+        if _is_array_prop(spec):
+            if key == "fields to return":
+                fields = _fields_for_tool(tool)
+                if fields:
+                    args[name] = fields
+            elif key in {"uei values", "ueis", "uei"} and is_uei:
+                args[name] = [cleaned_uei]
+            continue
+        if _is_object_prop(spec):
+            continue
+        if not _is_string_prop(spec):
+            continue
+        string_fallbacks.append(name)
+        if key in {"query", "q", "search", "search query", "keyword", "keywords", "term", "terms"}:
+            args[name] = query
+        elif key == "search mode":
+            allowed_modes = set(_enum_values(spec))
+            if not allowed_modes or "keyword" in allowed_modes:
+                args[name] = "keyword"
+
+    if not any(str(value).strip() == query for value in args.values() if isinstance(value, str)):
+        query_key = next((name for name in string_fallbacks if name in _schema_required(tool)), None) or (
+            string_fallbacks[0] if string_fallbacks else ""
+        )
+        if query_key and query_key not in args:
+            args[query_key] = query
+    return args
 
 
 def _search_mode_for_query(query: str, mode: str = "keyword") -> str:
@@ -826,6 +936,10 @@ def _record_identifier(record: dict[str, Any]) -> str:
     )
 
 
+def _record_uei(record: dict[str, Any]) -> str:
+    return _first_text(record, "uei", "uei_value", "ueiValue", "sam_uei", "unique_entity_id").upper()
+
+
 def _record_title(record: dict[str, Any]) -> str:
     return _first_text(record, "title", "name", "solicitationTitle", "description", "summary") or "GovTribe record"
 
@@ -1193,6 +1307,154 @@ def _normalize_scan_opportunity(
     }
 
 
+def _collect_text_values(value: Any, *, keys: tuple[str, ...] = ("name", "title", "code", "value", "contract_number")) -> list[str]:
+    values: list[str] = []
+    if isinstance(value, dict):
+        for key in keys:
+            if key in value:
+                values.extend(_collect_text_values(value.get(key), keys=keys))
+        if not values:
+            for nested in value.values():
+                values.extend(_collect_text_values(nested, keys=keys))
+    elif isinstance(value, list):
+        for item in value:
+            values.extend(_collect_text_values(item, keys=keys))
+    else:
+        text = str(value or "").strip()
+        if text:
+            values.append(text)
+    return dedupe_strings(values)
+
+
+def _vendor_record_location(record: dict[str, Any]) -> str:
+    value = record.get("location") or record.get("address")
+    if isinstance(value, dict):
+        parts = [
+            _first_text(value, "city"),
+            _first_text(value, "state", "state_code"),
+            _first_text(value, "country", "country_code"),
+        ]
+        text = ", ".join(part for part in parts if part)
+        if text:
+            return text
+    return _first_text(record, "location", "address")
+
+
+def _vendor_record_buyers(record: dict[str, Any]) -> list[str]:
+    buyers: list[str] = []
+    for key in ("federal_contract_awards", "federal_contract_idvs", "awarded_federal_contract_vehicle"):
+        values = record.get(key)
+        if not isinstance(values, list):
+            values = [values] if values else []
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            buyers.extend(
+                _collect_text_values(
+                    [
+                        item.get("contracting_federal_agency"),
+                        item.get("funding_federal_agency"),
+                        item.get("federal_agency"),
+                        item.get("agency"),
+                    ],
+                    keys=("name", "title", "value"),
+                )
+            )
+    return dedupe_strings(buyers)[:8]
+
+
+def _vendor_record_vehicles(record: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for key in ("awarded_federal_contract_vehicle", "federal_contract_idvs"):
+        values.extend(
+            _collect_text_values(
+                record.get(key),
+                keys=("name", "title", "contract_number", "vehicle", "value"),
+            )
+        )
+    return dedupe_strings(values)[:8]
+
+
+def _vendor_record_award_signals(record: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for key in ("federal_contract_awards", "federal_contract_idvs"):
+        items = record.get(key)
+        if not isinstance(items, list):
+            items = [items] if items else []
+        for item in items[:6]:
+            if not isinstance(item, dict):
+                continue
+            title = _record_title(item)
+            identifier = _record_identifier(item)
+            agency = _first_text(item, "contracting_federal_agency", "funding_federal_agency", "federal_agency")
+            parts = [part for part in (title, identifier, agency) if part and part != "GovTribe record"]
+            if parts:
+                values.append(" - ".join(parts[:3]))
+    return dedupe_strings(values)[:6]
+
+
+def _normalize_vendor_record(record: dict[str, Any], *, source_config: dict[str, Any], default_url: str) -> dict[str, Any]:
+    source_url = _record_url(record, default_url)
+    name = _first_text(record, "name", "vendor_name", "recipient_name", "awardee") or "Vendor"
+    dba = _first_text(record, "dba", "doing_business_as")
+    summary = _first_text(record, "govtribe_ai_summary", "summary", "description")
+    naics_codes = _record_naics_codes(record)
+    certifications = dedupe_strings(
+        [
+            *_collect_text_values(record.get("sba_certifications"), keys=("name", "title", "value")),
+            *_collect_text_values(record.get("business_types"), keys=("name", "title", "value")),
+        ]
+    )[:10]
+    vehicles = _vendor_record_vehicles(record)
+    buyers = _vendor_record_buyers(record)
+    award_signals = _vendor_record_award_signals(record)
+    keywords = dedupe_strings([*naics_codes, *certifications, *vehicles, *buyers])[:12]
+    return {
+        "source_id": str(source_config.get("id") or SOURCE_ID).strip(),
+        "source_name": str(source_config.get("name") or SOURCE_NAME).strip(),
+        "external_record_id": _record_identifier(record),
+        "source_url": source_url,
+        "govtribe_id": _record_identifier(record),
+        "govtribe_url": source_url,
+        "name": name,
+        "dba": dba,
+        "uei": _record_uei(record),
+        "summary": summary,
+        "location": _vendor_record_location(record),
+        "naics": naics_codes,
+        "certifications": certifications,
+        "contract_vehicles": vehicles,
+        "buyers": buyers,
+        "award_signals": award_signals,
+        "keywords": keywords,
+        "raw_record": record,
+    }
+
+
+def _select_vendor_record(records: list[dict[str, Any]], lookup: str) -> dict[str, Any] | None:
+    if not records:
+        return None
+    cleaned_uei = _clean_uei(lookup)
+    if _is_likely_uei(lookup):
+        for record in records:
+            if _clean_uei(_record_uei(record)) == cleaned_uei:
+                return record
+    slug = _lookup_url_slug(lookup)
+    if slug:
+        normalized_slug = _normalize_identifier(slug)
+        for record in records:
+            url = _record_url(record, "")
+            identifier = _record_identifier(record)
+            if normalized_slug and (normalized_slug in _normalize_identifier(url) or normalized_slug == _normalize_identifier(identifier)):
+                return record
+    lookup_name = _normalize_match_text(_vendor_lookup_query(lookup))
+    for record in records:
+        for value in (_first_text(record, "name"), _first_text(record, "dba")):
+            if lookup_name and _normalize_match_text(value) == lookup_name:
+                return record
+    return records[0]
+
+
 class GovTribeMCPCommercialIntelProvider:
     source_id = SOURCE_ID
     source_name = SOURCE_NAME
@@ -1219,6 +1481,101 @@ class GovTribeMCPCommercialIntelProvider:
     def _tool_families(self, client: MCPHttpClient) -> dict[str, dict[str, Any]]:
         tools = client.list_tools()
         return discover_tool_families(tools)
+
+    def resolve_vendor_profile(self, *, lookup: str, limit: int = 5) -> dict[str, Any]:
+        configured, missing = self.is_configured()
+        if not configured:
+            return {
+                "source_id": self.source_id,
+                "source_name": self.source_name,
+                "status": "not_configured",
+                "matched": False,
+                "lookup": lookup,
+                "vendor_record": {},
+                "notes": [f"Missing env vars: {', '.join(missing)}"],
+                "tool_name": "",
+            }
+
+        client = self._client()
+        default_url = str(self.source_config.get("homepage") or govtribe_mcp_url()).strip()
+        try:
+            families = self._tool_families(client)
+            tool = families.get("vendors")
+            if not tool:
+                return {
+                    "source_id": self.source_id,
+                    "source_name": self.source_name,
+                    "status": "tool_contract_unavailable",
+                    "matched": False,
+                    "lookup": lookup,
+                    "vendor_record": {},
+                    "notes": ["GovTribe MCP did not expose a compatible vendor search tool."],
+                    "tool_name": "",
+                }
+            args = _vendor_tool_arguments(tool, lookup=lookup, limit=limit)
+            result = client.call_tool(_tool_name(tool), args)
+            records = _tool_result_records(result)
+        except MCPResponseError as exc:
+            status = "tool_contract_unavailable" if exc.code == -32602 else "error"
+            return {
+                "source_id": self.source_id,
+                "source_name": self.source_name,
+                "status": status,
+                "matched": False,
+                "lookup": lookup,
+                "vendor_record": {},
+                "notes": [str(exc)],
+                "tool_name": "",
+            }
+        except MCPHTTPError as exc:
+            return {
+                "source_id": self.source_id,
+                "source_name": self.source_name,
+                "status": "error",
+                "matched": False,
+                "lookup": lookup,
+                "vendor_record": {},
+                "notes": [str(exc)],
+                "tool_name": "",
+            }
+        except Exception as exc:
+            return {
+                "source_id": self.source_id,
+                "source_name": self.source_name,
+                "status": "error",
+                "matched": False,
+                "lookup": lookup,
+                "vendor_record": {},
+                "notes": [str(exc)],
+                "tool_name": "",
+            }
+
+        selected = _select_vendor_record(records, lookup)
+        if not selected:
+            return {
+                "source_id": self.source_id,
+                "source_name": self.source_name,
+                "status": "no_match",
+                "matched": False,
+                "lookup": lookup,
+                "vendor_record": {},
+                "notes": ["GovTribe vendor search returned no matching records."],
+                "tool_name": _tool_name(tool),
+            }
+        normalized = _normalize_vendor_record(selected, source_config=self.source_config, default_url=default_url)
+        return {
+            "source_id": normalized["source_id"],
+            "source_name": normalized["source_name"],
+            "status": "ok",
+            "matched": True,
+            "lookup": lookup,
+            "matched_by": "GovTribe vendor search",
+            "external_record_id": normalized.get("external_record_id", ""),
+            "source_url": normalized.get("source_url", ""),
+            "vendor_record": normalized,
+            "notes": [f"GovTribe MCP tools used: {_tool_name(tool)}"],
+            "tool_name": _tool_name(tool),
+        }
 
     def search_scan_opportunities(
         self,
