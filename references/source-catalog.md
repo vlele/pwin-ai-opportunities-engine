@@ -59,6 +59,7 @@ Current retrieval rules:
 - Trust tier: 4
 - Portal: https://govtribe.com/mcp
 - API docs: https://govtribe.com/docs/govtribe-user-guide/govtribe-mcp/govtribe-mcp-for-developers/
+- Tool guide: `references/govtribe-mcp-tool-guide.md`
 - Runtime implementation:
   - `scripts/intel/mcp_http.py`
   - `scripts/intel/providers/govtribe_mcp.py`
@@ -69,7 +70,8 @@ Current retrieval rules:
 
 - Treat GovTribe as optional enrichment, not as a replacement for official `SAM.gov` notice retrieval.
 - Use direct MCP `initialize`, `notifications/initialized`, `tools/list`, and `tools/call` requests.
-- Discover opportunity, award, vehicle, and government-file tools from tool metadata, descriptions, and schemas.
+- Use the documented GovTribe for Agents tool map for federal opportunity, award, IDV, vehicle, and government-file enrichment.
+- Keep search query construction aligned with the GovTribe keyword/semantic mode guidance.
 - Use `GOVTRIBE_MCP_URL` only to override the default remote endpoint.
 - Default the GovTribe MCP timeout to 90 seconds unless `GOVTRIBE_MCP_TIMEOUT_SECONDS` is explicitly set.
 - Never log `GOVTRIBE_MCP_API_KEY`, authorization headers, or token fragments.

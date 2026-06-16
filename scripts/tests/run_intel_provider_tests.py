@@ -60,15 +60,48 @@ class FakeGovTribeClient:
     def list_tools(self) -> list[dict[str, object]]:
         return [
             {
+                "name": "Search_Activity",
+                "description": "Searches GovTribe activity feed events for a subject record and optionally related records.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "govtribe_type": {"type": "string"},
+                        "govtribe_id": {"type": "string"},
+                        "query": {"type": "string"},
+                    },
+                    "required": ["govtribe_type", "govtribe_id"],
+                },
+            },
+            {
                 "name": "Search_Federal_Contract_Opportunities",
                 "description": "Search federal contract opportunities by solicitation number or keyword query.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "query": {"type": "string"},
-                        "limit": {"type": "integer"},
+                        "search_mode": {"type": "string", "enum": ["keyword", "semantic"]},
+                        "per_page": {"type": "number"},
+                        "solicitation_numbers": {"type": "array", "items": {"type": "string"}},
+                        "fields_to_return": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "govtribe_id",
+                                    "govtribe_url",
+                                    "source_url",
+                                    "name",
+                                    "solicitation_number",
+                                    "descriptions",
+                                    "govtribe_ai_summary",
+                                    "government_files",
+                                    "federal_contract_awards",
+                                    "federal_contract_idvs",
+                                ],
+                            },
+                        },
                     },
-                    "required": ["query"],
+                    "required": [],
                 },
             }
         ]
@@ -170,13 +203,25 @@ def main() -> int:
         failures.append("govtribe_tool_discovery")
     broader_discovery = discover_tool_families(
         [
+            {
+                "name": "Search_Activity",
+                "description": "Searches GovTribe activity feed events for a subject record and optionally related records.",
+                "inputSchema": {"required": ["govtribe_type", "govtribe_id"]},
+            },
+            {
+                "name": "Search_Federal_Contract_Opportunities",
+                "description": "Search federal contract opportunities and returns solicitation records.",
+            },
             {"name": "Search_Federal_Contract_Awards", "description": "Search federal contract awards and vendors."},
+            {"name": "Search_Federal_Contract_IDVs", "description": "Search federal contract IDVs and vehicle records."},
             {"name": "Search_Federal_Contract_Vehicles", "description": "Search contract vehicles, IDIQs, GWACs, and schedules."},
             {"name": "Search_Government_Files", "description": "Search government files and procurement documents."},
         ]
     )
-    if set(broader_discovery) != {"awards", "vehicles", "government_files"}:
+    if set(broader_discovery) != {"opportunities", "awards", "idvs", "vehicles", "government_files"}:
         failures.append("govtribe_broader_tool_discovery")
+    if broader_discovery.get("opportunities", {}).get("name") != "Search_Federal_Contract_Opportunities":
+        failures.append("govtribe_activity_not_opportunity")
 
     with patch.dict(os.environ, {}, clear=True):
         provider = GovTribeMCPCommercialIntelProvider({"id": "govtribe_mcp_commercial_intel"})
@@ -229,8 +274,15 @@ def main() -> int:
             failures.append("govtribe_evidence_incumbent")
         if evidence.get("vehicle", {}).get("name") != "CIO-SP3":
             failures.append("govtribe_evidence_vehicle")
-        if fake_client.calls[0][1].get("query") != "IRS-2026-001":
+        first_call_args = fake_client.calls[0][1]
+        if first_call_args.get("query") != "IRS-2026-001":
             failures.append("govtribe_solicitation_first")
+        if first_call_args.get("solicitation_numbers") != ["IRS-2026-001"]:
+            failures.append("govtribe_solicitation_filter")
+        if first_call_args.get("search_mode") != "keyword":
+            failures.append("govtribe_keyword_mode")
+        if "fields_to_return" not in first_call_args:
+            failures.append("govtribe_fields_to_return")
 
     output = {
         "status": "OK" if not failures else "FAILED",

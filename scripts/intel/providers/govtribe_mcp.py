@@ -26,6 +26,134 @@ from intel.providers.base import (
 SOURCE_ID = "govtribe_mcp_commercial_intel"
 SOURCE_NAME = "GovTribe MCP Commercial Intelligence"
 
+FAMILY_TOOL_GUIDE: dict[str, dict[str, Any]] = {
+    "opportunities": {
+        "preferred_names": ("Search_Federal_Contract_Opportunities",),
+        "required_terms": ("federal", "contract", "opportunit"),
+        "fields_to_return": (
+            "govtribe_id",
+            "govtribe_url",
+            "source_url",
+            "name",
+            "solicitation_number",
+            "opportunity_type",
+            "opportunity_state",
+            "set_aside_type",
+            "posted_date",
+            "due_date",
+            "award_date",
+            "descriptions",
+            "govtribe_ai_summary",
+            "federal_contract_vehicle",
+            "federal_agency",
+            "naics_category",
+            "psc_category",
+            "government_files",
+            "federal_contract_awards",
+            "federal_contract_idvs",
+        ),
+    },
+    "awards": {
+        "preferred_names": ("Search_Federal_Contract_Awards",),
+        "required_terms": ("federal", "contract", "award"),
+        "fields_to_return": (
+            "govtribe_id",
+            "govtribe_url",
+            "name",
+            "contract_number",
+            "award_date",
+            "ultimate_completion_date",
+            "ceiling_value",
+            "dollars_obligated",
+            "base_and_exercised_options_value",
+            "set_aside_type",
+            "descriptions",
+            "govtribe_ai_summary",
+            "awardee",
+            "federal_contract_vehicle",
+            "federal_contract_idv",
+            "contracting_federal_agency",
+            "funding_federal_agency",
+            "originating_federal_contract_opportunity",
+        ),
+    },
+    "idvs": {
+        "preferred_names": ("Search_Federal_Contract_IDVs",),
+        "required_terms": ("federal", "contract", "idv"),
+        "fields_to_return": (
+            "govtribe_id",
+            "govtribe_url",
+            "name",
+            "contract_number",
+            "award_date",
+            "last_date_to_order",
+            "ceiling_value",
+            "dollars_obligated",
+            "base_and_exercised_options_value",
+            "set_aside",
+            "description",
+            "govtribe_ai_summary",
+            "awardee",
+            "federal_contract_vehicle",
+            "contracting_federal_agency",
+            "funding_federal_agency",
+            "originating_federal_contract_opportunity",
+            "task_orders",
+        ),
+    },
+    "vehicles": {
+        "preferred_names": ("Search_Federal_Contract_Vehicles",),
+        "required_terms": ("federal", "contract", "vehicle"),
+        "fields_to_return": (
+            "govtribe_id",
+            "govtribe_url",
+            "name",
+            "award_date",
+            "last_date_to_order",
+            "shared_ceiling",
+            "set_aside_type",
+            "descriptions",
+            "govtribe_ai_summary",
+            "federal_agency",
+            "federal_contract_awards",
+            "originating_federal_contract_opportunity",
+        ),
+    },
+    "government_files": {
+        "preferred_names": ("Search_Government_Files",),
+        "required_terms": ("government", "file"),
+        "fields_to_return": (
+            "govtribe_id",
+            "govtribe_url",
+            "download_url",
+            "name",
+            "file_format",
+            "extension",
+            "file_source",
+            "size",
+            "posted_date",
+            "content_snippet",
+            "govtribe_ai_summary",
+            "parent_record",
+        ),
+    },
+}
+
+QUERY_COMPATIBLE_REQUIRED_FIELDS = {
+    "query",
+    "search_mode",
+    "page",
+    "per_page",
+    "limit",
+    "size",
+    "page_size",
+    "max_results",
+    "fields_to_return",
+    "solicitation_numbers",
+    "piids",
+    "govtribe_ids",
+}
+
 
 def govtribe_mcp_url() -> str:
     return str(os.getenv("GOVTRIBE_MCP_URL") or DEFAULT_GOVTRIBE_MCP_URL).strip()
@@ -47,6 +175,10 @@ def _tool_name(tool: dict[str, Any]) -> str:
     return str(tool.get("name") or tool.get("title") or "").strip()
 
 
+def _normalize_tool_name(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
+
+
 def _schema_text(tool: dict[str, Any]) -> str:
     schema = tool.get("inputSchema") or tool.get("input_schema") or {}
     try:
@@ -61,47 +193,30 @@ def _tool_text(tool: dict[str, Any]) -> str:
             str(tool.get("name") or ""),
             str(tool.get("title") or ""),
             str(tool.get("description") or ""),
-            _schema_text(tool),
         ]
     ).lower()
 
 
 def _tool_score(tool: dict[str, Any], family: str) -> int:
+    guide = FAMILY_TOOL_GUIDE.get(family, {})
+    if not _tool_accepts_query_pattern(tool):
+        return 0
+    normalized_name = _normalize_tool_name(_tool_name(tool))
+    preferred_names = [_normalize_tool_name(item) for item in guide.get("preferred_names", ())]
+    if normalized_name in preferred_names:
+        return 100 - preferred_names.index(normalized_name)
+
     text = _tool_text(tool)
-    score = 0
-    if family == "opportunities":
-        if "opportunit" not in text:
-            return 0
-        score += 12
-        for term in ("federal", "contract", "solicitation", "notice"):
-            if term in text:
-                score += 3
-        for term in ("award", "vehicle", "file", "document"):
-            if term in text:
-                score -= 3
-    elif family == "awards":
-        if "award" not in text:
-            return 0
-        score += 10
-        for term in ("federal", "contract", "recipient", "vendor"):
-            if term in text:
-                score += 2
-        if "opportunit" in text:
-            score -= 2
-    elif family == "vehicles":
-        if "vehicle" not in text:
-            return 0
-        score += 10
-        for term in ("contract", "idiq", "gwac", "schedule"):
-            if term in text:
-                score += 2
-    elif family == "government_files":
-        if "file" not in text and "document" not in text:
-            return 0
-        score += 10
-        for term in ("government", "attachment", "procurement", "solicitation"):
-            if term in text:
-                score += 2
+    required_terms = tuple(str(item).lower() for item in guide.get("required_terms", ()))
+    if required_terms and not all(term in text for term in required_terms):
+        return 0
+    score = 10 + sum(3 for term in required_terms if term in text)
+    if family == "opportunities" and any(term in text for term in ("grant", "state and local", "vehicle opportunity")):
+        score -= 8
+    if family == "awards" and any(term in text for term in ("grant", "sub award", "sub-award")):
+        score -= 8
+    if family == "government_files" and any(term in text for term in ("user file", "vector store")):
+        score -= 8
     return score
 
 
@@ -114,7 +229,7 @@ def _select_tool(tools: list[dict[str, Any]], family: str) -> dict[str, Any] | N
 
 def discover_tool_families(tools: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     families: dict[str, dict[str, Any]] = {}
-    for family in ("opportunities", "awards", "vehicles", "government_files"):
+    for family in FAMILY_TOOL_GUIDE:
         tool = _select_tool(tools, family)
         if tool:
             families[family] = tool
@@ -137,6 +252,11 @@ def _schema_required(tool: dict[str, Any]) -> list[str]:
     return [str(item) for item in required] if isinstance(required, list) else []
 
 
+def _tool_accepts_query_pattern(tool: dict[str, Any]) -> bool:
+    required = {_normalize_tool_name(item) for item in _schema_required(tool)}
+    return required.issubset(QUERY_COMPATIBLE_REQUIRED_FIELDS)
+
+
 def _is_string_prop(spec: Any) -> bool:
     if not isinstance(spec, dict):
         return True
@@ -155,6 +275,53 @@ def _is_integer_prop(spec: Any) -> bool:
     return prop_type in {"integer", "number"}
 
 
+def _is_array_prop(spec: Any) -> bool:
+    if not isinstance(spec, dict):
+        return False
+    prop_type = spec.get("type")
+    if isinstance(prop_type, list):
+        return "array" in prop_type
+    return prop_type == "array"
+
+
+def _enum_values(spec: Any) -> list[str]:
+    if not isinstance(spec, dict):
+        return []
+    values = spec.get("enum")
+    if not isinstance(values, list):
+        items = spec.get("items")
+        values = items.get("enum") if isinstance(items, dict) else []
+    return [str(value) for value in values] if isinstance(values, list) else []
+
+
+def _tool_family(tool: dict[str, Any]) -> str:
+    normalized_name = _normalize_tool_name(_tool_name(tool))
+    for family, guide in FAMILY_TOOL_GUIDE.items():
+        preferred_names = {_normalize_tool_name(item) for item in guide.get("preferred_names", ())}
+        if normalized_name in preferred_names:
+            return family
+    return ""
+
+
+def _fields_for_tool(tool: dict[str, Any]) -> list[str]:
+    guide = FAMILY_TOOL_GUIDE.get(_tool_family(tool), {})
+    requested = [str(item) for item in guide.get("fields_to_return", ())]
+    spec = _schema_properties(tool).get("fields_to_return")
+    allowed = set(_enum_values(spec))
+    if allowed:
+        return [field for field in requested if field in allowed]
+    return requested
+
+
+def _search_mode_for_query(query: str, mode: str = "keyword") -> str:
+    clean_mode = str(mode or "keyword").strip().lower()
+    if clean_mode not in {"keyword", "semantic"}:
+        clean_mode = "keyword"
+    if clean_mode == "semantic":
+        return "semantic"
+    return "keyword"
+
+
 def _tool_arguments(
     tool: dict[str, Any],
     *,
@@ -163,10 +330,11 @@ def _tool_arguments(
     title: str = "",
     buyer: str = "",
     limit: int = 3,
+    search_mode: str = "keyword",
 ) -> dict[str, Any]:
     properties = _schema_properties(tool)
     if not properties:
-        return {"query": query, "limit": limit}
+        return {"query": query, "limit": limit, "search_mode": _search_mode_for_query(query, search_mode)}
 
     args: dict[str, Any] = {}
     string_fallbacks: list[str] = []
@@ -175,11 +343,24 @@ def _tool_arguments(
         if _is_integer_prop(spec) and key in {"limit", "size", "page size", "per page", "max results"}:
             args[name] = limit
             continue
+        if _is_array_prop(spec):
+            if key == "fields to return":
+                fields = _fields_for_tool(tool)
+                if fields:
+                    args[name] = fields
+            elif key == "solicitation numbers" and solicitation_number:
+                args[name] = [solicitation_number]
+            continue
         if not _is_string_prop(spec):
             continue
         string_fallbacks.append(name)
         if key in {"query", "q", "search", "search query", "keyword", "keywords", "term", "terms"}:
             args[name] = query
+        elif key == "search mode":
+            mode = _search_mode_for_query(query, search_mode)
+            allowed_modes = set(_enum_values(spec))
+            if not allowed_modes or mode in allowed_modes:
+                args[name] = mode
         elif "solicitation" in key and solicitation_number:
             args[name] = solicitation_number
         elif "notice" in key and solicitation_number:
@@ -327,15 +508,21 @@ def _flatten_records(value: Any) -> list[dict[str, Any]]:
     if records:
         return records
     useful_keys = {
+        "govtribe_id",
+        "govtribe_url",
         "id",
         "title",
         "name",
         "summary",
         "description",
+        "descriptions",
+        "govtribe_ai_summary",
+        "content_snippet",
         "solicitation_number",
         "solicitationNumber",
         "notice_id",
         "url",
+        "contract_number",
         "award_id",
         "vehicle",
         "vendor",
@@ -378,12 +565,13 @@ def _first_text(record: dict[str, Any], *keys: str) -> str:
 
 
 def _record_url(record: dict[str, Any], default_url: str) -> str:
-    return _first_text(record, "url", "link", "uiLink", "permalink", "source_url") or default_url
+    return _first_text(record, "govtribe_url", "url", "link", "uiLink", "permalink", "source_url", "download_url") or default_url
 
 
 def _record_identifier(record: dict[str, Any]) -> str:
     return _first_text(
         record,
+        "govtribe_id",
         "external_record_id",
         "id",
         "uuid",
@@ -394,6 +582,7 @@ def _record_identifier(record: dict[str, Any]) -> str:
         "award_id",
         "awardId",
         "contract_id",
+        "contract_number",
         "piid",
     )
 
@@ -407,6 +596,10 @@ def _record_value(record: dict[str, Any]) -> str:
         record,
         "contract_value",
         "contractValue",
+        "ceiling_value",
+        "shared_ceiling",
+        "dollars_obligated",
+        "base_and_exercised_options_value",
         "award_amount",
         "awardAmount",
         "estimated_value",
@@ -434,6 +627,7 @@ def _call_search(
     solicitation_number: str = "",
     title: str = "",
     buyer: str = "",
+    search_mode: str = "keyword",
 ) -> tuple[list[dict[str, Any]], str]:
     args = _tool_arguments(
         tool,
@@ -441,6 +635,7 @@ def _call_search(
         solicitation_number=solicitation_number,
         title=title,
         buyer=buyer,
+        search_mode=search_mode,
     )
     result = client.call_tool(_tool_name(tool), args)
     return _tool_result_records(result), _tool_name(tool)
@@ -463,7 +658,17 @@ def _records_to_result(
     first_family, first_record = records_by_family[0]
     source_url = _record_url(first_record, default_url)
     external_record_id = _record_identifier(first_record)
-    summary = _first_text(first_record, "summary", "description", "abstract", "title", "name")
+    summary = _first_text(
+        first_record,
+        "summary",
+        "govtribe_ai_summary",
+        "description",
+        "descriptions",
+        "content_snippet",
+        "abstract",
+        "title",
+        "name",
+    )
     incumbent_name = ""
     vehicle_name = ""
     set_aside = ""
@@ -481,7 +686,15 @@ def _records_to_result(
             "recipient_name",
             "contractor",
         )
-        vehicle_name = vehicle_name or _first_text(record, "vehicle", "vehicle_name", "contract_vehicle", "contractVehicle")
+        vehicle_name = vehicle_name or _first_text(
+            record,
+            "vehicle",
+            "vehicle_name",
+            "contract_vehicle",
+            "contractVehicle",
+            "federal_contract_vehicle",
+            "federal_contract_idv",
+        )
         set_aside = set_aside or _first_text(record, "set_aside", "setAside", "set_aside_type", "typeOfSetAsideDescription")
         value = value or _record_value(record)
 
@@ -749,13 +962,17 @@ class GovTribeMCPCommercialIntelProvider:
         errors: list[str] = []
         try:
             families = self._tool_families(client)
-            selected = {family: tool for family, tool in families.items() if family in {"opportunities", "awards", "vehicles", "government_files"}}
+            selected = {
+                family: tool
+                for family, tool in families.items()
+                if family in {"opportunities", "awards", "idvs", "vehicles", "government_files"}
+            }
             if not selected:
                 return default_result(
                     self.source_id,
                     self.source_name,
                     "tool_contract_unavailable",
-                    notes=["GovTribe MCP did not expose compatible opportunity, award, vehicle, or government-file search tools."],
+                    notes=["GovTribe MCP did not expose compatible opportunity, award, IDV, vehicle, or government-file search tools."],
                 )
 
             solicitation_number = str(opportunity.get("solicitation_number") or "").strip()
@@ -799,7 +1016,7 @@ class GovTribeMCPCommercialIntelProvider:
         return _records_to_result(
             source_config=self.source_config,
             status="partial_error" if errors else "ok",
-            matched_by="GovTribe MCP capture enrichment across available opportunity, award, vehicle, and government-file tools",
+            matched_by="GovTribe MCP capture enrichment across available opportunity, award, IDV, vehicle, and government-file tools",
             records_by_family=records_by_family,
             notes=[f"GovTribe MCP tools used: {', '.join(dedupe_strings(tool_names))}", *errors],
             default_url=default_url,

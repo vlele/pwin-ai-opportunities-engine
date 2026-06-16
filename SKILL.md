@@ -258,6 +258,7 @@ Critical source rules:
 - Never print or log secret values such as `SAM_API_KEY`.
 - For `USAspending`, use documented JSON `POST` requests.
 - For `GovTribe MCP`, use `GOVTRIBE_MCP_API_KEY` directly through the shipped MCP client; do not require `OPENAI_API_KEY` for GovTribe.
+- For `GovTribe MCP` tool selection, query construction, and default returned fields, use `references/govtribe-mcp-tool-guide.md`.
 - Use `OPENAI_API_KEY` only for optional semantic reasoning in the shipped reasoning helpers.
 
 Not in the shipped source contract:
