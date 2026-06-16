@@ -2,7 +2,7 @@
 
 If you can clone a repo and paste one OpenClaw prompt, you can use this skill.
 
-`pwin-ai-opportunities` turns OpenClaw into a lightweight federal opportunity scanner and capture-research assistant. Install the skill, set the required SAM.gov API key, point it at a company website, and OpenClaw will create and pre-populate the starter workspace files for you.
+`pwin-ai-opportunities` turns OpenClaw into a lightweight federal opportunity scanner and capture-research assistant. Install the skill, configure either SAM.gov or GovTribe access, point it at a company website, and OpenClaw will create and pre-populate the starter workspace files for you.
 
 ## Why it feels easy
 
@@ -20,13 +20,23 @@ git clone git@github.com:vlele/pwin-ai-opportunities-engine.git "$HOME/.openclaw
 export PWIN_AI_OPPS_ROOT="$HOME/.openclaw/skills/pwin-ai-opportunities"
 ```
 
-2. Export the required skill-specific secret:
+2. Export at least one opportunity-retrieval credential.
+
+For the official SAM.gov path:
 
 ```bash
 export SAM_API_KEY="your-sam-gov-key"
 ```
 
-3. Keep your normal OpenClaw model credential in place. Optionally export `GOVTRIBE_MCP_API_KEY` if you enable the GovTribe sidecar for a workspace.
+For the GovTribe MCP path:
+
+```bash
+export GOVTRIBE_MCP_API_KEY="your-govtribe-mcp-key"
+```
+
+SAM.gov remains the default official-source retrieval path. GovTribe MCP can also be used in lieu of SAM.gov for scan retrieval when the workspace enables `govtribe_mcp_commercial_intel` and sets `provider_options.allow_scan_retrieval_without_sam` to `true` in `procurement/source-registry.json`.
+
+3. Keep your normal OpenClaw model credential in place.
 
 If OpenClaw already works on your machine, you usually do not need any new LLM setup for this skill.
 
@@ -94,7 +104,8 @@ like A1
 ## Good to know
 
 - The current shipped scope is federal-only.
-- `SAM_API_KEY` is required for official opportunity retrieval; `GOVTRIBE_MCP_API_KEY` is optional for direct GovTribe enrichment.
+- `SAM_API_KEY` enables official SAM.gov opportunity retrieval.
+- `GOVTRIBE_MCP_API_KEY` enables direct GovTribe enrichment and can also power GovTribe-only scan retrieval when the workspace explicitly opts into that provider option.
 - Website-derived bootstrap fields are provisional until you confirm them.
 - OpenClaw should normally be invoked in chat; the Python scripts are the implementation layer underneath the skill.
 - Detailed setup notes live in `docs/install-openclaw.md`.
