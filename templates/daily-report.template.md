@@ -48,10 +48,4 @@
 
 ## Feedback Reminder
 
-Use the entry IDs above when replying:
-- `like A1`
-- `dislike W2 because too small`
-- `more like A1`
-- `hide E1`
-- `research A1`
-- `capture deep dive on A1`
+{{FEEDBACK_GUIDANCE}}
