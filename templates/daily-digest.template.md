@@ -63,11 +63,4 @@
 
 ## How to Give Feedback
 
-Reply with examples:
-- `like A1`
-- `dislike W2 because too small`
-- `more like A1`
-- `hide E1`
-- `never show grants`
-- `research A1`
-- `capture deep dive on A1`
+{{FEEDBACK_GUIDANCE}}
