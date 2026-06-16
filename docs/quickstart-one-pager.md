@@ -73,7 +73,7 @@ Recommended for the shipped reasoning path:
 
 ```bash
 export OPENAI_API_KEY="your-openai-key"
-export OPENAI_MODEL="gpt-5-mini"
+export OPENAI_MODEL="gpt-5.4-mini"
 ```
 
 Optional for the `GovTribe MCP` sidecar:
@@ -86,7 +86,7 @@ export GOVTRIBE_MCP_TIMEOUT_SECONDS=90
 
 Notes:
 
-- If `OPENAI_MODEL` is not set, the shipped scripts default to `gpt-5-mini`.
+- If `OPENAI_MODEL` is not set, the shipped scripts default to `gpt-5.4-mini`.
 - If `GovTribe MCP` is enabled in a workspace but `GOVTRIBE_MCP_API_KEY` is missing, scan and capture still run, but the commercial sidecar reports `not_configured`.
 - `GovWin IQ` is only a credential scaffold today, not a live runtime connector.
 
