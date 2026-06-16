@@ -1378,6 +1378,7 @@ def main() -> int:
 
     retrieval_records: list[dict[str, Any]] = []
     sam_scan_status = ""
+    sam_disabled_issue = ""
 
     if "sam_contract_opportunities" in enabled_ids:
         sam_result = search_sam_opportunities(naics_codes=naics_codes, today=today)
@@ -1406,7 +1407,7 @@ def main() -> int:
         retrieval_records.extend(sam_result.get("records", []))
     else:
         sam_scan_status = "disabled"
-        source_issues.append("SAM.gov Contract Opportunities is disabled in the runtime source registry.")
+        sam_disabled_issue = "SAM.gov Contract Opportunities is disabled in the runtime source registry."
 
     govtribe_source = next((source for source in enabled_sources if source.get("id") == "govtribe_mcp_commercial_intel"), None)
     govtribe_options = govtribe_source.get("provider_options", {}) if isinstance(govtribe_source, dict) else {}
@@ -1417,6 +1418,8 @@ def main() -> int:
         and govtribe_scan_opt_in
         and sam_scan_status in {"missing_api_key", "disabled"}
     )
+    if sam_disabled_issue and not should_run_govtribe_scan_retrieval:
+        source_issues.append(sam_disabled_issue)
     if should_run_govtribe_scan_retrieval:
         govtribe_provider = GovTribeMCPCommercialIntelProvider(govtribe_source)
         govtribe_result = govtribe_provider.search_scan_opportunities(
