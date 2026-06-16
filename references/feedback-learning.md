@@ -68,6 +68,13 @@ Apply rewards only to dimensions that actually contributed to the recommendation
 - contract-size bands
 - teaming / vehicle signals
 
+For semantic learning, keep opportunity context separate from feedback targets:
+
+- `resolved_entities` records semantic context detected on the opportunity
+- `feedback_interpretation.accepted_*` and `feedback_interpretation.rejected_*` records the traits eligible for learned preference scoring
+- explicit free-text reasons control promotion; for example, `reseller hardware and equipment buys are not our lane` should learn caution on that work pattern, not broad cautions against data management, set-aside posture, or prime-possible posture
+- ambiguous semantic facets should remain context unless the user names the trait or the reason is high-confidence and dimension-specific
+
 ## Promotion and decay
 
 - first signal: tentative
