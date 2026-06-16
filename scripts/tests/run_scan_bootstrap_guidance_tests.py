@@ -104,6 +104,7 @@ class FakeGovTribeRetrievalProvider:
                     "due_date": "2026-07-15",
                     "naics": ["541512"],
                     "set_aside": "Total Small Business Set-Aside",
+                    "estimated_value": "$1,000,000",
                     "summary": "Modernize a taxpayer case management platform with cloud-hosted delivery and analytics.",
                     "resource_links": ["https://govtribe.com/opportunity/gt-123"],
                     "raw_match_evidence": {
@@ -311,6 +312,16 @@ def main() -> int:
         assert opportunities[0]["source_id"] == "govtribe_mcp_commercial_intel", opportunities
         assert opportunities[0]["canonical_record_id"] == "govtribe:gt-123", opportunities
         assert "bucket" in opportunities[0], opportunities
+        cross_source_evidence = opportunities[0].get("cross_source_evidence", {})
+        assert "govtribe_mcp_commercial_intel" in cross_source_evidence.get("source_ids", []), cross_source_evidence
+        assert "sam_contract_opportunities" not in cross_source_evidence.get("source_ids", []), cross_source_evidence
+        assert "GovTribe MCP Commercial Intelligence" in cross_source_evidence.get("source_names", []), cross_source_evidence
+        vehicle_evidence = cross_source_evidence.get("vehicle", {}).get("evidence", [])
+        value_evidence = cross_source_evidence.get("contract_value_or_ceiling", {}).get("evidence", [])
+        combined_evidence = vehicle_evidence + value_evidence
+        assert "Opportunity record set-aside: Total Small Business Set-Aside." in vehicle_evidence, cross_source_evidence
+        assert "Opportunity record estimated value: $1,000,000." in value_evidence, cross_source_evidence
+        assert not any("SAM record" in item or "SAM notice" in item for item in combined_evidence), cross_source_evidence
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         workspace = Path(tmp_dir) / "workspace"
