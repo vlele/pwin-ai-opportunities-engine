@@ -68,6 +68,11 @@ def refresh_runtime_registry(bundle_root: Path, workspace: Path) -> tuple[Path, 
                 merged_source["enabled"] = runtime_source["enabled"]
             if "notes" in runtime_source:
                 merged_source["notes"] = runtime_source["notes"]
+            if "provider_options" in runtime_source and isinstance(runtime_source.get("provider_options"), dict):
+                template_options = merged_source.get("provider_options", {})
+                merged_options = dict(template_options) if isinstance(template_options, dict) else {}
+                merged_options.update(runtime_source["provider_options"])
+                merged_source["provider_options"] = merged_options
         merged_sources.append(merged_source)
     merged["sources"] = merged_sources
     write_json(runtime_path, merged)

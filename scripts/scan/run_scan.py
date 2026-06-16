@@ -20,7 +20,7 @@ from common.evidence_model import (
 )
 from common.paths import load_json, today_local_str, utc_now_iso, write_json
 from common.runtime import NOT_IMPLEMENTED_IN_BUNDLE_STATUS
-from common.commercial_intel import COMMERCIAL_INTEL_SOURCE_IDS, enrich_scan_records
+from common.commercial_intel import COMMERCIAL_INTEL_SOURCE_IDS, GovTribeMCPCommercialIntelProvider, enrich_scan_records
 from common.source_registry import (
     enabled_sources_summary,
     filter_sources_for_policy,
@@ -1376,11 +1376,15 @@ def main() -> int:
                 }
             )
 
+    retrieval_records: list[dict[str, Any]] = []
+    sam_scan_status = ""
+
     if "sam_contract_opportunities" in enabled_ids:
         sam_result = search_sam_opportunities(naics_codes=naics_codes, today=today)
+        sam_scan_status = str(sam_result.get("status", "unknown") or "unknown")
         sam_source_status = {
             "source_id": "sam_contract_opportunities",
-            "status": sam_result.get("status", "unknown"),
+            "status": sam_scan_status,
             "notes": sam_result.get("notes", []),
             "queried_naics": sam_result.get("queried_naics", []),
             "error_count": len(sam_result.get("errors", [])),
@@ -1399,16 +1403,59 @@ def main() -> int:
         source_statuses.append(sam_source_status)
         source_issues.extend(sam_result.get("errors", []))
 
-        candidate_records = []
-        semantic_reasoning_remaining = SEMANTIC_REASONING_MAX_RECORDS_PER_RUN
-        for record in sam_result.get("records", []):
-            due_date = _parse_any_date(record.get("due_date"))
-            timing_band, days_until_due = _timing_band(due_date, today, preferences)
-            if timing_band in {"expired", "out_of_window"}:
-                continue
-            if timing_band == "missing" and not timing["allow_missing"]:
-                continue
+        retrieval_records.extend(sam_result.get("records", []))
+    else:
+        sam_scan_status = "disabled"
+        source_issues.append("SAM.gov Contract Opportunities is disabled in the runtime source registry.")
 
+    govtribe_source = next((source for source in enabled_sources if source.get("id") == "govtribe_mcp_commercial_intel"), None)
+    govtribe_options = govtribe_source.get("provider_options", {}) if isinstance(govtribe_source, dict) else {}
+    govtribe_scan_opt_in = bool(govtribe_options.get("allow_scan_retrieval_without_sam")) if isinstance(govtribe_options, dict) else False
+    should_run_govtribe_scan_retrieval = (
+        not retrieval_records
+        and govtribe_source is not None
+        and govtribe_scan_opt_in
+        and sam_scan_status in {"missing_api_key", "disabled"}
+    )
+    if should_run_govtribe_scan_retrieval:
+        govtribe_provider = GovTribeMCPCommercialIntelProvider(govtribe_source)
+        govtribe_result = govtribe_provider.search_scan_opportunities(
+            vendor_profile=vendor_profile,
+            preferences=preferences,
+        )
+        govtribe_status = str(govtribe_result.get("status", "unknown") or "unknown")
+        source_statuses.append(
+            {
+                "source_id": "govtribe_mcp_commercial_intel",
+                "status": govtribe_status,
+                "mode": "scan_retrieval",
+                "notes": govtribe_result.get("notes", []),
+                "queried_naics": govtribe_result.get("queried_naics", []),
+                "tool_name": govtribe_result.get("tool_name", ""),
+                "error_count": 1 if govtribe_status in {"error", "tool_contract_unavailable"} else 0,
+                "record_count": len(govtribe_result.get("records", [])),
+            }
+        )
+        if govtribe_status in {"error", "tool_contract_unavailable"}:
+            source_issues.extend(
+                f"GovTribe scan retrieval: {note}"
+                for note in govtribe_result.get("notes", [])
+                if str(note).strip()
+            )
+        retrieval_records.extend(govtribe_result.get("records", []))
+
+    candidate_records = []
+    semantic_reasoning_remaining = SEMANTIC_REASONING_MAX_RECORDS_PER_RUN
+    for record in retrieval_records:
+        due_date = _parse_any_date(record.get("due_date"))
+        timing_band, days_until_due = _timing_band(due_date, today, preferences)
+        if timing_band in {"expired", "out_of_window"}:
+            continue
+        if timing_band == "missing" and not timing["allow_missing"]:
+            continue
+
+        hydrated_text = ""
+        if record.get("source_id") == "sam_contract_opportunities":
             hydrated = hydrate_sam_notice(str(record.get("notice_id", "")))
             hydrated_text = hydrated.get("summary") if hydrated.get("full_desc_loaded") else ""
             if hydrated.get("status") not in {"ok", "empty", "missing_notice_id"}:
@@ -1419,100 +1466,98 @@ def main() -> int:
                 record.setdefault("raw_match_evidence", {})
                 record["raw_match_evidence"]["full_desc_loaded"] = True
 
-            normalized_scan_text = _normalized_text(f"{record.get('title', '')} {record.get('summary', '')} {hydrated_text or ''}")
-            scan_token_set = set(normalized_scan_text.split())
-            preference_bucket, preference_note = _preference_filter_guidance(record, normalized_scan_text, scan_token_set, preferences)
-            match_score, confidence_score, reasons, caveat, fit_context = _score_record(
-                record,
-                keywords,
-                negative_keywords,
-                fit_guidance,
-                vendor_profile,
-                preferences,
-                hydrated_text,
-                timing_band,
-                days_until_due,
+        normalized_scan_text = _normalized_text(f"{record.get('title', '')} {record.get('summary', '')} {hydrated_text or ''}")
+        scan_token_set = set(normalized_scan_text.split())
+        preference_bucket, preference_note = _preference_filter_guidance(record, normalized_scan_text, scan_token_set, preferences)
+        match_score, confidence_score, reasons, caveat, fit_context = _score_record(
+            record,
+            keywords,
+            negative_keywords,
+            fit_guidance,
+            vendor_profile,
+            preferences,
+            hydrated_text,
+            timing_band,
+            days_until_due,
+        )
+        notice_categories = _notice_categories(record, hydrated_text)
+        guidance_bucket, guidance_note, guidance_categories = _notice_guidance(preferences, notice_categories, timing_band)
+        if preference_bucket == "suppressed":
+            guidance_bucket = "suppressed"
+            guidance_note = preference_note
+        semantic_score_before = match_score
+        semantic_bucket_before = _bucket_for_record(match_score, timing_band, preferences, guidance_bucket, fit_context)
+        semantic_reasoning_attempted = False
+        if (
+            semantic_reasoning_remaining > 0
+            and _should_run_semantic_reasoning(
+                match_score=match_score,
+                bucket_override=guidance_bucket,
+                timing_band=timing_band,
+                fit_context=fit_context,
+                hydrated_text=hydrated_text,
             )
-            notice_categories = _notice_categories(record, hydrated_text)
-            guidance_bucket, guidance_note, guidance_categories = _notice_guidance(preferences, notice_categories, timing_band)
-            if preference_bucket == "suppressed":
-                guidance_bucket = "suppressed"
-                guidance_note = preference_note
-            semantic_score_before = match_score
-            semantic_bucket_before = _bucket_for_record(match_score, timing_band, preferences, guidance_bucket, fit_context)
-            semantic_reasoning_attempted = False
-            if (
-                semantic_reasoning_remaining > 0
-                and _should_run_semantic_reasoning(
-                    match_score=match_score,
-                    bucket_override=guidance_bucket,
-                    timing_band=timing_band,
-                    fit_context=fit_context,
-                    hydrated_text=hydrated_text,
-                )
-            ):
-                semantic_reasoning_attempted = True
-                semantic_fit = assess_scan_fit(
-                    record=record,
-                    hydrated_text=hydrated_text or str(record.get("summary", "") or ""),
-                    vendor_profile=vendor_profile,
-                    deterministic_fit_context=fit_context,
-                    learned_semantic_preferences=_semantic_applied_preferences(preferences),
-                )
-                semantic_reasoning_remaining -= 1
-                semantic_points, semantic_reasons = _semantic_feedback_adjustment(semantic_fit, preferences)
-                match_score = max(0, min(match_score + semantic_points, 100))
-                if semantic_reasons:
-                    reasons = [*semantic_reasons, *reasons][:4]
-                fit_context["semantic_fit"] = semantic_fit or {}
-                fit_context["semantic_fit_assessment"] = (
-                    str((semantic_fit or {}).get("fit_assessment", "")).strip()
-                    if isinstance(semantic_fit, dict)
-                    else ""
-                )
-            else:
-                semantic_fit = None
-            record["match_score"] = match_score
-            record["confidence_score"] = confidence_score
-            record["semantic_fit"] = semantic_fit or {}
-            record["bucket"] = _bucket_for_record(match_score, timing_band, preferences, guidance_bucket, fit_context)
-            record["semantic_audit"] = _semantic_audit_record(
-                semantic_fit=semantic_fit,
-                score_before=semantic_score_before,
-                score_after=match_score,
-                bucket_before=semantic_bucket_before,
-                bucket_after=record["bucket"],
-                guidance_bucket=guidance_bucket,
-                reasoning_attempted=semantic_reasoning_attempted,
+        ):
+            semantic_reasoning_attempted = True
+            semantic_fit = assess_scan_fit(
+                record=record,
+                hydrated_text=hydrated_text or str(record.get("summary", "") or ""),
+                vendor_profile=vendor_profile,
+                deterministic_fit_context=fit_context,
+                learned_semantic_preferences=_semantic_applied_preferences(preferences),
             )
-            fit_context["semantic_audit"] = record["semantic_audit"]
-            record["timing_window"] = timing_band
-            if days_until_due is not None:
-                record["days_until_due"] = days_until_due
-            if notice_categories:
-                record["screening_categories"] = sorted(notice_categories)
-            hold_reason = _urgent_bucket_hold_reason(
-                record["bucket"],
-                match_score,
-                timing_band,
-                preferences,
-                guidance_bucket,
-                fit_context,
+            semantic_reasoning_remaining -= 1
+            semantic_points, semantic_reasons = _semantic_feedback_adjustment(semantic_fit, preferences)
+            match_score = max(0, min(match_score + semantic_points, 100))
+            if semantic_reasons:
+                reasons = [*semantic_reasons, *reasons][:4]
+            fit_context["semantic_fit"] = semantic_fit or {}
+            fit_context["semantic_fit_assessment"] = (
+                str((semantic_fit or {}).get("fit_assessment", "")).strip()
+                if isinstance(semantic_fit, dict)
+                else ""
             )
-            if guidance_note:
-                record["screening_status"] = guidance_bucket or record["bucket"]
-                record["explanation_reasons"] = [guidance_note, *reasons][:4]
-                record["main_caveat"] = guidance_note if guidance_bucket == "suppressed" else caveat
-                if guidance_categories:
-                    record["suppression_categories"] = guidance_categories
-            else:
-                record["explanation_reasons"] = ([hold_reason, *reasons] if hold_reason else reasons)[:4]
-                record["main_caveat"] = hold_reason or caveat
-            candidate_records.append(record)
+        else:
+            semantic_fit = None
+        record["match_score"] = match_score
+        record["confidence_score"] = confidence_score
+        record["semantic_fit"] = semantic_fit or {}
+        record["bucket"] = _bucket_for_record(match_score, timing_band, preferences, guidance_bucket, fit_context)
+        record["semantic_audit"] = _semantic_audit_record(
+            semantic_fit=semantic_fit,
+            score_before=semantic_score_before,
+            score_after=match_score,
+            bucket_before=semantic_bucket_before,
+            bucket_after=record["bucket"],
+            guidance_bucket=guidance_bucket,
+            reasoning_attempted=semantic_reasoning_attempted,
+        )
+        fit_context["semantic_audit"] = record["semantic_audit"]
+        record["timing_window"] = timing_band
+        if days_until_due is not None:
+            record["days_until_due"] = days_until_due
+        if notice_categories:
+            record["screening_categories"] = sorted(notice_categories)
+        hold_reason = _urgent_bucket_hold_reason(
+            record["bucket"],
+            match_score,
+            timing_band,
+            preferences,
+            guidance_bucket,
+            fit_context,
+        )
+        if guidance_note:
+            record["screening_status"] = guidance_bucket or record["bucket"]
+            record["explanation_reasons"] = [guidance_note, *reasons][:4]
+            record["main_caveat"] = guidance_note if guidance_bucket == "suppressed" else caveat
+            if guidance_categories:
+                record["suppression_categories"] = guidance_categories
+        else:
+            record["explanation_reasons"] = ([hold_reason, *reasons] if hold_reason else reasons)[:4]
+            record["main_caveat"] = hold_reason or caveat
+        candidate_records.append(record)
 
-        records.extend(candidate_records)
-    else:
-        source_issues.append("SAM.gov Contract Opportunities is disabled in the runtime source registry.")
+    records.extend(candidate_records)
 
     if "usaspending_award_history" in enabled_ids:
         enrichment_term = _search_text_for_enrichment(vendor_profile)

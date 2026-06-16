@@ -200,6 +200,25 @@ What `GovTribe MCP` adds when it is both enabled and configured:
 - optional capture-time incumbent, vehicle, related-procurement, and teaming clues
 - normalized cross-source evidence with explicit conflict reporting when official and commercial signals disagree
 
+`SAM.gov` remains the recommended official retrieval path. If a workspace intentionally needs GovTribe-only scan retrieval when `SAM_API_KEY` is unavailable, also set the explicit provider option:
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("procurement/source-registry.json")
+data = json.loads(path.read_text())
+for source in data.get("sources", []):
+    if source.get("id") == "govtribe_mcp_commercial_intel":
+        source["enabled"] = True
+        source.setdefault("provider_options", {})["allow_scan_retrieval_without_sam"] = True
+path.write_text(json.dumps(data, indent=2) + "\n")
+PY
+```
+
+This is a commercial tier-4 alternate retrieval path. It runs only when SAM.gov is disabled or cannot run because `SAM_API_KEY` is missing; it does not replace SAM.gov when SAM is configured.
+
 ## 7. Run the First Scan
 
 Once the workspace is bootstrapped, ask:
@@ -217,6 +236,7 @@ In Claude Code, use:
 Expected behavior:
 
 - if `SAM_API_KEY` is missing, the scan reports `missing_api_key`
+- if GovTribe-only scan retrieval is explicitly opted in and `GOVTRIBE_MCP_API_KEY` is configured, the scan can still produce commercial tier-4 opportunity records without `SAM_API_KEY`
 - if the workspace still has no usable NAICS, the scan reports `no_naics` and returns a bootstrap recommendation with the next command to run
 - if `OPENAI_API_KEY` is present, the scan can add semantic fit reasoning and a `semantic_audit` block
 - if `GovTribe MCP` is enabled and configured, the scan can add commercial source statuses plus `cross_source_evidence_notes`

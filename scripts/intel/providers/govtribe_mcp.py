@@ -5,6 +5,7 @@ import os
 import re
 from typing import Any
 
+from common.paths import utc_now_iso
 from common.evidence_model import (
     evidence_model_competitive_notes,
     evidence_model_next_questions,
@@ -149,6 +150,11 @@ QUERY_COMPATIBLE_REQUIRED_FIELDS = {
     "page_size",
     "max_results",
     "fields_to_return",
+    "naics",
+    "naics_code",
+    "naics_codes",
+    "ncode",
+    "ncodes",
     "solicitation_numbers",
     "piids",
     "govtribe_ids",
@@ -326,6 +332,7 @@ def _tool_arguments(
     tool: dict[str, Any],
     *,
     query: str,
+    naics_codes: list[str] | None = None,
     solicitation_number: str = "",
     title: str = "",
     buyer: str = "",
@@ -350,6 +357,8 @@ def _tool_arguments(
                     args[name] = fields
             elif key == "solicitation numbers" and solicitation_number:
                 args[name] = [solicitation_number]
+            elif key in {"naics", "naics codes", "naics code", "ncode", "ncodes"} and naics_codes:
+                args[name] = naics_codes
             continue
         if not _is_string_prop(spec):
             continue
@@ -369,6 +378,8 @@ def _tool_arguments(
             args[name] = title
         elif ("agency" in key or "buyer" in key or "customer" in key) and buyer:
             args[name] = buyer
+        elif key in {"naics", "naics code", "naics codes", "ncode", "ncodes"} and naics_codes:
+            args[name] = " ".join(naics_codes)
 
     if not any(str(value).strip() == query for value in args.values() if isinstance(value, str)):
         query_key = next((name for name in string_fallbacks if name in _schema_required(tool)), None) or (
@@ -403,9 +414,65 @@ def _vendor_brief(vendor_profile: dict[str, Any], preferences: dict[str, Any] | 
         ),
         "core_competencies": coerce_string_list(vendor_profile.get("core_competencies"), max_items=8),
         "confirmed_naics": coerce_string_list((naics or {}).get("confirmed"), max_items=8),
-        "candidate_naics": coerce_string_list((naics or {}).get("candidate"), max_items=8),
+        "candidate_naics": coerce_string_list((naics or {}).get("candidates") or (naics or {}).get("candidate"), max_items=8),
         "excluded_opportunity_classes": coerce_string_list(hard_filters.get("exclude_opportunity_classes"), max_items=8),
     }
+
+
+def _preference_values(preferences: dict[str, Any] | None, section: str, key: str) -> list[str]:
+    values: list[Any] = []
+    if not isinstance(preferences, dict):
+        return []
+    base_section = preferences.get(section, {}) if isinstance(preferences.get(section), dict) else {}
+    if isinstance(base_section.get(key), list):
+        values.extend(base_section.get(key, []))
+    learning = preferences.get("learning", {}) if isinstance(preferences.get("learning"), dict) else {}
+    applied = learning.get("applied_preferences", {}) if isinstance(learning.get("applied_preferences"), dict) else {}
+    applied_section = applied.get(section, {}) if isinstance(applied.get(section), dict) else {}
+    if isinstance(applied_section.get(key), list):
+        values.extend(applied_section.get(key, []))
+    return coerce_string_list(values, max_items=12)
+
+
+def _vendor_retrieval_naics(vendor_profile: dict[str, Any], preferences: dict[str, Any]) -> list[str]:
+    vendor = _vendor_brief(vendor_profile, preferences)
+    values = [
+        *coerce_string_list(vendor.get("confirmed_naics"), max_items=12),
+        *coerce_string_list(vendor.get("candidate_naics"), max_items=12),
+        *_preference_values(preferences, "soft_preferences", "preferred_naics"),
+    ]
+    excluded = set(_preference_values(preferences, "hard_filters", "exclude_naics"))
+    return [item for item in dedupe_strings(values) if item not in excluded][:8]
+
+
+def _profile_terms(vendor_profile: dict[str, Any], preferences: dict[str, Any]) -> list[str]:
+    terms: list[str] = []
+    company = vendor_profile.get("company") if isinstance(vendor_profile.get("company"), dict) else {}
+    terms.extend(coerce_string_list(company.get("summary"), max_items=1))
+    for item in vendor_profile.get("core_competencies", []):
+        if isinstance(item, dict):
+            terms.extend(coerce_string_list([item.get("name"), item.get("summary")], max_items=2))
+        else:
+            terms.extend(coerce_string_list(item, max_items=1))
+    terms.extend(coerce_string_list((vendor_profile.get("other_taxonomy_tags") or {}).get("keywords"), max_items=10) if isinstance(vendor_profile.get("other_taxonomy_tags"), dict) else [])
+    terms.extend(_preference_values(preferences, "soft_preferences", "positive_keywords"))
+    fit_narrative = str(vendor_profile.get("fit_narrative") or "").strip()
+    if fit_narrative:
+        terms.append(clip_text(fit_narrative, max_chars=500))
+    return dedupe_strings([clip_text(term, max_chars=120) for term in terms if term])[:12]
+
+
+def _scan_retrieval_queries(vendor_profile: dict[str, Any], preferences: dict[str, Any]) -> list[tuple[str, str]]:
+    terms = _profile_terms(vendor_profile, preferences)
+    vendor_name = _vendor_name(vendor_profile)
+    if terms:
+        keyword_terms = [f'"{term}"' if " " in term and len(term) <= 80 else term for term in terms[:6]]
+        semantic_query = " ".join([vendor_name, *terms[:8]]).strip()
+        return [
+            (" | ".join(keyword_terms), "keyword"),
+            (semantic_query, "semantic"),
+        ]
+    return [(vendor_name, "keyword")] if vendor_name != "Vendor" else []
 
 
 def _scan_record_brief(record: dict[str, Any], hydrated_text: str) -> dict[str, Any]:
@@ -624,17 +691,21 @@ def _call_search(
     *,
     tool: dict[str, Any],
     query: str,
+    naics_codes: list[str] | None = None,
     solicitation_number: str = "",
     title: str = "",
     buyer: str = "",
+    limit: int = 3,
     search_mode: str = "keyword",
 ) -> tuple[list[dict[str, Any]], str]:
     args = _tool_arguments(
         tool,
         query=query,
+        naics_codes=naics_codes,
         solicitation_number=solicitation_number,
         title=title,
         buyer=buyer,
+        limit=limit,
         search_mode=search_mode,
     )
     result = client.call_tool(_tool_name(tool), args)
@@ -817,6 +888,130 @@ def _records_to_result(
     }
 
 
+def _record_naics_codes(record: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+
+    def collect(value: Any) -> None:
+        if isinstance(value, dict):
+            for key in ("code", "naics", "naics_code", "id", "value", "name"):
+                if key in value:
+                    collect(value.get(key))
+            return
+        if isinstance(value, list):
+            for item in value:
+                collect(item)
+            return
+        text = str(value or "").strip()
+        if not text:
+            return
+        matches = re.findall(r"\b\d{6}\b", text)
+        values.extend(matches or [text])
+
+    for key in ("naics", "naics_code", "naics_codes", "naicsCategory", "naics_category"):
+        if key in record:
+            collect(record.get(key))
+    return dedupe_strings(values)
+
+
+def _record_resource_links(record: dict[str, Any], source_url: str) -> list[Any]:
+    links: list[Any] = []
+    for key in ("resource_links", "resourceLinks", "government_files", "files", "attachments"):
+        value = record.get(key)
+        if isinstance(value, list):
+            links.extend(value[:8])
+        elif value:
+            links.append(value)
+    for key in ("source_url", "govtribe_url", "url", "download_url"):
+        value = str(record.get(key) or "").strip()
+        if value:
+            links.append(value)
+    if source_url:
+        links.append(source_url)
+
+    deduped: list[Any] = []
+    seen: set[str] = set()
+    for item in links:
+        key = json.dumps(item, ensure_ascii=True, sort_keys=True) if isinstance(item, dict) else str(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped[:10]
+
+
+def _normalize_scan_opportunity(
+    *,
+    record: dict[str, Any],
+    source_config: dict[str, Any],
+    query: str,
+    queried_naics: list[str],
+    search_mode: str,
+    tool_name: str,
+    default_url: str,
+) -> dict[str, Any]:
+    source_id = str(source_config.get("id") or SOURCE_ID).strip()
+    source_name = str(source_config.get("name") or SOURCE_NAME).strip()
+    source_record_id = _record_identifier(record)
+    source_url = _record_url(record, default_url)
+    title = _record_title(record)
+    canonical_source_value = source_record_id or source_url or title
+    canonical_id = f"govtribe:{canonical_source_value}" if canonical_source_value else "govtribe:unknown"
+    notice_id = _first_text(record, "notice_id", "noticeId", "sam_notice_id", "samNoticeId") or source_record_id or canonical_id
+    summary = _first_text(
+        record,
+        "summary",
+        "govtribe_ai_summary",
+        "description",
+        "descriptions",
+        "content_snippet",
+        "abstract",
+    )
+    return {
+        "source_id": source_id,
+        "source_name": source_name,
+        "source_tier": int(source_config.get("trust_tier", 4) or 4),
+        "opportunity_id": canonical_id,
+        "canonical_record_id": canonical_id,
+        "canonical_record_id_type": "govtribe_id" if source_record_id else "govtribe_derived_id",
+        "notice_id": notice_id,
+        "title": title,
+        "url": source_url,
+        "buyer": _first_text(
+            record,
+            "buyer",
+            "agency",
+            "federal_agency",
+            "contracting_federal_agency",
+            "funding_federal_agency",
+            "department",
+            "organizationName",
+        )
+        or "N/A",
+        "opportunity_class": "contracts",
+        "notice_type": _first_text(record, "notice_type", "noticeType", "opportunity_type", "opportunity_state", "type"),
+        "solicitation_number": _first_text(record, "solicitation_number", "solicitationNumber", "solicitation", "number"),
+        "posted_date": _first_text(record, "posted_date", "postedDate", "published_date", "publication_date"),
+        "due_date": _first_text(record, "due_date", "dueDate", "response_deadline", "responseDeadLine", "responseDeadline") or "N/A",
+        "location": _first_text(record, "location", "placeOfPerformance", "place_of_performance"),
+        "naics": _record_naics_codes(record) or queried_naics,
+        "other_taxonomy_tags": [],
+        "set_aside": _first_text(record, "set_aside", "setAside", "set_aside_type", "typeOfSetAsideDescription"),
+        "estimated_value": _record_value(record) or None,
+        "summary": summary or "N/A",
+        "point_of_contact": record.get("pointOfContact", []) if isinstance(record.get("pointOfContact"), list) else [],
+        "resource_links": _record_resource_links(record, source_url),
+        "retrieval_timestamp": utc_now_iso(),
+        "raw_match_evidence": {
+            "query": query,
+            "queried_naics": queried_naics,
+            "search_mode": search_mode,
+            "tool_name": tool_name,
+            "source_record_id": source_record_id,
+            "full_desc_loaded": False,
+        },
+    }
+
+
 class GovTribeMCPCommercialIntelProvider:
     source_id = SOURCE_ID
     source_name = SOURCE_NAME
@@ -843,6 +1038,111 @@ class GovTribeMCPCommercialIntelProvider:
     def _tool_families(self, client: MCPHttpClient) -> dict[str, dict[str, Any]]:
         tools = client.list_tools()
         return discover_tool_families(tools)
+
+    def search_scan_opportunities(
+        self,
+        *,
+        vendor_profile: dict[str, Any],
+        preferences: dict[str, Any],
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        configured, missing = self.is_configured()
+        if not configured:
+            return {
+                "status": "not_configured",
+                "records": [],
+                "notes": [f"Missing env vars: {', '.join(missing)}"],
+                "queried_naics": [],
+                "tool_name": "",
+            }
+
+        client = self._client()
+        default_url = str(self.source_config.get("homepage") or govtribe_mcp_url()).strip()
+        queried_naics = _vendor_retrieval_naics(vendor_profile, preferences)
+        queries = _scan_retrieval_queries(vendor_profile, preferences)
+        if not queries and not queried_naics:
+            return {
+                "status": "no_match",
+                "records": [],
+                "notes": ["No vendor-specific GovTribe scan retrieval terms or NAICS were available."],
+                "queried_naics": [],
+                "tool_name": "",
+            }
+        if not queries:
+            queries = [(" ".join(queried_naics), "keyword")]
+        try:
+            families = self._tool_families(client)
+            tool = families.get("opportunities")
+            if not tool:
+                return {
+                    "status": "tool_contract_unavailable",
+                    "records": [],
+                    "notes": ["GovTribe MCP did not expose a compatible federal opportunities search tool."],
+                    "queried_naics": queried_naics,
+                    "tool_name": "",
+                }
+
+            normalized: dict[str, dict[str, Any]] = {}
+            tool_names: list[str] = []
+            for query, search_mode in queries:
+                found, tool_name = _call_search(
+                    client,
+                    tool=tool,
+                    query=query,
+                    naics_codes=queried_naics,
+                    limit=limit,
+                    search_mode=search_mode,
+                )
+                tool_names.append(tool_name)
+                for item in found:
+                    record = _normalize_scan_opportunity(
+                        record=item,
+                        source_config=self.source_config,
+                        query=query,
+                        queried_naics=queried_naics,
+                        search_mode=search_mode,
+                        tool_name=tool_name,
+                        default_url=default_url,
+                    )
+                    key = str(record.get("canonical_record_id") or record.get("url") or record.get("title") or "").strip()
+                    if key:
+                        normalized[key] = record
+                if normalized:
+                    break
+        except MCPResponseError as exc:
+            status = "tool_contract_unavailable" if exc.code == -32602 else "error"
+            return {
+                "status": status,
+                "records": [],
+                "notes": [str(exc)],
+                "queried_naics": queried_naics,
+                "tool_name": "",
+            }
+        except MCPHTTPError as exc:
+            return {
+                "status": "error",
+                "records": [],
+                "notes": [str(exc)],
+                "queried_naics": queried_naics,
+                "tool_name": "",
+            }
+        except Exception as exc:
+            return {
+                "status": "error",
+                "records": [],
+                "notes": [str(exc)],
+                "queried_naics": queried_naics,
+                "tool_name": "",
+            }
+
+        records = list(normalized.values())
+        return {
+            "status": "ok" if records else "no_match",
+            "records": records,
+            "notes": [f"GovTribe MCP tools used: {', '.join(dedupe_strings(tool_names))}"] if tool_names else [],
+            "queried_naics": queried_naics,
+            "tool_name": ", ".join(dedupe_strings(tool_names)),
+        }
 
     def enrich_scan(
         self,
