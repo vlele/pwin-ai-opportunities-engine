@@ -28,6 +28,12 @@ from intel.providers.base import (
 
 SOURCE_ID = "govtribe_mcp_commercial_intel"
 SOURCE_NAME = "GovTribe MCP Commercial Intelligence"
+ERROR_TEXT_MARKERS = (
+    "operator is invalid",
+    "selected federal agency ids operator is invalid",
+    "selected federal contract opportunity ids operator is invalid",
+)
+ERROR_STATUS_VALUES = {"error", "failed", "failure"}
 
 FAMILY_TOOL_GUIDE: dict[str, dict[str, Any]] = {
     "opportunities": {
@@ -595,6 +601,111 @@ def _json_from_text(text: str) -> Any:
         return None
 
 
+def _known_tool_error_text(text: Any) -> bool:
+    value = str(text or "").strip().lower()
+    return bool(value) and any(marker in value for marker in ERROR_TEXT_MARKERS)
+
+
+def _compact_error_text(value: Any) -> str:
+    if isinstance(value, dict):
+        for key in ("message", "detail", "details", "error_description", "text", "summary"):
+            text = _compact_error_text(value.get(key))
+            if text:
+                return text
+        if "error" in value:
+            return _compact_error_text(value.get("error"))
+        try:
+            return clip_text(json.dumps(value, ensure_ascii=True, sort_keys=True), max_chars=300)
+        except Exception:
+            return clip_text(value, max_chars=300)
+    if isinstance(value, list):
+        return "; ".join(filter(None, (_compact_error_text(item) for item in value[:3])))
+    return clip_text(value, max_chars=300)
+
+
+def _record_identity_keys(value: dict[str, Any]) -> bool:
+    strong_keys = {
+        "govtribe_id",
+        "govtribe_url",
+        "external_record_id",
+        "solicitation_number",
+        "solicitationNumber",
+        "notice_id",
+        "noticeId",
+        "contract_number",
+        "contract_id",
+        "award_id",
+        "awardId",
+        "piid",
+        "download_url",
+        "source_url",
+    }
+    return bool(strong_keys.intersection(value.keys()))
+
+
+def _record_container_keys(value: dict[str, Any]) -> bool:
+    container_keys = {"records", "results", "data", "items", "opportunities", "awards", "vehicles", "files", "documents"}
+    return any(isinstance(value.get(key), (list, dict)) for key in container_keys)
+
+
+def _payload_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        parts: list[str] = []
+        for key in ("message", "detail", "details", "error", "errors", "text", "summary", "title", "name"):
+            if key in value:
+                parts.append(_payload_text(value.get(key)))
+        return " ".join(part for part in parts if part).strip()
+    if isinstance(value, list):
+        return " ".join(_payload_text(item) for item in value[:6]).strip()
+    return str(value or "").strip()
+
+
+def _tool_error_note(value: Any) -> str:
+    if isinstance(value, str):
+        return f"GovTribe MCP tool error: {clip_text(value, max_chars=300)}" if _known_tool_error_text(value) else ""
+    if not isinstance(value, dict):
+        return ""
+
+    is_error = value.get("isError")
+    if is_error is True or str(is_error).strip().lower() == "true":
+        message = _compact_error_text(value) or "tool returned an error payload"
+        return f"GovTribe MCP tool error: {message}"
+
+    error_value = value.get("error")
+    if error_value:
+        message = _compact_error_text(error_value) or _compact_error_text(value)
+        return f"GovTribe MCP tool error: {message}"
+
+    errors_value = value.get("errors")
+    if errors_value:
+        message = _compact_error_text(errors_value) or _compact_error_text(value)
+        return f"GovTribe MCP tool error: {message}"
+
+    status = str(value.get("status") or "").strip().lower()
+    if status in ERROR_STATUS_VALUES and _compact_error_text(value):
+        return f"GovTribe MCP tool error: {_compact_error_text(value)}"
+
+    payload_text = _payload_text(value)
+    if _known_tool_error_text(payload_text) and not _record_identity_keys(value):
+        return f"GovTribe MCP tool error: {clip_text(payload_text, max_chars=300)}"
+
+    return ""
+
+
+def _is_error_only_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return True
+    if not isinstance(value, dict):
+        return False
+    if _record_container_keys(value):
+        return False
+    if _record_identity_keys(value):
+        return False
+    return bool(_tool_error_note(value))
+
+
 def _extract_tool_values(tool_result: dict[str, Any]) -> list[Any]:
     values: list[Any] = []
     for key in ("structuredContent", "structured_content", "value"):
@@ -610,7 +721,7 @@ def _extract_tool_values(tool_result: dict[str, Any]) -> list[Any]:
             text = item.get("text")
             if isinstance(text, str) and text.strip():
                 parsed = _json_from_text(text)
-                values.append(parsed if parsed is not None else {"summary": text.strip()})
+                values.append(parsed if parsed is not None else text.strip())
     return values
 
 
@@ -655,11 +766,17 @@ def _flatten_records(value: Any) -> list[dict[str, Any]]:
     return []
 
 
-def _tool_result_records(tool_result: dict[str, Any]) -> list[dict[str, Any]]:
+def _tool_result_records_and_errors(tool_result: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     records: list[dict[str, Any]] = []
+    errors: list[str] = []
     for value in _extract_tool_values(tool_result):
+        error_note = _tool_error_note(value)
+        if error_note:
+            errors.append(error_note)
+        if _is_error_only_value(value):
+            continue
         records.extend(_flatten_records(value))
-    return records
+    return records, dedupe_strings(errors)
 
 
 def _first_text(record: dict[str, Any], *keys: str) -> str:
@@ -756,7 +873,7 @@ def _call_search(
     due_date_to: str = "",
     opportunity_states: list[str] | None = None,
     sort: dict[str, str] | None = None,
-) -> tuple[list[dict[str, Any]], str]:
+) -> tuple[list[dict[str, Any]], str, list[str]]:
     args = _tool_arguments(
         tool,
         query=query,
@@ -772,7 +889,8 @@ def _call_search(
         sort=sort,
     )
     result = client.call_tool(_tool_name(tool), args)
-    return _tool_result_records(result), _tool_name(tool)
+    records, errors = _tool_result_records_and_errors(result)
+    return records, _tool_name(tool), errors
 
 
 def _records_to_result(
@@ -1148,12 +1266,13 @@ class GovTribeMCPCommercialIntelProvider:
 
             normalized: dict[str, dict[str, Any]] = {}
             tool_names: list[str] = []
+            extraction_errors: list[str] = []
             semantic_expansion_attempted = False
             for query, search_mode in queries:
                 normalized_search_mode = _search_mode_for_query(query, search_mode)
                 if normalized_search_mode == "semantic":
                     semantic_expansion_attempted = True
-                found, tool_name = _call_search(
+                found, tool_name, call_errors = _call_search(
                     client,
                     tool=tool,
                     query=query,
@@ -1166,6 +1285,7 @@ class GovTribeMCPCommercialIntelProvider:
                     sort=_scan_retrieval_sort(normalized_search_mode),
                 )
                 tool_names.append(tool_name)
+                extraction_errors.extend(f"{tool_name}: {error}" for error in call_errors)
                 for item in found:
                     record = _normalize_scan_opportunity(
                         record=item,
@@ -1180,6 +1300,8 @@ class GovTribeMCPCommercialIntelProvider:
                     if key:
                         normalized[key] = record
                 if normalized:
+                    break
+                if call_errors:
                     break
         except MCPResponseError as exc:
             status = "tool_contract_unavailable" if exc.code == -32602 else "error"
@@ -1208,9 +1330,18 @@ class GovTribeMCPCommercialIntelProvider:
             }
 
         records = list(normalized.values())
+        if not records and extraction_errors:
+            return {
+                "status": "error",
+                "records": [],
+                "notes": dedupe_strings(extraction_errors),
+                "queried_naics": queried_naics,
+                "tool_name": ", ".join(dedupe_strings(tool_names)),
+            }
         notes = [
             *([f"GovTribe MCP tools used: {', '.join(dedupe_strings(tool_names))}"] if tool_names else []),
             f"GovTribe scan due-date filter: {due_date_from} to {due_date_to}.",
+            *extraction_errors,
         ]
         if semantic_expansion_attempted:
             notes.append(
@@ -1218,7 +1349,7 @@ class GovTribeMCPCommercialIntelProvider:
                 "with active-state and due-date filters retained."
             )
         return {
-            "status": "ok" if records else "no_match",
+            "status": "partial_error" if records and extraction_errors else ("ok" if records else "no_match"),
             "records": records,
             "notes": dedupe_strings(notes),
             "queried_naics": queried_naics,
@@ -1262,9 +1393,10 @@ class GovTribeMCPCommercialIntelProvider:
 
             records: list[dict[str, Any]] = []
             tool_names: list[str] = []
+            extraction_errors: list[str] = []
             solicitation_number = str(opportunity.get("solicitation_number") or "").strip()
             if solicitation_number:
-                found, tool_name = _call_search(
+                found, tool_name, call_errors = _call_search(
                     client,
                     tool=tool,
                     query=solicitation_number,
@@ -1274,8 +1406,9 @@ class GovTribeMCPCommercialIntelProvider:
                 )
                 records.extend(found)
                 tool_names.append(tool_name)
+                extraction_errors.extend(f"{tool_name}: {error}" for error in call_errors)
             if not records:
-                found, tool_name = _call_search(
+                found, tool_name, call_errors = _call_search(
                     client,
                     tool=tool,
                     query=query,
@@ -1285,6 +1418,7 @@ class GovTribeMCPCommercialIntelProvider:
                 )
                 records.extend(found)
                 tool_names.append(tool_name)
+                extraction_errors.extend(f"{tool_name}: {error}" for error in call_errors)
         except MCPResponseError as exc:
             status = "tool_contract_unavailable" if exc.code == -32602 else "error"
             return default_result(self.source_id, self.source_name, status, notes=[str(exc)])
@@ -1292,6 +1426,14 @@ class GovTribeMCPCommercialIntelProvider:
             return default_result(self.source_id, self.source_name, "error", notes=[str(exc)])
         except Exception as exc:
             return default_result(self.source_id, self.source_name, "error", notes=[str(exc)])
+
+        if not records and extraction_errors:
+            return default_result(
+                self.source_id,
+                self.source_name,
+                "error",
+                notes=dedupe_strings(extraction_errors),
+            )
 
         if not records:
             return default_result(
@@ -1303,10 +1445,10 @@ class GovTribeMCPCommercialIntelProvider:
 
         return _records_to_result(
             source_config=self.source_config,
-            status="ok",
+            status="partial_error" if extraction_errors else "ok",
             matched_by="GovTribe opportunity search by solicitation number or title/buyer query",
             records_by_family=[("opportunities", item) for item in records],
-            notes=[f"GovTribe MCP tools used: {', '.join(dedupe_strings(tool_names))}"],
+            notes=[f"GovTribe MCP tools used: {', '.join(dedupe_strings(tool_names))}", *extraction_errors],
             default_url=default_url,
         )
 
@@ -1360,7 +1502,7 @@ class GovTribeMCPCommercialIntelProvider:
             for family, tool in selected.items():
                 family_query = solicitation_number if family == "opportunities" and solicitation_number else query
                 try:
-                    found, tool_name = _call_search(
+                    found, tool_name, call_errors = _call_search(
                         client,
                         tool=tool,
                         query=family_query,
@@ -1370,6 +1512,7 @@ class GovTribeMCPCommercialIntelProvider:
                     )
                     records_by_family.extend((family, item) for item in found)
                     tool_names.append(tool_name)
+                    errors.extend(f"{tool_name}: {error}" for error in call_errors)
                 except MCPResponseError as exc:
                     if exc.code == -32602:
                         errors.append(f"{_tool_name(tool)} schema incompatible")
@@ -1386,7 +1529,11 @@ class GovTribeMCPCommercialIntelProvider:
             return default_result(self.source_id, self.source_name, "error", notes=[str(exc)])
 
         if not records_by_family:
-            status = "tool_contract_unavailable" if errors else "no_match"
+            status = (
+                "tool_contract_unavailable"
+                if errors and all("schema incompatible" in error for error in errors)
+                else ("error" if errors else "no_match")
+            )
             return default_result(
                 self.source_id,
                 self.source_name,
