@@ -47,15 +47,30 @@ class FakeGovTribeBootstrapProvider:
                 "govtribe_id": "vendor-123",
                 "govtribe_url": "https://govtribe.com/vendors/halvik-corp-5grr4",
                 "name": "Halvik, LLC",
-                "uei": "ABC123DEF456",
-                "summary": "Halvik provides federal IT modernization and cybersecurity services.",
+                "uei": "VMRTJLWMQRH7",
+                "summary": (
+                    "Halvik provides software engineering, cloud services, cybersecurity, data analytics, "
+                    "and program management support to federal agencies."
+                ),
                 "location": "Vienna, VA, USA",
-                "naics": ["541512", "Computer Systems Design Services"],
-                "certifications": ["SBA Certified 8A Program Participant", "Service Disabled Veteran Owned Business"],
-                "contract_vehicles": ["GSA MAS"],
+                "naics": ["Web Search Portals and All Other Information Services"],
+                "certifications": [
+                    "Self Certified Small Disadvantaged Business",
+                    "For Profit Organization",
+                    "Business or Organization",
+                    "Limited Liability Company",
+                ],
+                "contract_vehicles": ["True", "GSA MAS"],
                 "buyers": ["Department of Veterans Affairs"],
                 "award_signals": ["VA Modernization Support - VA-1 - Department of Veterans Affairs"],
-                "keywords": ["541512", "cybersecurity", "GSA MAS", "Department of Veterans Affairs"],
+                "keywords": [
+                    "True",
+                    "For Profit Organization",
+                    "Web Search Portals and All Other Information Services",
+                    "cybersecurity",
+                    "GSA MAS",
+                    "Department of Veterans Affairs",
+                ],
                 "raw_record": {},
             },
             "notes": ["GovTribe MCP tools used: Search_Vendors"],
@@ -210,12 +225,28 @@ def main() -> int:
         assert fake_provider.lookups == ["https://govtribe.com/vendors/halvik-corp-5grr4"], fake_provider.lookups
         assert govtribe_vendor_profile["bootstrap"]["method"] == "govtribe_vendor_bootstrap_script_v1", govtribe_vendor_profile
         assert govtribe_vendor_profile["company"]["name"] == "Halvik, LLC", govtribe_vendor_profile["company"]
-        assert govtribe_vendor_profile["company"]["uei"] == "ABC123DEF456", govtribe_vendor_profile["company"]
-        assert "541512" in govtribe_vendor_profile["naics"]["candidates"], govtribe_vendor_profile["naics"]
-        assert "SBA Certified 8A Program Participant" in govtribe_vendor_profile["commercial_constraints"]["certifications"], govtribe_vendor_profile
+        assert govtribe_vendor_profile["company"]["uei"] == "VMRTJLWMQRH7", govtribe_vendor_profile["company"]
+        assert govtribe_vendor_profile["company"]["govtribe_url"] == "https://govtribe.com/vendors/halvik-corp-5grr4", govtribe_vendor_profile["company"]
+        assert "519290" in govtribe_vendor_profile["naics"]["candidates"], govtribe_vendor_profile["naics"]
+        assert "cybersecurity" in govtribe_vendor_profile["core_competencies"], govtribe_vendor_profile
+        assert "cloud modernization" in govtribe_vendor_profile["core_competencies"], govtribe_vendor_profile
+        assert "Self Certified Small Disadvantaged Business" in govtribe_vendor_profile["commercial_constraints"]["certifications"], govtribe_vendor_profile
+        assert "Self Certified Small Disadvantaged Business" not in govtribe_vendor_profile["core_competencies"], govtribe_vendor_profile
         assert "GSA MAS" in govtribe_vendor_profile["contract_vehicles"], govtribe_vendor_profile
+        assert "True" not in govtribe_vendor_profile["contract_vehicles"], govtribe_vendor_profile
         assert "Department of Veterans Affairs" in govtribe_vendor_profile["buyers"]["notes"], govtribe_vendor_profile
-        assert "541512" in govtribe_preferences["soft_preferences"]["preferred_naics"], govtribe_preferences
+        assert "519290" in govtribe_preferences["soft_preferences"]["preferred_naics"], govtribe_preferences
+        noisy_payload = json.dumps(
+            {
+                "keywords": govtribe_vendor_profile.get("other_taxonomy_tags", {}).get("keywords", []),
+                "positive_keywords": govtribe_preferences.get("soft_preferences", {}).get("positive_keywords", []),
+                "preferred_contract_vehicles": govtribe_preferences.get("soft_preferences", {}).get("preferred_contract_vehicles", []),
+                "starter": govtribe_starter,
+            }
+        )
+        for bad_value in ("True", "For Profit Organization", "Business or Organization", "Limited Liability Company"):
+            assert bad_value not in noisy_payload, noisy_payload
+        assert "519290 - Web Search Portals and All Other Information Services" in govtribe_starter, govtribe_starter
         assert "GovTribe subscription-derived facts" in govtribe_starter, govtribe_starter
         assert "GovTribe subscription-derived facts" in govtribe_memory, govtribe_memory
         assert "GOVTRIBE_MCP_API_KEY" not in govtribe_payload, govtribe_payload

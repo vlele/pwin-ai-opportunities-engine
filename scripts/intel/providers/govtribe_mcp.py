@@ -34,6 +34,19 @@ ERROR_TEXT_MARKERS = (
     "selected federal contract opportunity ids operator is invalid",
 )
 ERROR_STATUS_VALUES = {"error", "failed", "failure"}
+BOOLEAN_TEXT_VALUES = {"true", "false", "yes", "no"}
+GENERIC_VENDOR_METADATA_VALUES = {
+    "business or organization",
+    "for profit organization",
+    "limited liability company",
+    "partnership or limited liability partnership",
+}
+NAICS_LABEL_TO_CODE = {
+    "web search portals and all other information services": "519290",
+}
+NAICS_CODE_TO_LABEL = {
+    "519290": "Web Search Portals and All Other Information Services",
+}
 
 FAMILY_TOOL_GUIDE: dict[str, dict[str, Any]] = {
     "vendors": {
@@ -217,6 +230,29 @@ def _normalize_identifier(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").lower()).strip()
 
 
+def _clean_signal_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def _is_boolean_or_generic_metadata(value: Any) -> bool:
+    normalized = _normalize_key(value)
+    return normalized in BOOLEAN_TEXT_VALUES or normalized in GENERIC_VENDOR_METADATA_VALUES
+
+
+def _signal_values(values: list[Any], *, allow_generic_metadata: bool = False) -> list[str]:
+    cleaned: list[str] = []
+    for value in values:
+        text = _clean_signal_text(value)
+        if not text:
+            continue
+        if _normalize_key(text) in BOOLEAN_TEXT_VALUES:
+            continue
+        if not allow_generic_metadata and _normalize_key(text) in GENERIC_VENDOR_METADATA_VALUES:
+            continue
+        cleaned.append(text)
+    return dedupe_strings(cleaned)
+
+
 def _is_govtribe_vendor_url(value: str) -> bool:
     return bool(re.search(r"https?://(?:www\.)?govtribe\.com/vendors/[^/\s]+", str(value or ""), re.I))
 
@@ -224,6 +260,25 @@ def _is_govtribe_vendor_url(value: str) -> bool:
 def _lookup_url_slug(value: str) -> str:
     match = re.search(r"https?://(?:www\.)?govtribe\.com/vendors/([^/?#\s]+)", str(value or ""), re.I)
     return match.group(1).strip() if match else ""
+
+
+def _human_vendor_query_from_slug(slug: str) -> str:
+    cleaned = re.sub(r"[-_]+", " ", slug or "").strip()
+    if not cleaned:
+        return ""
+    parts = cleaned.split()
+    if parts and re.fullmatch(r"[a-z0-9]{4,8}", parts[-1], re.I) and any(char.isdigit() for char in parts[-1]):
+        parts = parts[:-1]
+    return " ".join(parts).strip()
+
+
+def _vendor_lookup_queries(lookup: str) -> list[str]:
+    raw = str(lookup or "").strip()
+    slug = _lookup_url_slug(raw)
+    if not slug:
+        return [raw] if raw else []
+    full_slug_query = slug.replace("-", " ").replace("_", " ").strip()
+    return dedupe_strings([_human_vendor_query_from_slug(slug), full_slug_query])
 
 
 def _is_likely_uei(value: str) -> bool:
@@ -389,16 +444,13 @@ def _fields_for_tool(tool: dict[str, Any]) -> list[str]:
 
 
 def _vendor_lookup_query(lookup: str) -> str:
-    raw = str(lookup or "").strip()
-    slug = _lookup_url_slug(raw)
-    if slug:
-        return slug.replace("-", " ")
-    return raw
+    queries = _vendor_lookup_queries(lookup)
+    return queries[0] if queries else str(lookup or "").strip()
 
 
-def _vendor_tool_arguments(tool: dict[str, Any], *, lookup: str, limit: int = 5) -> dict[str, Any]:
+def _vendor_tool_arguments(tool: dict[str, Any], *, lookup: str, limit: int = 5, query: str = "") -> dict[str, Any]:
     properties = _schema_properties(tool)
-    query = _vendor_lookup_query(lookup)
+    query = query or _vendor_lookup_query(lookup)
     cleaned_uei = _clean_uei(lookup)
     is_uei = _is_likely_uei(lookup)
     if not properties:
@@ -1183,29 +1235,91 @@ def _records_to_result(
     }
 
 
-def _record_naics_codes(record: dict[str, Any]) -> list[str]:
-    values: list[str] = []
+def _naics_item_from_text(value: Any) -> dict[str, str] | None:
+    text = _clean_signal_text(value)
+    if not text or _is_boolean_or_generic_metadata(text):
+        return None
+    match = re.search(r"\b\d{6}\b", text)
+    if match:
+        code = match.group(0)
+        label = _clean_signal_text(re.sub(rf"\b{code}\b\s*[-:–—]?\s*", "", text))
+        if label == code:
+            label = ""
+        return {"code": code, "label": label or NAICS_CODE_TO_LABEL.get(code, "")}
+    mapped_code = NAICS_LABEL_TO_CODE.get(_normalize_key(text))
+    if mapped_code:
+        return {"code": mapped_code, "label": text}
+    return {"code": "", "label": text}
+
+
+def _record_naics_items(record: dict[str, Any]) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+
+    def append_item(item: dict[str, str] | None) -> None:
+        if not item:
+            return
+        key = json.dumps(item, ensure_ascii=True, sort_keys=True)
+        if key not in {json.dumps(existing, ensure_ascii=True, sort_keys=True) for existing in items}:
+            items.append(item)
+
+    def first_item(values: list[str]) -> dict[str, str] | None:
+        for raw_value in values:
+            item = _naics_item_from_text(raw_value)
+            if item:
+                return item
+        return None
 
     def collect(value: Any) -> None:
         if isinstance(value, dict):
-            for key in ("code", "naics", "naics_code", "id", "value", "name"):
+            code_values: list[str] = []
+            label_values: list[str] = []
+            for key in ("code", "naics", "naics_code", "id", "value"):
                 if key in value:
-                    collect(value.get(key))
+                    direct = value.get(key)
+                    if isinstance(direct, (dict, list)):
+                        collect(direct)
+                    else:
+                        text = _clean_signal_text(direct)
+                        if re.search(r"\b\d{6}\b", text):
+                            code_values.append(text)
+                        elif text:
+                            label_values.append(text)
+            for key in ("name", "title", "label", "description"):
+                if key in value:
+                    direct = value.get(key)
+                    if isinstance(direct, (dict, list)):
+                        collect(direct)
+                    else:
+                        text = _clean_signal_text(direct)
+                        if text:
+                            label_values.append(text)
+            if code_values or label_values:
+                code_item = first_item(code_values)
+                label_item = first_item(label_values)
+                label = label_item.get("label", "") if label_item else ""
+                if code_item and code_item.get("code"):
+                    append_item({"code": code_item["code"], "label": label or code_item.get("label", "")})
+                else:
+                    for label_value in label_values:
+                        append_item(_naics_item_from_text(label_value))
+                return
+            for nested in value.values():
+                collect(nested)
             return
         if isinstance(value, list):
             for item in value:
                 collect(item)
             return
-        text = str(value or "").strip()
-        if not text:
-            return
-        matches = re.findall(r"\b\d{6}\b", text)
-        values.extend(matches or [text])
+        append_item(_naics_item_from_text(value))
 
     for key in ("naics", "naics_code", "naics_codes", "naicsCategory", "naics_category"):
         if key in record:
             collect(record.get(key))
-    return dedupe_strings(values)
+    return items
+
+
+def _record_naics_codes(record: dict[str, Any]) -> list[str]:
+    return dedupe_strings([item["code"] for item in _record_naics_items(record) if item.get("code")])
 
 
 def _record_resource_links(record: dict[str, Any], source_url: str) -> list[Any]:
@@ -1360,7 +1474,7 @@ def _vendor_record_buyers(record: dict[str, Any]) -> list[str]:
                     keys=("name", "title", "value"),
                 )
             )
-    return dedupe_strings(buyers)[:8]
+    return _signal_values(buyers)[:8]
 
 
 def _vendor_record_vehicles(record: dict[str, Any]) -> list[str]:
@@ -1369,10 +1483,10 @@ def _vendor_record_vehicles(record: dict[str, Any]) -> list[str]:
         values.extend(
             _collect_text_values(
                 record.get(key),
-                keys=("name", "title", "contract_number", "vehicle", "value"),
+                keys=("name", "title", "contract_number", "vehicle"),
             )
         )
-    return dedupe_strings(values)[:8]
+    return _signal_values(values)[:8]
 
 
 def _vendor_record_award_signals(record: dict[str, Any]) -> list[str]:
@@ -1390,7 +1504,7 @@ def _vendor_record_award_signals(record: dict[str, Any]) -> list[str]:
             parts = [part for part in (title, identifier, agency) if part and part != "GovTribe record"]
             if parts:
                 values.append(" - ".join(parts[:3]))
-    return dedupe_strings(values)[:6]
+    return _signal_values(values)[:6]
 
 
 def _normalize_vendor_record(record: dict[str, Any], *, source_config: dict[str, Any], default_url: str) -> dict[str, Any]:
@@ -1398,17 +1512,19 @@ def _normalize_vendor_record(record: dict[str, Any], *, source_config: dict[str,
     name = _first_text(record, "name", "vendor_name", "recipient_name", "awardee") or "Vendor"
     dba = _first_text(record, "dba", "doing_business_as")
     summary = _first_text(record, "govtribe_ai_summary", "summary", "description")
-    naics_codes = _record_naics_codes(record)
-    certifications = dedupe_strings(
+    naics_items = _record_naics_items(record)
+    naics_codes = [item["code"] for item in naics_items if item.get("code")]
+    certifications = _signal_values(
         [
             *_collect_text_values(record.get("sba_certifications"), keys=("name", "title", "value")),
             *_collect_text_values(record.get("business_types"), keys=("name", "title", "value")),
-        ]
+        ],
+        allow_generic_metadata=True,
     )[:10]
     vehicles = _vendor_record_vehicles(record)
     buyers = _vendor_record_buyers(record)
     award_signals = _vendor_record_award_signals(record)
-    keywords = dedupe_strings([*naics_codes, *certifications, *vehicles, *buyers])[:12]
+    keywords = _signal_values([*naics_codes, *vehicles, *buyers])[:12]
     return {
         "source_id": str(source_config.get("id") or SOURCE_ID).strip(),
         "source_name": str(source_config.get("name") or SOURCE_NAME).strip(),
@@ -1422,6 +1538,7 @@ def _normalize_vendor_record(record: dict[str, Any], *, source_config: dict[str,
         "summary": summary,
         "location": _vendor_record_location(record),
         "naics": naics_codes,
+        "naics_items": naics_items,
         "certifications": certifications,
         "contract_vehicles": vehicles,
         "buyers": buyers,
@@ -1512,9 +1629,17 @@ class GovTribeMCPCommercialIntelProvider:
                     "notes": ["GovTribe MCP did not expose a compatible vendor search tool."],
                     "tool_name": "",
                 }
-            args = _vendor_tool_arguments(tool, lookup=lookup, limit=limit)
-            result = client.call_tool(_tool_name(tool), args)
-            records = _tool_result_records(result)
+            selected = None
+            records: list[dict[str, Any]] = []
+            extraction_errors: list[str] = []
+            for query in _vendor_lookup_queries(lookup) or [str(lookup or "").strip()]:
+                args = _vendor_tool_arguments(tool, lookup=lookup, limit=limit, query=query)
+                result = client.call_tool(_tool_name(tool), args)
+                records, errors = _tool_result_records_and_errors(result)
+                extraction_errors.extend(errors)
+                selected = _select_vendor_record(records, lookup)
+                if selected:
+                    break
         except MCPResponseError as exc:
             status = "tool_contract_unavailable" if exc.code == -32602 else "error"
             return {
@@ -1550,7 +1675,6 @@ class GovTribeMCPCommercialIntelProvider:
                 "tool_name": "",
             }
 
-        selected = _select_vendor_record(records, lookup)
         if not selected:
             return {
                 "source_id": self.source_id,
@@ -1559,7 +1683,7 @@ class GovTribeMCPCommercialIntelProvider:
                 "matched": False,
                 "lookup": lookup,
                 "vendor_record": {},
-                "notes": ["GovTribe vendor search returned no matching records."],
+                "notes": dedupe_strings(extraction_errors) or ["GovTribe vendor search returned no matching records."],
                 "tool_name": _tool_name(tool),
             }
         normalized = _normalize_vendor_record(selected, source_config=self.source_config, default_url=default_url)

@@ -181,9 +181,12 @@ class FakeGovTribeVendorClient:
                 "govtribe_ai_summary": "Halvik provides federal IT modernization and cybersecurity services.",
                 "location": {"city": "Vienna", "state": "VA", "country": "USA"},
                 "sba_certifications": ["SBA Certified 8A Program Participant"],
-                "business_types": ["Service Disabled Veteran Owned Business"],
-                "naics_category": {"code": "541512", "name": "Computer Systems Design Services"},
-                "awarded_federal_contract_vehicle": [{"name": "GSA MAS"}],
+                "business_types": ["Service Disabled Veteran Owned Business", "For Profit Organization"],
+                "naics_category": [
+                    {"name": "Web Search Portals and All Other Information Services"},
+                    {"code": "541512", "name": "Computer Systems Design Services"},
+                ],
+                "awarded_federal_contract_vehicle": [{"name": "GSA MAS", "value": True}],
                 "federal_contract_awards": [
                     {
                         "name": "VA Modernization Support",
@@ -247,6 +250,15 @@ class FakeGovTribeVendorClient:
 
     def call_tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
         self.calls.append((name, arguments or {}))
+        return {"structuredContent": {"records": self._records}}
+
+
+class FakeGovTribeVendorRetryClient(FakeGovTribeVendorClient):
+    def call_tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
+        args = arguments or {}
+        self.calls.append((name, args))
+        if args.get("query") == "halvik corp":
+            return {"structuredContent": {"records": []}}
         return {"structuredContent": {"records": self._records}}
 
 
@@ -464,10 +476,18 @@ def main() -> int:
             failures.append("govtribe_vendor_uei_normalized")
         if isinstance(vendor_record, dict) and "541512" not in vendor_record.get("naics", []):
             failures.append("govtribe_vendor_naics_normalized")
+        if isinstance(vendor_record, dict) and "519290" not in vendor_record.get("naics", []):
+            failures.append("govtribe_vendor_label_only_naics_mapped")
+        naics_items = vendor_record.get("naics_items", []) if isinstance(vendor_record, dict) else []
+        if not any(item.get("code") == "519290" and item.get("label") == "Web Search Portals and All Other Information Services" for item in naics_items if isinstance(item, dict)):
+            failures.append("govtribe_vendor_naics_items_normalized")
         if isinstance(vendor_record, dict) and "SBA Certified 8A Program Participant" not in vendor_record.get("certifications", []):
             failures.append("govtribe_vendor_certifications_normalized")
         if isinstance(vendor_record, dict) and "GSA MAS" not in vendor_record.get("contract_vehicles", []):
             failures.append("govtribe_vendor_vehicle_normalized")
+        vendor_payload = json.dumps(vendor_record)
+        if "True" in vendor_payload or "For Profit Organization" in vendor_record.get("keywords", []):
+            failures.append("govtribe_vendor_filters_generic_matching_values")
         uei_args = vendor_client.calls[-1][1]
         if vendor_client.calls[-1][0] != "Search_Vendors":
             failures.append("govtribe_vendor_typed_tool")
@@ -492,10 +512,26 @@ def main() -> int:
         if url_result.get("status") != "ok":
             failures.append("govtribe_vendor_url_status")
         url_args = vendor_client.calls[-1][1]
-        if url_args.get("query") != "halvik corp 5grr4":
+        if url_args.get("query") != "halvik corp":
             failures.append("govtribe_vendor_url_query")
         if "govtribe_ids" in url_args:
             failures.append("govtribe_vendor_url_no_slug_id_filter")
+
+        retry_client = FakeGovTribeVendorRetryClient()
+        retry_provider = GovTribeMCPCommercialIntelProvider(
+            {
+                "id": "govtribe_mcp_commercial_intel",
+                "name": "GovTribe MCP Commercial Intelligence",
+                "homepage": "https://govtribe.com/mcp",
+            },
+            client=retry_client,  # type: ignore[arg-type]
+        )
+        retry_result = retry_provider.resolve_vendor_profile(lookup="https://govtribe.com/vendors/halvik-corp-5grr4")
+        if retry_result.get("status") != "ok":
+            failures.append("govtribe_vendor_url_retry_status")
+        retry_queries = [call[1].get("query") for call in retry_client.calls]
+        if retry_queries != ["halvik corp", "halvik corp 5grr4"]:
+            failures.append("govtribe_vendor_url_retry_queries")
 
         no_match_provider = GovTribeMCPCommercialIntelProvider(
             {"id": "govtribe_mcp_commercial_intel"},
