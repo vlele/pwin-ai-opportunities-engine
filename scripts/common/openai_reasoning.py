@@ -30,7 +30,7 @@ except Exception:  # pragma: no cover - optional dependency
     OpenAI = None  # type: ignore[assignment]
 
 
-DEFAULT_REASONING_MODEL = os.getenv("PWIN_REASONING_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-5-mini"
+DEFAULT_REASONING_MODEL = os.getenv("PWIN_REASONING_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-5.4-mini"
 DEFAULT_REASONING_TIMEOUT_SECONDS = int(os.getenv("PWIN_REASONING_TIMEOUT_SECONDS", "30") or "30")
 SCHEMA_VERSION = "1.0"
 MAX_NOTICE_TEXT = 12000
