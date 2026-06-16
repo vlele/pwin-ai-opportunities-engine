@@ -6,7 +6,6 @@ import re
 from datetime import date, timedelta
 from typing import Any
 
-from common.paths import today_local_str, utc_now_iso
 from common.evidence_model import (
     evidence_model_competitive_notes,
     evidence_model_next_questions,
@@ -14,6 +13,8 @@ from common.evidence_model import (
     evidence_model_vehicle_signals,
     normalize_provider_evidence_model,
 )
+from common.paths import today_local_str, utc_now_iso
+from common.profile_terms import filter_low_signal_profile_terms
 from intel.mcp_http import DEFAULT_GOVTRIBE_MCP_URL, MCPHTTPError, MCPHttpClient, MCPResponseError, clean_bearer_token
 from intel.providers.base import (
     clip_text,
@@ -472,15 +473,21 @@ def _vendor_retrieval_naics(vendor_profile: dict[str, Any], preferences: dict[st
 
 def _profile_terms(vendor_profile: dict[str, Any], preferences: dict[str, Any]) -> list[str]:
     terms: list[str] = []
+    discrete_terms: list[str] = []
     company = vendor_profile.get("company") if isinstance(vendor_profile.get("company"), dict) else {}
     terms.extend(coerce_string_list(company.get("summary"), max_items=1))
     for item in vendor_profile.get("core_competencies", []):
         if isinstance(item, dict):
-            terms.extend(coerce_string_list([item.get("name"), item.get("summary")], max_items=2))
+            discrete_terms.extend(coerce_string_list([item.get("name"), item.get("summary")], max_items=2))
         else:
-            terms.extend(coerce_string_list(item, max_items=1))
-    terms.extend(coerce_string_list((vendor_profile.get("other_taxonomy_tags") or {}).get("keywords"), max_items=10) if isinstance(vendor_profile.get("other_taxonomy_tags"), dict) else [])
-    terms.extend(_preference_values(preferences, "soft_preferences", "positive_keywords"))
+            discrete_terms.extend(coerce_string_list(item, max_items=1))
+    discrete_terms.extend(
+        coerce_string_list((vendor_profile.get("other_taxonomy_tags") or {}).get("keywords"), max_items=10)
+        if isinstance(vendor_profile.get("other_taxonomy_tags"), dict)
+        else []
+    )
+    discrete_terms.extend(_preference_values(preferences, "soft_preferences", "positive_keywords"))
+    terms.extend(filter_low_signal_profile_terms(discrete_terms))
     fit_narrative = str(vendor_profile.get("fit_narrative") or "").strip()
     if fit_narrative:
         terms.append(clip_text(fit_narrative, max_chars=500))

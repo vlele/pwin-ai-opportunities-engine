@@ -107,6 +107,35 @@ def render_section(entries: list[dict[str, Any]], lookup: dict[str, dict[str, An
     return "\n\n---\n\n".join(render_entry(entry, entry_explanation(entry, lookup)) for entry in entries)
 
 
+def render_feedback_guidance(entries: list[dict[str, Any]], source_issues: list[str] | None = None) -> str:
+    entry_ids = [str(entry.get("entry_id", "")).strip() for entry in entries if entry.get("entry_id")]
+    if not entry_ids:
+        lines = [
+            "No stable entry IDs were generated for this run, so there are no entries to act on yet.",
+            "",
+            "Review the Source Issues section above, address any source or quota problem, then retry the scan after the source recovers.",
+        ]
+        issue_text = next((str(item).strip() for item in (source_issues or []) if str(item).strip()), "")
+        if issue_text:
+            lines.extend(["", f"Current source issue: {issue_text}"])
+        return "\n".join(lines)
+
+    primary_id = entry_ids[0]
+    secondary_id = entry_ids[1] if len(entry_ids) > 1 else primary_id
+    return "\n".join(
+        [
+            "Use the entry IDs above when replying:",
+            f"- `like {primary_id}`",
+            f"- `dislike {secondary_id} because too small`",
+            f"- `more like {primary_id}`",
+            f"- `hide {secondary_id}`",
+            "- `never show grants`",
+            f"- `research {primary_id}`",
+            f"- `capture deep dive on {primary_id}`",
+        ]
+    )
+
+
 def replace_many(template: str, replacements: dict[str, str]) -> str:
     result = template
     for key, value in replacements.items():
@@ -198,6 +227,7 @@ def render_digest_and_report(
         "{{UNIQUE_COUNT}}": str(len(entries)),
         "{{QUARANTINE_COUNT}}": str(1 if run_status == "QUARANTINED_EMPTY_SNAPSHOT" else 0),
         "{{PREFERENCE_DRIFT_OR_NONE}}": "none found",
+        "{{FEEDBACK_GUIDANCE}}": render_feedback_guidance(entries, source_issues),
     }
 
     digest_text = replace_many(digest_template, replacements)

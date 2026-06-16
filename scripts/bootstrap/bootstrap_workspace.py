@@ -25,25 +25,13 @@ from common.paths import (  # type: ignore
     write_json,
     write_text,
 )
+from common.profile_terms import is_low_signal_profile_term, normalize_profile_term  # type: ignore
 from common.source_registry import refresh_runtime_registry  # type: ignore
 
 
 USER_AGENT = "pwin-ai-opportunities-bootstrap/1.0"
 MAX_FETCH_BYTES = 750_000
 MAX_RELEVANT_LINKS = 4
-GENERIC_SECTIONS = {
-    "about",
-    "contact",
-    "home",
-    "homepage",
-    "services",
-    "solutions",
-    "industries",
-    "capabilities",
-    "partners",
-    "case studies",
-    "case study",
-}
 RELEVANT_LINK_HINTS = (
     "about",
     "solution",
@@ -329,13 +317,14 @@ def _infer_capabilities(pages: list[PageSignals], summary: str) -> list[str]:
     if len(capabilities) >= 4:
         return capabilities[:6]
 
+    summary_key = normalize_profile_term(summary)
     for page in pages:
         for heading in page.headings:
             cleaned = _clean_text(heading)
             lowered = cleaned.lower()
-            if not cleaned or lowered in GENERIC_SECTIONS:
+            if not cleaned or is_low_signal_profile_term(cleaned):
                 continue
-            if len(cleaned.split()) > 6 or lowered == summary.lower():
+            if len(cleaned.split()) > 6 or normalize_profile_term(cleaned) == summary_key:
                 continue
             _append_unique(capabilities, lowered)
             if len(capabilities) >= 6:

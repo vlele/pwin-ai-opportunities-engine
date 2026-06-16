@@ -20,6 +20,7 @@ from common.evidence_model import (
     merge_evidence_models,
 )
 from common.paths import LOCAL_TIMEZONE, load_json, utc_now_iso, write_json
+from common.profile_terms import filter_low_signal_profile_terms
 from common.runtime import NOT_IMPLEMENTED_IN_BUNDLE_STATUS
 from common.commercial_intel import COMMERCIAL_INTEL_SOURCE_IDS, GovTribeMCPCommercialIntelProvider, enrich_scan_records
 from common.source_registry import (
@@ -475,7 +476,7 @@ def _vendor_keywords(profile: dict[str, Any], preferences: dict[str, Any] | None
     if preferences:
         for item in _merged_preference_values(preferences, "soft_preferences", "positive_keywords"):
             keywords.append(item.strip().lower())
-    return sorted(dict.fromkeys(keywords))
+    return sorted(dict.fromkeys(filter_low_signal_profile_terms(keywords)))
 
 
 def _vendor_negative_keywords(profile: dict[str, Any], preferences: dict[str, Any] | None = None) -> list[str]:
