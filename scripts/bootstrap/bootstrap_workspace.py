@@ -702,6 +702,47 @@ def _format_number(value: Any) -> str:
     return f"{number:,.1f}"
 
 
+def _stat_number(value: Any) -> int | float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number.is_integer():
+        return int(number)
+    return number
+
+
+def _govtribe_stat_snapshot(stats: Any) -> dict[str, int | float]:
+    if not isinstance(stats, dict):
+        return {}
+    snapshot: dict[str, int | float] = {}
+    for key in ("count", "min", "max", "avg", "sum"):
+        number = _stat_number(stats.get(key))
+        if number is not None:
+            snapshot[key] = number
+    if "min" not in snapshot and "max" not in snapshot:
+        return {}
+    return snapshot
+
+
+def _govtribe_observed_award_value_range(vendor_record: dict[str, Any]) -> dict[str, Any]:
+    value_stats = _govtribe_award_profile(vendor_record).get("value_stats")
+    if not isinstance(value_stats, dict):
+        return {}
+    observed: dict[str, Any] = {
+        "basis": "historical_govtribe_award_aggregations",
+        "constraint_status": "observed_history_not_user_constraint",
+        "source_field": "govtribe_award_profile.value_stats",
+    }
+    for key in ("dollars_obligated", "ceiling_value", "base_and_exercised_options_value"):
+        snapshot = _govtribe_stat_snapshot(value_stats.get(key))
+        if snapshot:
+            observed[key] = snapshot
+    if len(observed) == 3:
+        return {}
+    return observed
+
+
 def _govtribe_value_stats_note(vendor_record: dict[str, Any]) -> str:
     value_stats = _govtribe_award_profile(vendor_record).get("value_stats")
     if not isinstance(value_stats, dict):
@@ -709,12 +750,15 @@ def _govtribe_value_stats_note(vendor_record: dict[str, Any]) -> str:
     obligated = value_stats.get("dollars_obligated")
     if isinstance(obligated, dict):
         count = obligated.get("count")
+        min_value = _format_money(obligated.get("min"))
         avg = _format_money(obligated.get("avg"))
         max_value = _format_money(obligated.get("max"))
         total = _format_money(obligated.get("sum"))
         parts = []
         if count not in (None, ""):
             parts.append(f"{count} award records")
+        if min_value:
+            parts.append(f"min obligated {min_value}")
         if avg:
             parts.append(f"average obligated {avg}")
         if max_value:
@@ -1133,6 +1177,7 @@ def seed_workspace_from_govtribe(
     contract_vehicle_subcategories = _clean_govtribe_values(vendor_record.get("contract_vehicle_subcategories", []))
     teaming_preferences = _clean_govtribe_values(vendor_record.get("teaming_preferences", []), allow_generic_metadata=True)
     award_value_note = _govtribe_value_stats_note(vendor_record)
+    observed_award_value_range = _govtribe_observed_award_value_range(vendor_record)
     sci_pricing_note = _govtribe_sci_pricing_note(vendor_record)
     contract_vehicles = _clean_govtribe_values(vendor_record.get("contract_vehicles", []))
     expired_contract_vehicles = _clean_govtribe_values(vendor_record.get("expired_contract_vehicles", []))
@@ -1235,6 +1280,8 @@ def seed_workspace_from_govtribe(
         vendor_profile["commercial_constraints"].get("teaming_preferences", []),
         teaming_preferences,
     )
+    if observed_award_value_range:
+        vendor_profile["commercial_constraints"]["observed_award_value_range"] = observed_award_value_range
     vendor_profile["contract_vehicles"] = _merge_unique(vendor_profile.get("contract_vehicles", []), contract_vehicles)
     vendor_profile["contract_vehicle_subcategories"] = _merge_unique(
         vendor_profile.get("contract_vehicle_subcategories", []),
@@ -1274,6 +1321,7 @@ def seed_workspace_from_govtribe(
         ("commercial_constraints.set_aside_programs", set_aside_programs),
         ("commercial_constraints.prime_or_sub", prime_or_sub),
         ("commercial_constraints.teaming_preferences", teaming_preferences),
+        ("commercial_constraints.observed_award_value_range", observed_award_value_range),
         ("contract_vehicles", contract_vehicles),
         ("contract_vehicle_subcategories", contract_vehicle_subcategories),
         ("buyers.notes", buyers),
@@ -1399,6 +1447,7 @@ def seed_workspace_from_govtribe(
             f"- Candidate NAICS: {', '.join(candidate_naics) if candidate_naics else 'Needs confirmation'}",
             f"- Vendor hierarchy check: {hierarchy_confirmation or 'No GovTribe parent hierarchy signal detected.'}",
             f"- Candidate vehicle subcategories: {', '.join(contract_vehicle_subcategories[:3]) if contract_vehicle_subcategories else 'Needs confirmation'}",
+            f"- Award value signal: {award_value_note}",
             f"- Service contract pricing signal: {sci_pricing_note}",
             "- GovTribe subscription-derived facts remain provisional and separate from website-derived facts.",
             "",

@@ -121,7 +121,9 @@ class FakeGovTribeBootstrapProvider:
                         {"name": "Firm Fixed Price", "doc_count": 14, "dollars_obligated": 18000000},
                     ],
                     "value_stats": {
-                        "dollars_obligated": {"count": 24, "min": 1000, "max": 10000000, "avg": 1250000, "sum": 30000000}
+                        "dollars_obligated": {"count": 24, "min": 1000, "max": 10000000, "avg": 1250000, "sum": 30000000},
+                        "ceiling_value": {"count": 10, "min": 50000, "max": 50000000, "avg": 5000000, "sum": 50000000},
+                        "base_and_exercised_options_value": {"count": 12, "min": 25000, "max": 12000000, "avg": 2000000, "sum": 24000000},
                     },
                 },
                 "govtribe_service_contract_inventory_profile": {
@@ -339,6 +341,13 @@ def main() -> int:
         assert "Historical sub-award prime: Large Prime Integrator" in govtribe_vendor_profile["commercial_constraints"]["teaming_preferences"], govtribe_vendor_profile
         assert govtribe_vendor_profile["commercial_constraints"]["min_award_value"] is None, govtribe_vendor_profile
         assert govtribe_vendor_profile["commercial_constraints"]["max_award_value"] is None, govtribe_vendor_profile
+        observed_award_value_range = govtribe_vendor_profile["commercial_constraints"]["observed_award_value_range"]
+        assert observed_award_value_range["constraint_status"] == "observed_history_not_user_constraint", observed_award_value_range
+        assert observed_award_value_range["source_field"] == "govtribe_award_profile.value_stats", observed_award_value_range
+        assert observed_award_value_range["dollars_obligated"]["min"] == 1000, observed_award_value_range
+        assert observed_award_value_range["dollars_obligated"]["max"] == 10000000, observed_award_value_range
+        assert observed_award_value_range["ceiling_value"]["max"] == 50000000, observed_award_value_range
+        assert observed_award_value_range["base_and_exercised_options_value"]["min"] == 25000, observed_award_value_range
         assert "govtribe_award_profile" in govtribe_vendor_profile, govtribe_vendor_profile
         assert "govtribe_service_contract_inventory_profile" in govtribe_vendor_profile, govtribe_vendor_profile
         assert govtribe_vendor_profile["govtribe_service_contract_inventory_profile"]["value_stats"]["derived_hourly_rate"]["avg"] == 118.4, govtribe_vendor_profile
@@ -379,6 +388,7 @@ def main() -> int:
         assert "Multiple Award Schedule: 54151S" in govtribe_starter, govtribe_starter
         assert "Historical sub-award prime: Large Prime Integrator" in govtribe_starter, govtribe_starter
         assert "GovTribe award-history signal" in govtribe_starter, govtribe_starter
+        assert "min obligated $1.0K" in govtribe_starter, govtribe_starter
         assert "GovTribe Service Contract Inventory signal" in govtribe_starter, govtribe_starter
         assert "move up the vendor chain to Halvik Parent Inc." in govtribe_starter, govtribe_starter
         assert "Company URL: https://govtribe.com/vendors/halvik-corp-5grr4" not in govtribe_starter, govtribe_starter
@@ -393,6 +403,7 @@ def main() -> int:
         provenance = govtribe_vendor_profile["provenance"]["facts"]
         assert any(item.get("field") == "company.uei" for item in provenance), provenance
         assert any(item.get("field") == "company.parent" for item in provenance), provenance
+        assert any(item.get("field") == "commercial_constraints.observed_award_value_range" for item in provenance), provenance
         assert all(item.get("source") == "govtribe_mcp_commercial_intel" for item in provenance if item.get("provenance") == "govtribe_subscription_derived"), provenance
         govtribe_source = next(item for item in govtribe_registry["sources"] if item.get("id") == "govtribe_mcp_commercial_intel")
         assert govtribe_source["enabled"] is True, govtribe_source

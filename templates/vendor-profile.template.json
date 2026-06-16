@@ -70,6 +70,7 @@
       "min": null,
       "max": null
     },
+    "observed_award_value_range": null,
     "teaming_preferences": [],
     "prime_or_sub": [],
     "certifications": [],
