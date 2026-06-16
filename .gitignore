@@ -2,6 +2,8 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.so
+.DS_Store
+.idea/
 .venv/
 venv/
 .env
