@@ -241,6 +241,8 @@ Currently implemented sources:
 
 - `SAM.gov` live contract opportunities
 - `USAspending.gov` award-history enrichment
+- optional direct `GovTribe MCP` commercial-intelligence enrichment
+- `GovWin IQ` credential scaffold
 
 Source rules:
 
@@ -255,6 +257,9 @@ Critical source rules:
 - For `SAM.gov` noticedesc, use the official endpoint and never treat a noticedesc URL as full text.
 - Never print or log secret values such as `SAM_API_KEY`.
 - For `USAspending`, use documented JSON `POST` requests.
+- For `GovTribe MCP`, use `GOVTRIBE_MCP_API_KEY` directly through the shipped MCP client; do not require `OPENAI_API_KEY` for GovTribe.
+- For `GovTribe MCP` tool selection, query construction, and default returned fields, use `references/govtribe-mcp-tool-guide.md`.
+- Use `OPENAI_API_KEY` only for optional semantic reasoning in the shipped reasoning helpers.
 
 Not in the shipped source contract:
 
@@ -262,7 +267,7 @@ Not in the shipped source contract:
 - Acquisition.gov forecasts
 - GSA eBuy Open
 - grants sources
-- commercial enrichment portals
+- non-implemented commercial enrichment portals
 
 ## Runtime Files
 

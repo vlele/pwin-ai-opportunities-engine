@@ -19,8 +19,8 @@ If an older workspace still contains additional source IDs in `procurement/sourc
 - Portal: https://sam.gov/content/opportunities
 - API docs: https://open.gsa.gov/api/get-opportunities-public-api/
 - Runtime implementation:
-  - `scripts/scan/sam_search.py`
-  - `scripts/scan/sam_hydrate.py`
+  - `scripts/intel/providers/sam_gov.py`
+  - compatibility wrappers: `scripts/scan/sam_search.py`, `scripts/scan/sam_hydrate.py`
 - Required secret: `SAM_API_KEY`
 
 Current retrieval rules:
@@ -55,24 +55,28 @@ Current retrieval rules:
 - Shipped use:
   - optional scan-time commercial sidecar
   - optional capture-time commercial sidecar
-- Access pattern: remote MCP via OpenAI Responses API
+- Access pattern: direct remote MCP over Streamable HTTP
 - Trust tier: 4
 - Portal: https://govtribe.com/mcp
 - API docs: https://govtribe.com/docs/govtribe-user-guide/govtribe-mcp/govtribe-mcp-for-developers/
+- Tool guide: `references/govtribe-mcp-tool-guide.md`
 - Runtime implementation:
-  - `scripts/common/openai_mcp.py`
-  - `scripts/common/commercial_intel.py`
-- Required secrets:
-  - `OPENAI_API_KEY`
-  - `GOVTRIBE_MCP_API_KEY`
+  - `scripts/intel/mcp_http.py`
+  - `scripts/intel/providers/govtribe_mcp.py`
+  - compatibility wrapper: `scripts/common/commercial_intel.py`
+- Required secret: `GOVTRIBE_MCP_API_KEY`
 
 Current retrieval rules:
 
 - Treat GovTribe as optional enrichment, not as a replacement for official `SAM.gov` notice retrieval.
+- Use direct MCP `initialize`, `notifications/initialized`, `tools/list`, and `tools/call` requests.
+- Use the documented GovTribe for Agents tool map for federal opportunity, award, IDV, vehicle, and government-file enrichment.
+- Keep search query construction aligned with the GovTribe keyword/semantic mode guidance.
 - Use `GOVTRIBE_MCP_URL` only to override the default remote endpoint.
 - Default the GovTribe MCP timeout to 90 seconds unless `GOVTRIBE_MCP_TIMEOUT_SECONDS` is explicitly set.
-- Never log `OPENAI_API_KEY` or `GOVTRIBE_MCP_API_KEY`.
+- Never log `GOVTRIBE_MCP_API_KEY`, authorization headers, or token fragments.
 - If GovTribe is enabled but not configured, report that state explicitly in source statuses.
+- If GovTribe MCP tools are unavailable or schema-incompatible, report `tool_contract_unavailable` and keep official-source scan/capture running.
 
 ### 4. GovWin IQ Commercial Intelligence
 
@@ -85,7 +89,8 @@ Current retrieval rules:
 - Portal: https://www.deltek.com/en/products/project-based-businesses/govwin-iq
 - API docs: https://help.deltek.com/Product/GovWinIQ/Configuring/API_v2_Configuration.htm
 - Runtime implementation:
-  - `scripts/common/commercial_intel.py`
+  - `scripts/intel/providers/govwin_iq.py`
+  - compatibility wrapper: `scripts/common/commercial_intel.py`
 - Required secrets:
   - `GOVWIN_CLIENT_ID`
   - `GOVWIN_CLIENT_SECRET`
@@ -114,3 +119,7 @@ These may appear in older docs or stale workspace registries, but they are not p
 3. Treat `GovTribe MCP` and `GovWin IQ` as optional commercial sidecars behind explicit runtime enablement.
 4. Keep the runtime source registry limited to the implemented or scaffolded source IDs in the current template.
 5. Do not describe non-implemented sources as active just because they were present in older repo revisions.
+
+## Semantic reasoning
+
+`OPENAI_API_KEY` is used only by the optional semantic reasoning helpers in `scripts/common/openai_reasoning.py`. It is not required for `SAM.gov`, `USAspending.gov`, direct `GovTribe MCP`, or the `GovWin IQ` placeholder provider.
