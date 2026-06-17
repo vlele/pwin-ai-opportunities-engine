@@ -610,6 +610,8 @@ def _vendor_tool_arguments(tool: dict[str, Any], *, lookup: str, limit: int = 5,
             continue
         if not _is_string_prop(spec):
             continue
+        if key.endswith(" operator"):
+            continue
         string_fallbacks.append(name)
         if key in {"query", "q", "search", "search query", "keyword", "keywords", "term", "terms"}:
             args[name] = query
@@ -684,6 +686,8 @@ def _tool_arguments(
                 args[name] = opportunity_states
             continue
         if not _is_string_prop(spec):
+            continue
+        if key.endswith(" operator"):
             continue
         string_fallbacks.append(name)
         if key in {"query", "q", "search", "search query", "keyword", "keywords", "term", "terms"}:

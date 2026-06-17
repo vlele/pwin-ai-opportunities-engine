@@ -110,7 +110,11 @@ class FakeGovTribeClient:
                             },
                         },
                         "naics_codes": {"type": "array", "items": {"type": "string"}},
+                        "naics_codes_operator": {"type": "string", "enum": ["in", "not_in"]},
                         "solicitation_numbers": {"type": "array", "items": {"type": "string"}},
+                        "solicitation_numbers_operator": {"type": "string", "enum": ["in", "not_in"]},
+                        "federal_agency_ids_operator": {"type": "string", "enum": ["in", "not_in"]},
+                        "federal_contract_opportunity_ids_operator": {"type": "string", "enum": ["in", "not_in"]},
                         "fields_to_return": {
                             "type": "array",
                             "items": {
@@ -1243,6 +1247,9 @@ def main() -> int:
             failures.append("govtribe_retrieval_due_date_sort")
         if retrieval_call_args.get("naics_codes") != ["541512", "541519", "541611"]:
             failures.append("govtribe_retrieval_naics_filter")
+        operator_args = {key: value for key, value in retrieval_call_args.items() if str(key).endswith("_operator")}
+        if operator_args:
+            failures.append("govtribe_retrieval_unexpected_operator_args")
         if "fields_to_return" not in retrieval_call_args:
             failures.append("govtribe_retrieval_fields_to_return")
 
