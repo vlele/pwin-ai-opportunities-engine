@@ -103,8 +103,11 @@ def main() -> int:
         (source for source in template.get("sources", []) if source.get("id") == "govtribe_mcp_commercial_intel"),
         {},
     )
-    if template_govtribe.get("provider_options", {}).get("allow_scan_retrieval_without_sam") is not False:
-        failures.append("govtribe_scan_retrieval_default_off")
+    template_govtribe_options = template_govtribe.get("provider_options", {})
+    if template_govtribe_options.get("scan_retrieval_enabled") is not True:
+        failures.append("govtribe_scan_retrieval_default_on_when_enabled")
+    if "allow_scan_retrieval_without_sam" in template_govtribe_options:
+        failures.append("govtribe_scan_retrieval_stale_fallback_option")
     if "scan_retrieval" not in template_govtribe.get("capabilities", []):
         failures.append("govtribe_scan_retrieval_capability")
 
@@ -118,7 +121,7 @@ def main() -> int:
             copied = dict(source)
             if copied.get("id") == "govtribe_mcp_commercial_intel":
                 copied["enabled"] = True
-                copied["provider_options"] = {"allow_scan_retrieval_without_sam": True}
+                copied["provider_options"] = {"scan_retrieval_enabled": False}
             runtime_sources.append(copied)
         runtime["sources"] = runtime_sources
         write_json(runtime_path, runtime)
@@ -129,7 +132,7 @@ def main() -> int:
         )
         if not refreshed:
             failures.append("registry_refresh_expected")
-        if refreshed_govtribe.get("provider_options", {}).get("allow_scan_retrieval_without_sam") is not True:
+        if refreshed_govtribe.get("provider_options", {}).get("scan_retrieval_enabled") is not False:
             failures.append("registry_refresh_preserves_provider_options")
 
     output = {

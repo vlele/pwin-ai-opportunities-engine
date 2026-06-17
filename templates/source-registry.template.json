@@ -97,7 +97,7 @@
         "capture_enrichment"
       ],
       "provider_options": {
-        "allow_scan_retrieval_without_sam": false
+        "scan_retrieval_enabled": true
       },
       "homepage": "https://govtribe.com/mcp",
       "api_docs": "https://govtribe.com/docs/govtribe-user-guide/govtribe-mcp/govtribe-mcp-for-developers/"

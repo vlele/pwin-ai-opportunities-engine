@@ -765,6 +765,69 @@ def _normalized_text(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
 
 
+def _normalized_identifier(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _retrieval_dedupe_key(record: dict[str, Any]) -> str:
+    solicitation_number = _normalized_identifier(record.get("solicitation_number"))
+    if solicitation_number:
+        return f"solicitation:{solicitation_number}"
+    canonical_record_id = _normalized_identifier(record.get("canonical_record_id") or record.get("opportunity_id"))
+    source_id = _normalized_identifier(record.get("source_id"))
+    if canonical_record_id and source_id:
+        return f"{source_id}:{canonical_record_id}"
+    title = _normalized_text(record.get("title"))
+    buyer = _normalized_text(record.get("buyer"))
+    due_date = _normalized_text(record.get("due_date"))
+    if title and buyer:
+        return f"title-buyer-due:{title}|{buyer}|{due_date}"
+    return ""
+
+
+def _retrieval_source_priority(record: dict[str, Any]) -> tuple[int, str]:
+    source_id = str(record.get("source_id") or "")
+    source_tier = record.get("source_tier")
+    if isinstance(source_tier, int):
+        tier = source_tier
+    else:
+        tier = 99
+    source_rank = {
+        "sam_contract_opportunities": 0,
+        "govtribe_mcp_commercial_intel": 10,
+        "govwin_iq_commercial_intel": 20,
+    }.get(source_id, 50)
+    return (tier, f"{source_rank:03d}:{source_id}")
+
+
+def _dedupe_retrieval_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    keyed_records: dict[str, dict[str, Any]] = {}
+    ordered_keys: list[str] = []
+    passthrough_records: list[dict[str, Any]] = []
+    for record in records:
+        key = _retrieval_dedupe_key(record)
+        if not key:
+            passthrough_records.append(record)
+            continue
+        current = keyed_records.get(key)
+        if current is None:
+            keyed_records[key] = record
+            ordered_keys.append(key)
+            continue
+        if _retrieval_source_priority(record) < _retrieval_source_priority(current):
+            keyed_records[key] = record
+    return [keyed_records[key] for key in ordered_keys] + passthrough_records
+
+
+def _scan_retrieval_enabled(source: dict[str, Any]) -> bool:
+    if "scan_retrieval" not in source.get("capabilities", []):
+        return False
+    provider_options = source.get("provider_options", {})
+    if not isinstance(provider_options, dict):
+        return True
+    return provider_options.get("scan_retrieval_enabled", True) is not False
+
+
 def _keyword_matches(keyword: str, normalized_text: str, token_set: set[str]) -> bool:
     normalized_keyword = _normalized_text(keyword)
     if not normalized_keyword:
@@ -1470,13 +1533,8 @@ def main() -> int:
         sam_disabled_issue = "SAM.gov Contract Opportunities is disabled in the runtime source registry."
 
     govtribe_source = next((source for source in enabled_sources if source.get("id") == "govtribe_mcp_commercial_intel"), None)
-    govtribe_options = govtribe_source.get("provider_options", {}) if isinstance(govtribe_source, dict) else {}
-    govtribe_scan_opt_in = bool(govtribe_options.get("allow_scan_retrieval_without_sam")) if isinstance(govtribe_options, dict) else False
-    should_run_govtribe_scan_retrieval = (
-        not retrieval_records
-        and govtribe_source is not None
-        and govtribe_scan_opt_in
-        and sam_scan_status in {"missing_api_key", "disabled"}
+    should_run_govtribe_scan_retrieval = bool(
+        govtribe_source is not None and _scan_retrieval_enabled(govtribe_source)
     )
     if sam_disabled_issue and not should_run_govtribe_scan_retrieval:
         source_issues.append(sam_disabled_issue)
@@ -1506,6 +1564,8 @@ def main() -> int:
                 if str(note).strip()
             )
         retrieval_records.extend(govtribe_result.get("records", []))
+
+    retrieval_records = _dedupe_retrieval_records(retrieval_records)
 
     candidate_records = []
     semantic_reasoning_remaining = SEMANTIC_REASONING_MAX_RECORDS_PER_RUN
