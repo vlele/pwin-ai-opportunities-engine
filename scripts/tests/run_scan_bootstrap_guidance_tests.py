@@ -29,7 +29,12 @@ def _template_registry() -> dict:
     return json.loads((Path(__file__).resolve().parents[2] / "templates" / "source-registry.template.json").read_text(encoding="utf-8"))
 
 
-def _write_workspace(workspace: Path, *, govtribe_enabled: bool = False, govtribe_retrieval: bool = False) -> None:
+def _write_workspace(
+    workspace: Path,
+    *,
+    govtribe_enabled: bool = False,
+    govtribe_scan_retrieval_enabled: bool | None = None,
+) -> None:
     procurement = workspace / "procurement"
     procurement.mkdir(parents=True, exist_ok=True)
     _write_json(
@@ -49,7 +54,8 @@ def _write_workspace(workspace: Path, *, govtribe_enabled: bool = False, govtrib
     for source in registry.get("sources", []):
         if source.get("id") == "govtribe_mcp_commercial_intel":
             source["enabled"] = govtribe_enabled
-            source.setdefault("provider_options", {})["allow_scan_retrieval_without_sam"] = govtribe_retrieval
+            if govtribe_scan_retrieval_enabled is not None:
+                source.setdefault("provider_options", {})["scan_retrieval_enabled"] = govtribe_scan_retrieval_enabled
     _write_json(procurement / "source-registry.json", registry)
 
 
@@ -258,7 +264,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         workspace = Path(tmp_dir) / "workspace"
-        _write_workspace(workspace, govtribe_enabled=False, govtribe_retrieval=False)
+        _write_workspace(workspace, govtribe_enabled=False)
         with patch.dict(os.environ, {}, clear=True):
             payload = _run_scan_main(workspace)
         sam_status = next(item for item in payload["source_statuses"] if item.get("source_id") == "sam_contract_opportunities")
@@ -267,7 +273,23 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         workspace = Path(tmp_dir) / "workspace"
-        _write_workspace(workspace, govtribe_enabled=True, govtribe_retrieval=True)
+        _write_workspace(workspace, govtribe_enabled=True, govtribe_scan_retrieval_enabled=False)
+        FakeGovTribeRetrievalProvider.called = False
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            run_scan,
+            "GovTribeMCPCommercialIntelProvider",
+            FakeGovTribeRetrievalProvider,
+        ):
+            payload = _run_scan_main(workspace)
+        assert FakeGovTribeRetrievalProvider.called is False, payload
+        assert not any(
+            item.get("source_id") == "govtribe_mcp_commercial_intel" and item.get("mode") == "scan_retrieval"
+            for item in payload["source_statuses"]
+        ), payload
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        workspace = Path(tmp_dir) / "workspace"
+        _write_workspace(workspace, govtribe_enabled=True)
         with patch.dict(os.environ, {}, clear=True):
             payload = _run_scan_main(workspace)
         govtribe_retrieval_status = next(
@@ -279,7 +301,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         workspace = Path(tmp_dir) / "workspace"
-        _write_workspace(workspace, govtribe_enabled=True, govtribe_retrieval=True)
+        _write_workspace(workspace, govtribe_enabled=True)
         _write_json(workspace / "procurement" / "vendor-profile.json", {"company": {}})
         FakeGovTribeNoMatchProvider.called = False
         with patch.dict(os.environ, {}, clear=True), patch.object(run_scan, "GovTribeMCPCommercialIntelProvider", FakeGovTribeNoMatchProvider):
@@ -296,7 +318,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         workspace = Path(tmp_dir) / "workspace"
-        _write_workspace(workspace, govtribe_enabled=True, govtribe_retrieval=True)
+        _write_workspace(workspace, govtribe_enabled=True)
         FakeGovTribeRetrievalProvider.called = False
         with patch.dict(os.environ, {}, clear=True), patch.object(run_scan, "GovTribeMCPCommercialIntelProvider", FakeGovTribeRetrievalProvider):
             payload = _run_scan_main(workspace)
@@ -325,7 +347,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         workspace = Path(tmp_dir) / "workspace"
-        _write_workspace(workspace, govtribe_enabled=True, govtribe_retrieval=True)
+        _write_workspace(workspace, govtribe_enabled=True)
         FakeGovTribeExpiredRetrievalProvider.called = False
         with patch.dict(os.environ, {}, clear=True), patch.object(
             run_scan,
@@ -350,7 +372,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         workspace = Path(tmp_dir) / "workspace"
-        _write_workspace(workspace, govtribe_enabled=True, govtribe_retrieval=True)
+        _write_workspace(workspace, govtribe_enabled=True)
         FakeGovTribeRetrievalProvider.called = False
         sam_record = {
             "source_id": "sam_contract_opportunities",
@@ -394,12 +416,15 @@ def main() -> int:
             FakeGovTribeRetrievalProvider,
         ):
             payload = _run_scan_main(workspace)
-        assert FakeGovTribeRetrievalProvider.called is False, payload
-        assert not any(
-            item.get("source_id") == "govtribe_mcp_commercial_intel" and item.get("mode") == "scan_retrieval"
+        assert FakeGovTribeRetrievalProvider.called is True, payload
+        govtribe_retrieval_status = next(
+            item
             for item in payload["source_statuses"]
-        ), payload
+            if item.get("source_id") == "govtribe_mcp_commercial_intel" and item.get("mode") == "scan_retrieval"
+        )
+        assert govtribe_retrieval_status["status"] == "ok", payload
         opportunities = json.loads(Path(payload["opportunities_path"]).read_text(encoding="utf-8")).get("records", [])
+        assert len(opportunities) == 1, opportunities
         assert opportunities[0]["source_id"] == "sam_contract_opportunities", opportunities
         assert any(item.get("source_id") == "govtribe_mcp_commercial_intel" for item in payload["source_statuses"]), payload
 

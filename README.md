@@ -34,7 +34,7 @@ For the GovTribe MCP path:
 export GOVTRIBE_MCP_API_KEY="your-govtribe-mcp-key"
 ```
 
-SAM.gov remains the default official-source retrieval path. GovTribe MCP can also be used in lieu of SAM.gov for scan retrieval when the workspace enables `govtribe_mcp_commercial_intel` and sets `provider_options.allow_scan_retrieval_without_sam` to `true` in `procurement/source-registry.json`.
+SAM.gov remains the default official-source retrieval path. When the workspace enables `govtribe_mcp_commercial_intel`, GovTribe MCP can also participate in scan retrieval alongside SAM.gov and downstream enrichment. Set `provider_options.scan_retrieval_enabled` to `false` in `procurement/source-registry.json` only when you want GovTribe enrichment without GovTribe-sourced scan candidates.
 
 3. Keep your normal OpenClaw model credential in place.
 
@@ -113,7 +113,7 @@ like A1
 
 - The current shipped scope is federal-only.
 - `SAM_API_KEY` enables official SAM.gov opportunity retrieval.
-- `GOVTRIBE_MCP_API_KEY` enables direct GovTribe enrichment and can also power GovTribe-only scan retrieval when the workspace explicitly opts into that provider option.
+- `GOVTRIBE_MCP_API_KEY` enables direct GovTribe enrichment and GovTribe-sourced scan retrieval when the workspace enables the GovTribe MCP source.
 - Website-derived bootstrap fields are provisional until you confirm them.
 - OpenClaw should normally be invoked in chat; the Python scripts are the implementation layer underneath the skill.
 - Detailed setup notes live in `docs/install-openclaw.md`.

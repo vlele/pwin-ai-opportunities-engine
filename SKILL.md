@@ -107,7 +107,8 @@ Notes:
 
 - Replace `30-45` with the horizon inferred from the user message.
 - The scan script refreshes the runtime source registry, writes dated snapshots, builds stable entry IDs, and renders the report and digest.
-- The shipped source set is federal-only and currently implemented for `SAM.gov`, `USAspending.gov` enrichment, plus optional commercial-intel sidecars for `GovTribe MCP` and a `GovWin IQ` credential scaffold when those sources are enabled and configured.
+- The shipped source set is federal-only and currently implemented for `SAM.gov`, `USAspending.gov` enrichment, plus optional commercial-intel providers for `GovTribe MCP` and a `GovWin IQ` credential scaffold when those sources are enabled and configured.
+- When `govtribe_mcp_commercial_intel` is enabled, GovTribe can contribute scan-retrieval records alongside SAM.gov; keep its tier-4 commercial provenance visible in the digest.
 
 After the script runs:
 
@@ -260,7 +261,7 @@ Currently implemented sources:
 
 Source rules:
 
-- official sources first
+- official sources first, with enabled commercial sources clearly labeled when they add scan candidates or enrichment
 - federal only by default
 - no state or local sources in this release
 - do not describe stale source IDs from older revisions as active shipped behavior

@@ -4,7 +4,7 @@ This bundle is federal-only, and the shipped runtime contract currently implemen
 
 - `SAM.gov` for live contract opportunity retrieval
 - `USAspending.gov` for award-history enrichment
-- optional commercial-intelligence sidecars for `GovTribe MCP` and `GovWin IQ`
+- optional commercial-intelligence providers for `GovTribe MCP` and `GovWin IQ`
 
 If an older workspace still contains additional source IDs in `procurement/source-registry.json`, treat them as stale configuration until the runtime registry is refreshed from the current template.
 
@@ -51,11 +51,11 @@ Current retrieval rules:
 
 ### 3. GovTribe MCP Commercial Intelligence
 
-- Type: subscription commercial-intelligence enrichment and opt-in alternate retrieval
+- Type: subscription commercial-intelligence enrichment and enabled-source retrieval
 - Shipped use:
-  - optional scan-time commercial sidecar
-  - optional capture-time commercial sidecar
-  - optional primary scan retrieval only when SAM.gov cannot run and the workspace explicitly opts in
+  - optional scan-time commercial retrieval alongside official sources
+  - optional scan-time commercial enrichment
+  - optional capture-time commercial enrichment
 - Access pattern: direct remote MCP over Streamable HTTP
 - Trust tier: 4
 - Portal: https://govtribe.com/mcp
@@ -69,9 +69,9 @@ Current retrieval rules:
 
 Current retrieval rules:
 
-- Treat GovTribe as optional enrichment by default, not as a replacement for official `SAM.gov` notice retrieval.
-- A workspace may opt into GovTribe as a commercial tier-4 alternate scan retrieval source with `provider_options.allow_scan_retrieval_without_sam: true`, but only when SAM.gov is disabled or cannot run because `SAM_API_KEY` is missing.
-- Keep `SAM.gov` first whenever `SAM_API_KEY` is configured and SAM.gov is enabled.
+- Treat GovTribe as optional commercial retrieval and enrichment when the workspace enables `govtribe_mcp_commercial_intel`.
+- Let GovTribe scan retrieval run alongside `SAM.gov`; set `provider_options.scan_retrieval_enabled: false` only when GovTribe should enrich official-source records without adding GovTribe-sourced scan candidates.
+- Keep `SAM.gov` records preferred during dedupe whenever `SAM_API_KEY` is configured and SAM.gov is enabled.
 - Use direct MCP `initialize`, `notifications/initialized`, `tools/list`, and `tools/call` requests.
 - Use the documented GovTribe for Agents tool map for federal opportunity, award, IDV, vehicle, and government-file enrichment.
 - Keep search query construction aligned with the GovTribe keyword/semantic mode guidance.
@@ -119,7 +119,7 @@ These may appear in older docs or stale workspace registries, but they are not p
 
 1. Start with `SAM.gov` for live notice retrieval.
 2. Use `USAspending.gov` only as enrichment around those live opportunities.
-3. Treat `GovTribe MCP` and `GovWin IQ` as optional commercial sidecars behind explicit runtime enablement, except for the explicit GovTribe-only scan retrieval opt-in described above.
+3. Treat `GovTribe MCP` and `GovWin IQ` as optional commercial providers behind explicit runtime enablement; enabled GovTribe can add scan candidates alongside official sources.
 4. Keep the runtime source registry limited to the implemented or scaffolded source IDs in the current template.
 5. Do not describe non-implemented sources as active just because they were present in older repo revisions.
 
