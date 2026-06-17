@@ -9,6 +9,7 @@ venv/
 .env
 *.log
 procurement/
+/MEMORY.md
 *Zone.Identifier
 *Zone.Identifier*
 *sec.endpointdlp

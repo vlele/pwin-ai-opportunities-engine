@@ -91,7 +91,7 @@ def main() -> int:
     }
     with patch.object(reasoning, "_call_openai_json", return_value=broad_model_result):
         feedback_payload = reasoning.interpret_feedback(
-            user_text="dislike E6 because reseller hardware and equipment buys are not our lane",
+            user_text="dislike E6 because reseller hardware and equipment buys are not a target fit",
             feedback_kind="dislike",
             reward=-1,
             record=record,
@@ -112,7 +112,7 @@ def main() -> int:
         events=[
             {
                 "reward": -1,
-                "user_utterance": "dislike E6 because reseller hardware and equipment buys are not our lane",
+                "user_utterance": "dislike E6 because reseller hardware and equipment buys are not a target fit",
                 "semantic_feedback": broad_model_result,
             }
         ],
@@ -140,7 +140,7 @@ def main() -> int:
         events=[
             {
                 "reward": -1,
-                "user_utterance": "dislike E6 because data management is not our lane",
+                "user_utterance": "dislike E6 because data management is not a target fit",
                 "semantic_feedback": broad_model_result,
             }
         ],

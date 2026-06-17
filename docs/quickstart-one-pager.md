@@ -140,7 +140,7 @@ and treat NAICS 541511 and 541512 as candidates.
 If you are already looking at a GovTribe vendor profile and `GOVTRIBE_MCP_API_KEY` is configured, you can bootstrap from GovTribe instead:
 
 ```text
-Use pwin-ai-opportunities and bootstrap this workspace from https://govtribe.com/vendors/halvik-corp-5grr4.
+Use pwin-ai-opportunities and bootstrap this workspace from https://govtribe.com/vendors/demogov-services-demo1.
 ```
 
 In Claude Code, use:
@@ -164,7 +164,7 @@ For GovTribe vendor lookup:
 ```bash
 python3 "$PWIN_AI_OPPS_ROOT/scripts/bootstrap/bootstrap_workspace.py" \
   --workspace "$PWD" \
-  --vendor-lookup "Halvik, LLC"
+  --vendor-lookup "DemoGov Services, LLC"
 ```
 
 That creates or updates:

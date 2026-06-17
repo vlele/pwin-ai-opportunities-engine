@@ -1,4 +1,4 @@
-# Applied Information Sciences Daily Opportunity Digest - 2026-05-09
+# Acme Federal Analytics Daily Opportunity Digest - 2026-05-09
 
 **Report Date:** 2026-05-09  
 **Run Status:** OK  
@@ -21,23 +21,23 @@
 
 ## Action Now
 
-### A1 - ORRISK Organizational Risk Analytics and Assessment Support
+### A1 - DEMO-RISK Organizational Risk Analytics and Assessment Support
 
 | Field | Value |
 |:---|:---|
-| Buyer | CDC |
+| Buyer | Demo Health Agency |
 | Due | 2026-06-14 |
 | Opportunity Class | contracts |
 | Source | SAM.gov (Tier 1) |
 | Match Score | 82 |
 | Confidence | 68 |
-| Direct URL | https://sam.gov/opp/0231571d291a47c7a80b415452d7bf24/view |
+| Direct URL | https://sam.gov/opp/demo-notice-20260509-a1/view |
 
-Opportunity summary: CDC appears to be seeking organizational risk analytics and assessment support aligned to mission and compliance reporting needs.
+Opportunity summary: Demo Health Agency appears to be seeking organizational risk analytics and assessment support aligned to mission and compliance reporting needs.
 
 Why it matters:
 - Strong analytics and advisory fit
-- Federal mission and health-domain adjacency
+- Federal mission and demo health-domain adjacency
 - Follow-on and incumbent mapping possible through award-history enrichment
 
 Caveat: Full noticedesc hydration was incomplete in the source snapshot.
@@ -50,7 +50,7 @@ Caveat: Full noticedesc hydration was incomplete in the source snapshot.
 
 | Field | Value |
 |:---|:---|
-| Buyer | HHS |
+| Buyer | Demo Shared Services Office |
 | Due | 2026-06-22 |
 | Opportunity Class | contracts |
 | Source | SAM.gov (Tier 1) |
@@ -74,7 +74,7 @@ Caveat: Buyer-specific mission context still needs deeper research.
 
 | Field | Value |
 |:---|:---|
-| Buyer | USDA |
+| Buyer | Demo Agriculture Office |
 | Due | 2026-06-18 |
 | Opportunity Class | contracts |
 | Source | Acquisition.gov Procurement Forecasts (Tier 2) |

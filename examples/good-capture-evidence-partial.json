@@ -5,21 +5,21 @@
   "entry": {
     "report_entry_id": "A1",
     "digest_date": "2026-05-09",
-    "opportunity_id": "0231571d291a47c7a80b415452d7bf24",
-    "canonical_record_id": "0231571d291a47c7a80b415452d7bf24",
+    "opportunity_id": "demo-notice-20260509-a1",
+    "canonical_record_id": "demo-notice-20260509-a1",
     "canonical_record_id_type": "notice_id",
-    "notice_id": "0231571d291a47c7a80b415452d7bf24",
-    "title": "ORRISK Organizational Risk Analytics and Assessment Support",
-    "buyer": "CDC",
+    "notice_id": "demo-notice-20260509-a1",
+    "title": "DEMO-RISK Organizational Risk Analytics and Assessment Support",
+    "buyer": "Demo Health Agency",
     "source_id": "sam_contract_opportunities",
     "source_name": "SAM.gov",
     "source_tier": 1,
-    "url": "https://sam.gov/opp/0231571d291a47c7a80b415452d7bf24/view"
+    "url": "https://sam.gov/opp/demo-notice-20260509-a1/view"
   },
   "artifacts": {
     "request_log_path": "procurement/capture-requests.jsonl",
-    "request_capture_brief_path": "procurement/capture-briefs/2026-05-09/A1-0231571d291a47c7a80b415452d7bf24-req-20260509a1.md",
-    "request_capture_evidence_path": "procurement/capture-evidence/2026-05-09/A1-0231571d291a47c7a80b415452d7bf24-req-20260509a1.json"
+    "request_capture_brief_path": "procurement/capture-briefs/2026-05-09/A1-demo-notice-20260509-a1-req-20260509a1.md",
+    "request_capture_evidence_path": "procurement/capture-evidence/2026-05-09/A1-demo-notice-20260509-a1-req-20260509a1.json"
   },
   "executive_brief": {
     "summary": "Partial but current capture brief created from current request artifacts.",
@@ -35,18 +35,18 @@
       "mission_driver": "Risk visibility",
       "policy_driver": "Reporting accountability",
       "budget_signal": "Award-history review pending",
-      "stakeholders": "CDC program owner",
+      "stakeholders": "Demo Health Agency program owner",
       "incumbents": "Unknown",
       "key_risks": "Partial evidence",
       "kpis": "cycle-time reduction; reporting quality",
       "solution_implications": "Lead with analytics maturity",
-      "evidence_links": "https://sam.gov/opp/0231571d291a47c7a80b415452d7bf24/view",
-      "evidence_snippets": ["Public notice metadata indicates CDC risk-assessment support intent."]
+      "evidence_links": "https://sam.gov/opp/demo-notice-20260509-a1/view",
+      "evidence_snippets": ["Public notice metadata indicates Demo Health Agency risk-assessment support intent."]
     }
   ],
-  "stakeholder_map": ["CDC program owner", "Contracting office"],
+  "stakeholder_map": ["Demo Health Agency program owner", "Contracting office"],
   "budget_funding_signals": ["Use USAspending for award history."],
-  "related_procurements": ["Check archived CDC analytics support notices."],
+  "related_procurements": ["Check archived Demo Health Agency analytics support notices."],
   "vehicle_signals": ["Vehicle path not yet confirmed."],
   "competitive_landscape": {
     "likely_incumbents": [],
@@ -55,7 +55,7 @@
     "emerging_challengers": [],
     "notes": ["Competitive posture still partial."]
   },
-  "public_discourse_signals": ["Review CDC strategy and oversight sources."],
+  "public_discourse_signals": ["Review Demo Health Agency strategy and oversight sources."],
   "recommended_next_research_moves": ["Validate incumbent via USAspending", "Map stakeholders from official bios"],
   "action_items_next_10_days": ["Confirm mission owner", "Confirm award history"],
   "assumptions_to_validate": ["Comparable prior awards exist"],
@@ -63,7 +63,7 @@
   "source_log": [
     {
       "title": "Official opportunity page",
-      "url": "https://sam.gov/opp/0231571d291a47c7a80b415452d7bf24/view",
+      "url": "https://sam.gov/opp/demo-notice-20260509-a1/view",
       "publisher": "SAM.gov",
       "published_date": "N/A",
       "accessed_date": "2026-05-09",

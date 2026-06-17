@@ -1,8 +1,8 @@
 Capture research for A1 is now logged and a fresh structured brief was generated from the current request artifacts.
 
 Status: PARTIAL_CAPTURE_RESEARCH
-Brief: procurement/capture-briefs/2026-05-09/A1-0231571d291a47c7a80b415452d7bf24-req-20260509a1.md
-Evidence: procurement/capture-evidence/2026-05-09/A1-0231571d291a47c7a80b415452d7bf24-req-20260509a1.json
+Brief: procurement/capture-briefs/2026-05-09/A1-demo-notice-20260509-a1-req-20260509a1.md
+Evidence: procurement/capture-evidence/2026-05-09/A1-demo-notice-20260509-a1-req-20260509a1.json
 
 The brief already includes the Executive Brief, Objective Matrix, Stakeholder Map, Budget/Spending signals, and Evidence Annex. The main remaining gaps are incumbent confirmation and fuller public-source mission context.
 

@@ -4,10 +4,10 @@
 
 Fix issue #25 by separating semantic context detected on an opportunity from the semantic traits the user actually accepted or rejected in feedback.
 
-For the Halvik feedback:
+For the DemoGov feedback:
 
 ```text
-dislike E6 because reseller hardware and equipment buys are not our lane
+dislike E6 because reseller hardware and equipment buys are not a target fit
 ```
 
 the system should learn a specific caution for reseller hardware/equipment buys without penalizing data management, set-aside posture, no-set-aside text, or prime-possible posture.
@@ -38,9 +38,9 @@ git diff --check
 
 ## Acceptance Criteria
 
-- The Halvik regression learns `reseller_hardware_equipment_buy` as the rejected semantic facet.
+- The DemoGov regression learns `reseller_hardware_equipment_buy` as the rejected semantic facet.
 - The same feedback does not create negative learning signals for `data_management`, `set_aside_restricted`, `no set aside used`, or `prime_possible`.
-- Explicit mission-domain feedback such as `data management is not our lane` still creates an avoided mission-domain preference.
+- Explicit mission-domain feedback such as `data management is not a target fit` still creates an avoided mission-domain preference.
 - Recomputing existing feedback ledgers applies the same target constraint, so old over-broad events do not keep polluting semantic aggregates.
 
 ## References

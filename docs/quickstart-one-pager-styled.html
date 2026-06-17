@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>pWin.ai Opportunities Quick Start</title>
+  <title>quickstart-one-pager</title>
   <style>
     /* Default styles provided by pandoc.
     ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
@@ -92,9 +92,6 @@
   <link rel="stylesheet" href="quickstart-one-pager-styled.css" />
 </head>
 <body>
-<header id="title-block-header">
-<h1 class="title">pWin.ai Opportunities Quick Start</h1>
-</header>
 <h1 id="pwin.ai-opportunities-quick-start">pWin.ai Opportunities Quick
 Start</h1>
 <p><code>pWin.ai Opportunities</code> helps you bootstrap a workspace
@@ -219,15 +216,24 @@ with confirmed NAICS 541511 and 541512.</code></pre>
 <p>If those NAICS are still tentative, say:</p>
 <pre class="text"><code>Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
 and treat NAICS 541511 and 541512 as candidates.</code></pre>
+<p>If you are already looking at a GovTribe vendor profile and
+<code>GOVTRIBE_MCP_API_KEY</code> is configured, you can bootstrap from
+GovTribe instead:</p>
+<pre class="text"><code>Use pwin-ai-opportunities and bootstrap this workspace from https://govtribe.com/vendors/demogov-services-demo1.</code></pre>
 <p>In Claude Code, use:</p>
 <pre class="text"><code>/pwin-bootstrap workspace path $PWD and company URL https://example.com
 /pwin-bootstrap workspace path $PWD and company URL https://example.com with confirmed NAICS 541511 and 541512
 /pwin-bootstrap workspace path $PWD and company URL https://example.com with candidate NAICS 541511 and 541512</code></pre>
 <p>If you want the direct underlying CLI path on any host, run:</p>
-<div class="sourceCode" id="cb12"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/bootstrap/bootstrap_workspace.py&quot;</span> <span class="dt">\</span></span>
-<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="dt">\</span></span>
-<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--company-url</span> <span class="st">&quot;https://example.com&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb13"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/bootstrap/bootstrap_workspace.py&quot;</span> <span class="dt">\</span></span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--company-url</span> <span class="st">&quot;https://example.com&quot;</span></span></code></pre></div>
+<p>For GovTribe vendor lookup:</p>
+<div class="sourceCode" id="cb14"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/bootstrap/bootstrap_workspace.py&quot;</span> <span class="dt">\</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--vendor-lookup</span> <span class="st">&quot;DemoGov Services, LLC&quot;</span></span></code></pre></div>
 <p>That creates or updates:</p>
 <ul>
 <li><code>procurement/vendor-profile.json</code></li>
@@ -253,6 +259,11 @@ plus website inference</li>
 <li>candidate buyer notes, provenance facts, and a reminder that
 website-derived facts are still provisional</li>
 </ul>
+<p>GovTribe bootstrap can also pre-populate UEI, GovTribe profile URL,
+NAICS, certifications, contract vehicles, award and buyer signals, and
+AI summary text. Those facts are labeled as GovTribe
+subscription-derived commercial intelligence and remain provisional
+until confirmed.</p>
 <p>It also seeds <code>procurement/preferences.json</code> to exclude
 <code>grants</code> by default, prefer <code>contracts</code>,
 <code>subcontracts</code>, and <code>forecasts</code>, and reuse the
@@ -268,18 +279,18 @@ GovTribe in This Workspace</h2>
 <p>If you want <code>GovTribe MCP</code> enrichment in this specific
 workspace, flip it on in
 <code>procurement/source-registry.json</code>:</p>
-<div class="sourceCode" id="cb13"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="at">-</span> <span class="op">&lt;&lt;&#39;PY&#39;</span></span>
-<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a><span class="st">import json</span></span>
-<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a><span class="st">from pathlib import Path</span></span>
-<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a><span class="st">path = Path(&quot;procurement/source-registry.json&quot;)</span></span>
-<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a><span class="st">data = json.loads(path.read_text())</span></span>
-<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a><span class="st">for source in data.get(&quot;sources&quot;, []):</span></span>
-<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a><span class="st">    if source.get(&quot;id&quot;) == &quot;govtribe_mcp_commercial_intel&quot;:</span></span>
-<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a><span class="st">        source[&quot;enabled&quot;] = True</span></span>
-<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a><span class="st">path.write_text(json.dumps(data, indent=2) + &quot;\n&quot;)</span></span>
-<span id="cb13-11"><a href="#cb13-11" aria-hidden="true" tabindex="-1"></a><span class="op">PY</span></span></code></pre></div>
+<div class="sourceCode" id="cb15"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="at">-</span> <span class="op">&lt;&lt;&#39;PY&#39;</span></span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a><span class="st">import json</span></span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a><span class="st">from pathlib import Path</span></span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a><span class="st">path = Path(&quot;procurement/source-registry.json&quot;)</span></span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a><span class="st">data = json.loads(path.read_text())</span></span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a><span class="st">for source in data.get(&quot;sources&quot;, []):</span></span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a><span class="st">    if source.get(&quot;id&quot;) == &quot;govtribe_mcp_commercial_intel&quot;:</span></span>
+<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a><span class="st">        source[&quot;enabled&quot;] = True</span></span>
+<span id="cb15-10"><a href="#cb15-10" aria-hidden="true" tabindex="-1"></a><span class="st">path.write_text(json.dumps(data, indent=2) + &quot;\n&quot;)</span></span>
+<span id="cb15-11"><a href="#cb15-11" aria-hidden="true" tabindex="-1"></a><span class="op">PY</span></span></code></pre></div>
 <p>What <code>GovTribe MCP</code> adds when it is both enabled and
 configured:</p>
 <ul>
@@ -289,6 +300,26 @@ teaming clues</li>
 <li>normalized cross-source evidence with explicit conflict reporting
 when official and commercial signals disagree</li>
 </ul>
+<p><code>SAM.gov</code> remains the recommended official retrieval path.
+If a workspace intentionally needs GovTribe-only scan retrieval when
+<code>SAM_API_KEY</code> is unavailable, also set the explicit provider
+option:</p>
+<div class="sourceCode" id="cb16"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="at">-</span> <span class="op">&lt;&lt;&#39;PY&#39;</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a><span class="st">import json</span></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a><span class="st">from pathlib import Path</span></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a><span class="st">path = Path(&quot;procurement/source-registry.json&quot;)</span></span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a><span class="st">data = json.loads(path.read_text())</span></span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a><span class="st">for source in data.get(&quot;sources&quot;, []):</span></span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a><span class="st">    if source.get(&quot;id&quot;) == &quot;govtribe_mcp_commercial_intel&quot;:</span></span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a><span class="st">        source[&quot;enabled&quot;] = True</span></span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a><span class="st">        source.setdefault(&quot;provider_options&quot;, {})[&quot;allow_scan_retrieval_without_sam&quot;] = True</span></span>
+<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a><span class="st">path.write_text(json.dumps(data, indent=2) + &quot;\n&quot;)</span></span>
+<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a><span class="op">PY</span></span></code></pre></div>
+<p>This is a commercial tier-4 alternate retrieval path. It runs only
+when SAM.gov is disabled or cannot run because <code>SAM_API_KEY</code>
+is missing; it does not replace SAM.gov when SAM is configured.</p>
 <h2 id="run-the-first-scan">7. Run the First Scan</h2>
 <p>Once the workspace is bootstrapped, ask:</p>
 <pre class="text"><code>Use pwin-ai-opportunities and run a federal opportunity scan for the next 30 to 45 days in this workspace.</code></pre>
@@ -298,6 +329,10 @@ when official and commercial signals disagree</li>
 <ul>
 <li>if <code>SAM_API_KEY</code> is missing, the scan reports
 <code>missing_api_key</code></li>
+<li>if GovTribe-only scan retrieval is explicitly opted in and
+<code>GOVTRIBE_MCP_API_KEY</code> is configured, the scan can still
+produce commercial tier-4 opportunity records without
+<code>SAM_API_KEY</code></li>
 <li>if the workspace still has no usable NAICS, the scan reports
 <code>no_naics</code> and returns a bootstrap recommendation with the
 next command to run</li>
@@ -311,10 +346,10 @@ IDs like <code>A1</code>, <code>W2</code>, or <code>E1</code></li>
 </ul>
 <p>If you hit <code>no_naics</code>, rerun bootstrap before you try
 another scan:</p>
-<div class="sourceCode" id="cb16"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/bootstrap/bootstrap_workspace.py&quot;</span> <span class="dt">\</span></span>
-<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="dt">\</span></span>
-<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--company-url</span> <span class="st">&quot;https://example.com&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb19"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/bootstrap/bootstrap_workspace.py&quot;</span> <span class="dt">\</span></span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--company-url</span> <span class="st">&quot;https://example.com&quot;</span></span></code></pre></div>
 <p>Key scan artifacts:</p>
 <ul>
 <li><code>procurement/opportunities/YYYY-MM-DD.json</code></li>
@@ -344,25 +379,25 @@ ID</h3>
 <p>In Claude Code, use:</p>
 <pre class="text"><code>/pwin-research workspace path $PWD and entry A1 with full capture depth</code></pre>
 <h3 id="direct-local-file-capture">Direct local-file capture</h3>
-<div class="sourceCode" id="cb21"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> <span class="dt">\</span></span>
-<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="dt">\</span></span>
-<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--file</span> <span class="st">&quot;/absolute/path/to/PWS.pdf&quot;</span> <span class="dt">\</span></span>
-<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--file</span> <span class="st">&quot;/absolute/path/to/QA.docx&quot;</span> <span class="dt">\</span></span>
-<span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--title</span> <span class="st">&quot;Example opportunity&quot;</span> <span class="dt">\</span></span>
-<span id="cb21-6"><a href="#cb21-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--buyer</span> <span class="st">&quot;Department of Example&quot;</span> <span class="dt">\</span></span>
-<span id="cb21-7"><a href="#cb21-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--summary</span> <span class="st">&quot;Direct local-file capture from downloaded solicitation artifacts.&quot;</span> <span class="dt">\</span></span>
-<span id="cb21-8"><a href="#cb21-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--solicitation-number</span> <span class="st">&quot;ABC123&quot;</span> <span class="dt">\</span></span>
-<span id="cb21-9"><a href="#cb21-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">--depth</span> full_360</span></code></pre></div>
+<div class="sourceCode" id="cb24"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> <span class="dt">\</span></span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--file</span> <span class="st">&quot;/absolute/path/to/PWS.pdf&quot;</span> <span class="dt">\</span></span>
+<span id="cb24-4"><a href="#cb24-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--file</span> <span class="st">&quot;/absolute/path/to/QA.docx&quot;</span> <span class="dt">\</span></span>
+<span id="cb24-5"><a href="#cb24-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--title</span> <span class="st">&quot;Example opportunity&quot;</span> <span class="dt">\</span></span>
+<span id="cb24-6"><a href="#cb24-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">--buyer</span> <span class="st">&quot;Department of Example&quot;</span> <span class="dt">\</span></span>
+<span id="cb24-7"><a href="#cb24-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">--summary</span> <span class="st">&quot;Direct local-file capture from downloaded solicitation artifacts.&quot;</span> <span class="dt">\</span></span>
+<span id="cb24-8"><a href="#cb24-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">--solicitation-number</span> <span class="st">&quot;ABC123&quot;</span> <span class="dt">\</span></span>
+<span id="cb24-9"><a href="#cb24-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">--depth</span> full_360</span></code></pre></div>
 <p>Optional metadata for direct local-file capture includes
 <code>--url</code> and <code>--notice-id</code> when you have them.</p>
 <h3 id="hybrid-capture">Hybrid capture</h3>
-<div class="sourceCode" id="cb22"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> <span class="dt">\</span></span>
-<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="dt">\</span></span>
-<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--entry</span> <span class="st">&quot;A1&quot;</span> <span class="dt">\</span></span>
-<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--file</span> <span class="st">&quot;/absolute/path/to/amendment.pdf&quot;</span> <span class="dt">\</span></span>
-<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--depth</span> full_360</span></code></pre></div>
+<div class="sourceCode" id="cb25"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> <span class="dt">\</span></span>
+<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="dt">\</span></span>
+<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">--entry</span> <span class="st">&quot;A1&quot;</span> <span class="dt">\</span></span>
+<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">--file</span> <span class="st">&quot;/absolute/path/to/amendment.pdf&quot;</span> <span class="dt">\</span></span>
+<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">--depth</span> full_360</span></code></pre></div>
 <p>All three capture modes write fresh artifacts under:</p>
 <ul>
 <li><code>procurement/capture-briefs/</code></li>
@@ -450,13 +485,13 @@ feedback.</li>
 <p>These are helpful for debugging or CI. In normal OpenClaw and Codex
 usage, prefer the chat prompts above. In Claude Code, prefer the
 <code>/pwin-*</code> command pack.</p>
-<div class="sourceCode" id="cb25"><pre
-class="sourceCode bash"><code class="sourceCode bash"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/bootstrap/bootstrap_workspace.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--company-url</span> <span class="st">&quot;https://example.com&quot;</span></span>
-<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/scan/run_scan.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--horizon</span> <span class="st">&quot;30-45&quot;</span> <span class="at">--federal-only</span></span>
-<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/show/show_digest.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--date</span> latest</span>
-<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--entry</span> <span class="st">&quot;A1&quot;</span> <span class="at">--depth</span> full_360</span>
-<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--file</span> <span class="st">&quot;/absolute/path/to/PWS.pdf&quot;</span> <span class="at">--file</span> <span class="st">&quot;/absolute/path/to/QA.docx&quot;</span> <span class="at">--title</span> <span class="st">&quot;Example opportunity&quot;</span> <span class="at">--buyer</span> <span class="st">&quot;Department of Example&quot;</span> <span class="at">--summary</span> <span class="st">&quot;Direct local-file capture from downloaded solicitation artifacts.&quot;</span> <span class="at">--solicitation-number</span> <span class="st">&quot;ABC123&quot;</span> <span class="at">--depth</span> full_360</span>
-<span id="cb25-6"><a href="#cb25-6" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--entry</span> <span class="st">&quot;A1&quot;</span> <span class="at">--file</span> <span class="st">&quot;/absolute/path/to/amendment.pdf&quot;</span> <span class="at">--depth</span> full_360</span>
-<span id="cb25-7"><a href="#cb25-7" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/feedback/apply_feedback.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--text</span> <span class="st">&quot;never show grants&quot;</span></span></code></pre></div>
+<div class="sourceCode" id="cb28"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb28-1"><a href="#cb28-1" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/bootstrap/bootstrap_workspace.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--company-url</span> <span class="st">&quot;https://example.com&quot;</span></span>
+<span id="cb28-2"><a href="#cb28-2" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/scan/run_scan.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--horizon</span> <span class="st">&quot;30-45&quot;</span> <span class="at">--federal-only</span></span>
+<span id="cb28-3"><a href="#cb28-3" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/show/show_digest.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--date</span> latest</span>
+<span id="cb28-4"><a href="#cb28-4" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--entry</span> <span class="st">&quot;A1&quot;</span> <span class="at">--depth</span> full_360</span>
+<span id="cb28-5"><a href="#cb28-5" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--file</span> <span class="st">&quot;/absolute/path/to/PWS.pdf&quot;</span> <span class="at">--file</span> <span class="st">&quot;/absolute/path/to/QA.docx&quot;</span> <span class="at">--title</span> <span class="st">&quot;Example opportunity&quot;</span> <span class="at">--buyer</span> <span class="st">&quot;Department of Example&quot;</span> <span class="at">--summary</span> <span class="st">&quot;Direct local-file capture from downloaded solicitation artifacts.&quot;</span> <span class="at">--solicitation-number</span> <span class="st">&quot;ABC123&quot;</span> <span class="at">--depth</span> full_360</span>
+<span id="cb28-6"><a href="#cb28-6" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/capture/run_capture_research.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--entry</span> <span class="st">&quot;A1&quot;</span> <span class="at">--file</span> <span class="st">&quot;/absolute/path/to/amendment.pdf&quot;</span> <span class="at">--depth</span> full_360</span>
+<span id="cb28-7"><a href="#cb28-7" aria-hidden="true" tabindex="-1"></a><span class="ex">python3</span> <span class="st">&quot;</span><span class="va">$PWIN_AI_OPPS_ROOT</span><span class="st">/scripts/feedback/apply_feedback.py&quot;</span> <span class="at">--workspace</span> <span class="st">&quot;</span><span class="va">$PWD</span><span class="st">&quot;</span> <span class="at">--text</span> <span class="st">&quot;never show grants&quot;</span></span></code></pre></div>
 </body>
 </html>
