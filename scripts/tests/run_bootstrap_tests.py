@@ -20,150 +20,166 @@ def write(path: Path, text: str) -> None:
 
 
 class FakeGovTribeBootstrapProvider:
-    def __init__(self, *, status: str = "ok") -> None:
+    def __init__(
+        self,
+        *,
+        status: str = "ok",
+        status_by_lookup: dict[str, str] | None = None,
+        vendor_record: dict | None = None,
+        vendor_record_by_lookup: dict[str, dict] | None = None,
+    ) -> None:
         self.status = status
+        self.status_by_lookup = status_by_lookup or {}
+        self.vendor_record = vendor_record or {}
+        self.vendor_record_by_lookup = vendor_record_by_lookup or {}
         self.lookups: list[str] = []
 
     def resolve_vendor_profile(self, *, lookup: str, limit: int = 5) -> dict:
         self.lookups.append(lookup)
-        if self.status != "ok":
+        status = self.status_by_lookup.get(lookup, self.status)
+        if status != "ok":
             return {
-                "status": self.status,
+                "status": status,
                 "matched": False,
-                "notes": [f"fake {self.status}"],
+                "notes": [f"fake {status}"],
                 "vendor_record": {},
             }
-        return {
-            "status": "ok",
-            "matched": True,
-            "matched_by": "GovTribe vendor search",
+        vendor_record = {
+            "source_id": "govtribe_mcp_commercial_intel",
+            "source_name": "GovTribe MCP Commercial Intelligence",
             "external_record_id": "vendor-123",
             "source_url": "https://govtribe.com/vendors/halvik-corp-5grr4",
-            "vendor_record": {
-                "source_id": "govtribe_mcp_commercial_intel",
-                "source_name": "GovTribe MCP Commercial Intelligence",
-                "external_record_id": "vendor-123",
-                "source_url": "https://govtribe.com/vendors/halvik-corp-5grr4",
-                "govtribe_id": "vendor-123",
-                "govtribe_url": "https://govtribe.com/vendors/halvik-corp-5grr4",
-                "name": "Halvik, LLC",
-                "uei": "VMRTJLWMQRH7",
+            "govtribe_id": "vendor-123",
+            "govtribe_url": "https://govtribe.com/vendors/halvik-corp-5grr4",
+            "name": "Halvik, LLC",
+            "dba": "",
+            "division": "",
+            "uei": "VMRTJLWMQRH7",
+            "parent_or_child": "Child",
+            "parent_vendor": {
+                "name": "Halvik Parent Inc.",
+                "uei": "PARENTUEI123",
+                "govtribe_id": "parent-123",
+                "govtribe_url": "https://govtribe.com/vendors/halvik-parent",
+            },
+            "vendor_hierarchy": {
                 "parent_or_child": "Child",
-                "parent_vendor": {
+                "parent": {
                     "name": "Halvik Parent Inc.",
                     "uei": "PARENTUEI123",
                     "govtribe_id": "parent-123",
                     "govtribe_url": "https://govtribe.com/vendors/halvik-parent",
                 },
-                "vendor_hierarchy": {
-                    "parent_or_child": "Child",
-                    "parent": {
-                        "name": "Halvik Parent Inc.",
-                        "uei": "PARENTUEI123",
-                        "govtribe_id": "parent-123",
-                        "govtribe_url": "https://govtribe.com/vendors/halvik-parent",
-                    },
-                },
-                "summary": (
-                    "Halvik provides software engineering, cloud services, cybersecurity, data analytics, "
-                    "and program management support to federal agencies.\n"
-                    "Halvik has secured positions on GSA MAS and the One Acquisition Solution for "
-                    "Integrated Services Small Business (OASIS SB) IDIQ."
-                ),
-                "location": "Vienna, VA, USA",
-                "naics": ["Web Search Portals and All Other Information Services"],
-                "certifications": [
-                    "Self Certified Small Disadvantaged Business",
-                    "For Profit Organization",
-                    "Business or Organization",
-                    "Limited Liability Company",
-                ],
-                "contract_vehicles": ["True", "GSA MAS"],
-                "expired_contract_vehicles": ["One Acquisition Solution for Integrated Services - Small Business (OASIS SB)"],
-                "buyers": ["Department of Veterans Affairs"],
-                "places_of_performance": ["Vienna, VA 22182, USA", "Washington, DC 20001, USA"],
-                "preferred_states": ["VA", "DC"],
-                "set_asides": ["No Set-Aside Used", "Total Small Business", "Competitive 8(a)"],
-                "contract_types": ["Delivery Order", "Definitive Contract"],
-                "pricing_types": ["Firm Fixed Price", "Time and Materials"],
-                "prime_or_sub": ["prime"],
-                "psc_codes": ["D399"],
-                "service_contract_roles": ["prime", "sub"],
-                "contract_vehicle_subcategories": ["Multiple Award Schedule: 54151S"],
-                "teaming_preferences": ["Historical sub-award prime: Large Prime Integrator"],
-                "govtribe_award_profile": {
-                    "top_naics": [
-                        {
-                            "code": "541512",
-                            "label": "Computer Systems Design Services",
-                            "doc_count": 22,
-                            "dollars_obligated": 25000000,
-                        },
-                        {
-                            "code": "541519",
-                            "label": "Other Computer Related Services",
-                            "doc_count": 8,
-                            "dollars_obligated": 5000000,
-                        },
-                    ],
-                    "top_locations": [
-                        {"name": "Vienna, VA 22182, USA", "state": "VA", "doc_count": 12, "dollars_obligated": 22000000},
-                        {"name": "Washington, DC 20001, USA", "state": "DC", "doc_count": 3, "dollars_obligated": 3000000},
-                    ],
-                    "top_set_asides": [
-                        {"name": "No Set-Aside Used", "doc_count": 15, "dollars_obligated": 20000000},
-                        {"name": "Total Small Business", "doc_count": 4, "dollars_obligated": 4000000},
-                    ],
-                    "top_contract_types": [
-                        {"name": "Delivery Order", "doc_count": 17, "dollars_obligated": 21000000},
-                    ],
-                    "top_pricing_types": [
-                        {"name": "Firm Fixed Price", "doc_count": 14, "dollars_obligated": 18000000},
-                    ],
-                    "value_stats": {
-                        "dollars_obligated": {"count": 24, "min": 1000, "max": 10000000, "avg": 1250000, "sum": 30000000},
-                        "ceiling_value": {"count": 10, "min": 50000, "max": 50000000, "avg": 5000000, "sum": 50000000},
-                        "base_and_exercised_options_value": {"count": 12, "min": 25000, "max": 12000000, "avg": 2000000, "sum": 24000000},
-                    },
-                },
-                "govtribe_service_contract_inventory_profile": {
-                    "value_stats": {
-                        "derived_hourly_rate": {"count": 9, "min": 82.5, "max": 156.75, "avg": 118.4},
-                        "total_dollar_amount_invoiced": {"count": 9, "sum": 2450000, "avg": 272222.22},
-                        "hours_invoiced": {"count": 9, "sum": 20692, "avg": 2299.1},
-                    },
-                    "top_roles": [{"name": "prime", "doc_count": 7}, {"name": "sub", "doc_count": 2}],
-                    "top_naics": [{"code": "541513", "label": "Computer Facilities Management Services", "doc_count": 3}],
-                    "top_psc": [{"code": "D399", "label": "IT and Telecom Other IT and Telecommunications", "doc_count": 5}],
-                    "top_states": [{"name": "MD", "doc_count": 4}],
-                },
-                "govtribe_vehicle_subcategory_profile": {
-                    "subcategories": [
-                        {
-                            "name": "Information Technology Professional Services",
-                            "short_name": "54151S",
-                            "display_name": "Multiple Award Schedule: 54151S",
-                            "vehicle": "Multiple Award Schedule",
-                        }
-                    ]
-                },
-                "govtribe_sub_award_profile": {
-                    "top_prime_contractors": [{"name": "Large Prime Integrator"}],
-                    "sub_award_signals": [
-                        "Cloud migration support subaward - Large Prime Integrator - Halvik, LLC - 2024-02-01"
-                    ],
-                },
-                "award_signals": ["VA Modernization Support - VA-1 - Department of Veterans Affairs"],
-                "keywords": [
-                    "True",
-                    "For Profit Organization",
-                    "Web Search Portals and All Other Information Services",
-                    "cybersecurity",
-                    "GSA MAS",
-                    "Department of Veterans Affairs",
-                ],
-                "raw_record": {},
             },
+            "summary": (
+                "Halvik provides software engineering, cloud services, cybersecurity, data analytics, "
+                "and program management support to federal agencies.\n"
+                "Halvik has secured positions on GSA MAS and the One Acquisition Solution for "
+                "Integrated Services Small Business (OASIS SB) IDIQ."
+            ),
+            "location": "Vienna, VA, USA",
+            "naics": ["Web Search Portals and All Other Information Services"],
+            "certifications": [
+                "Self Certified Small Disadvantaged Business",
+                "For Profit Organization",
+                "Business or Organization",
+                "Limited Liability Company",
+            ],
+            "contract_vehicles": ["True", "GSA MAS"],
+            "expired_contract_vehicles": ["One Acquisition Solution for Integrated Services - Small Business (OASIS SB)"],
+            "buyers": ["Department of Veterans Affairs"],
+            "places_of_performance": ["Vienna, VA 22182, USA", "Washington, DC 20001, USA"],
+            "preferred_states": ["VA", "DC"],
+            "set_asides": ["No Set-Aside Used", "Total Small Business", "Competitive 8(a)"],
+            "contract_types": ["Delivery Order", "Definitive Contract"],
+            "pricing_types": ["Firm Fixed Price", "Time and Materials"],
+            "prime_or_sub": ["prime"],
+            "psc_codes": ["D399"],
+            "service_contract_roles": ["prime", "sub"],
+            "contract_vehicle_subcategories": ["Multiple Award Schedule: 54151S"],
+            "teaming_preferences": ["Historical sub-award prime: Large Prime Integrator"],
+            "govtribe_award_profile": {
+                "top_naics": [
+                    {
+                        "code": "541512",
+                        "label": "Computer Systems Design Services",
+                        "doc_count": 22,
+                        "dollars_obligated": 25000000,
+                    },
+                    {
+                        "code": "541519",
+                        "label": "Other Computer Related Services",
+                        "doc_count": 8,
+                        "dollars_obligated": 5000000,
+                    },
+                ],
+                "top_locations": [
+                    {"name": "Vienna, VA 22182, USA", "state": "VA", "doc_count": 12, "dollars_obligated": 22000000},
+                    {"name": "Washington, DC 20001, USA", "state": "DC", "doc_count": 3, "dollars_obligated": 3000000},
+                ],
+                "top_set_asides": [
+                    {"name": "No Set-Aside Used", "doc_count": 15, "dollars_obligated": 20000000},
+                    {"name": "Total Small Business", "doc_count": 4, "dollars_obligated": 4000000},
+                ],
+                "top_contract_types": [
+                    {"name": "Delivery Order", "doc_count": 17, "dollars_obligated": 21000000},
+                ],
+                "top_pricing_types": [
+                    {"name": "Firm Fixed Price", "doc_count": 14, "dollars_obligated": 18000000},
+                ],
+                "value_stats": {
+                    "dollars_obligated": {"count": 24, "min": 1000, "max": 10000000, "avg": 1250000, "sum": 30000000},
+                    "ceiling_value": {"count": 10, "min": 50000, "max": 50000000, "avg": 5000000, "sum": 50000000},
+                    "base_and_exercised_options_value": {"count": 12, "min": 25000, "max": 12000000, "avg": 2000000, "sum": 24000000},
+                },
+            },
+            "govtribe_service_contract_inventory_profile": {
+                "value_stats": {
+                    "derived_hourly_rate": {"count": 9, "min": 82.5, "max": 156.75, "avg": 118.4},
+                    "total_dollar_amount_invoiced": {"count": 9, "sum": 2450000, "avg": 272222.22},
+                    "hours_invoiced": {"count": 9, "sum": 20692, "avg": 2299.1},
+                },
+                "top_roles": [{"name": "prime", "doc_count": 7}, {"name": "sub", "doc_count": 2}],
+                "top_naics": [{"code": "541513", "label": "Computer Facilities Management Services", "doc_count": 3}],
+                "top_psc": [{"code": "D399", "label": "IT and Telecom Other IT and Telecommunications", "doc_count": 5}],
+                "top_states": [{"name": "MD", "doc_count": 4}],
+            },
+            "govtribe_vehicle_subcategory_profile": {
+                "subcategories": [
+                    {
+                        "name": "Information Technology Professional Services",
+                        "short_name": "54151S",
+                        "display_name": "Multiple Award Schedule: 54151S",
+                        "vehicle": "Multiple Award Schedule",
+                    }
+                ]
+            },
+            "govtribe_sub_award_profile": {
+                "top_prime_contractors": [{"name": "Large Prime Integrator"}],
+                "sub_award_signals": [
+                    "Cloud migration support subaward - Large Prime Integrator - Halvik, LLC - 2024-02-01"
+                ],
+            },
+            "award_signals": ["VA Modernization Support - VA-1 - Department of Veterans Affairs"],
+            "keywords": [
+                "True",
+                "For Profit Organization",
+                "Web Search Portals and All Other Information Services",
+                "cybersecurity",
+                "GSA MAS",
+                "Department of Veterans Affairs",
+            ],
+            "raw_record": {},
+        }
+        vendor_record.update(self.vendor_record)
+        vendor_record.update(self.vendor_record_by_lookup.get(lookup, {}))
+        return {
+            "status": "ok",
+            "matched": True,
+            "matched_by": "GovTribe vendor search",
+            "external_record_id": vendor_record.get("external_record_id", ""),
+            "source_url": vendor_record.get("source_url", ""),
+            "vendor_record": vendor_record,
             "notes": ["GovTribe MCP tools used: Search_Vendors"],
             "tool_name": "Search_Vendors",
         }
@@ -226,6 +242,7 @@ def main() -> int:
             naics_status="confirmed",
             explicit_name="",
             explicit_summary="",
+            provider=FakeGovTribeBootstrapProvider(status="not_configured"),
         )
 
         vendor_profile = load_json(workspace / "procurement" / "vendor-profile.json", default={})
@@ -269,6 +286,7 @@ def main() -> int:
             naics_status="confirmed",
             explicit_name="Halvik, LLC",
             explicit_summary="Halvik supports federal cybersecurity programs.",
+            provider=FakeGovTribeBootstrapProvider(status="not_configured"),
         )
 
         nav_vendor_profile = load_json(nav_workspace / "procurement" / "vendor-profile.json", default={})
@@ -290,6 +308,195 @@ def main() -> int:
         assert "cybersecurity" in nav_preferences["soft_preferences"]["positive_keywords"], nav_preferences
         for low_signal_term in ("about us", "logistics", "digital services"):
             assert low_signal_term not in nav_payload, nav_payload
+
+        unavailable_workspace = root / "website-govtribe-unavailable"
+        unavailable_provider = FakeGovTribeBootstrapProvider(status="not_configured")
+        unavailable_result = seed_workspace(
+            bundle_root=bundle_root,
+            workspace=unavailable_workspace,
+            company_url=(site / "index.html").resolve().as_uri(),
+            user_naics=[],
+            naics_status="confirmed",
+            explicit_name="",
+            explicit_summary="",
+            provider=unavailable_provider,
+        )
+        unavailable_vendor_profile = load_json(unavailable_workspace / "procurement" / "vendor-profile.json", default={})
+        assert unavailable_result["status"] == "OK", unavailable_result
+        assert unavailable_result["bootstrap_source"] == "website", unavailable_result
+        assert unavailable_result["govtribe_status"] == "GOVTRIBE_NOT_CONFIGURED", unavailable_result
+        assert unavailable_provider.lookups == ["Acme Federal"], unavailable_provider.lookups
+        assert unavailable_vendor_profile["bootstrap"]["method"] == "company_url_bootstrap_script_v1", unavailable_vendor_profile
+
+        hybrid_site = root / "hybrid-site"
+        hybrid_workspace = root / "hybrid-workspace"
+        write(
+            hybrid_site / "index.html",
+            """
+            <html>
+              <head>
+                <title>Halvik | Federal Technology Delivery</title>
+                <meta name="description" content="Halvik supports federal software engineering, cloud modernization, and cybersecurity programs." />
+              </head>
+              <body>
+                <h1>Federal Technology Delivery</h1>
+                <p>We help federal agencies modernize secure mission applications and data platforms.</p>
+              </body>
+            </html>
+            """,
+        )
+        hybrid_provider = FakeGovTribeBootstrapProvider()
+        hybrid_result = seed_workspace(
+            bundle_root=bundle_root,
+            workspace=hybrid_workspace,
+            company_url=(hybrid_site / "index.html").resolve().as_uri(),
+            user_naics=[],
+            naics_status="confirmed",
+            explicit_name="",
+            explicit_summary="",
+            provider=hybrid_provider,
+        )
+        hybrid_vendor_profile = load_json(hybrid_workspace / "procurement" / "vendor-profile.json", default={})
+        hybrid_facts = hybrid_vendor_profile["provenance"]["facts"]
+        hybrid_url = (hybrid_site / "index.html").resolve().as_uri()
+        assert hybrid_result["status"] == "OK", hybrid_result
+        assert hybrid_result["bootstrap_source"] == "govtribe", hybrid_result
+        assert hybrid_result["govtribe_inferred_lookup"] == "Halvik", hybrid_result
+        assert hybrid_result["govtribe_match_confidence"] == "near_exact_name", hybrid_result
+        assert hybrid_provider.lookups == ["Halvik"], hybrid_provider.lookups
+        assert hybrid_vendor_profile["bootstrap"]["method"] == "govtribe_vendor_bootstrap_script_v1", hybrid_vendor_profile
+        assert hybrid_vendor_profile["bootstrap"]["inputs"]["plain_language_summary"] == "", hybrid_vendor_profile
+        assert hybrid_vendor_profile["company"]["name"] == "Halvik", hybrid_vendor_profile["company"]
+        assert hybrid_vendor_profile["company"]["website"] == hybrid_url, hybrid_vendor_profile["company"]
+        assert hybrid_vendor_profile["company"]["summary"].startswith("Halvik supports federal software"), hybrid_vendor_profile["company"]
+        assert hybrid_vendor_profile["company"]["uei"] == "VMRTJLWMQRH7", hybrid_vendor_profile["company"]
+        assert any(
+            item.get("field") == "company.website"
+            and item.get("source") == hybrid_url
+            and item.get("provenance") == "user_confirmed"
+            for item in hybrid_facts
+        ), hybrid_facts
+        assert any(
+            item.get("field") == "company.name"
+            and item.get("source") == hybrid_url
+            and item.get("provenance") == "website_inferred"
+            for item in hybrid_facts
+        ), hybrid_facts
+        assert any(
+            item.get("field") == "company.summary"
+            and item.get("source") == hybrid_url
+            and item.get("provenance") == "website_inferred"
+            for item in hybrid_facts
+        ), hybrid_facts
+        assert not any(
+            item.get("field") in {"company.name", "company.summary"}
+            and item.get("provenance") == "govtribe_subscription_derived"
+            for item in hybrid_facts
+        ), hybrid_facts
+        assert any(
+            item.get("field") == "company.uei" and item.get("provenance") == "govtribe_subscription_derived"
+            for item in hybrid_facts
+        ), hybrid_facts
+
+        no_match_workspace = root / "website-govtribe-no-match"
+        no_match_provider = FakeGovTribeBootstrapProvider(status="no_match")
+        no_match_result = seed_workspace(
+            bundle_root=bundle_root,
+            workspace=no_match_workspace,
+            company_url=(hybrid_site / "index.html").resolve().as_uri(),
+            user_naics=[],
+            naics_status="confirmed",
+            explicit_name="",
+            explicit_summary="",
+            provider=no_match_provider,
+        )
+        no_match_vendor_profile = load_json(no_match_workspace / "procurement" / "vendor-profile.json", default={})
+        assert no_match_result["status"] == "OK", no_match_result
+        assert no_match_result["bootstrap_source"] == "website", no_match_result
+        assert no_match_result["govtribe_status"] == "GOVTRIBE_NO_MATCH", no_match_result
+        assert no_match_provider.lookups == ["Halvik"], no_match_provider.lookups
+        assert no_match_vendor_profile["bootstrap"]["method"] == "company_url_bootstrap_script_v1", no_match_vendor_profile
+
+        ais_site = root / "ais-site"
+        write(
+            ais_site / "index.html",
+            """
+            <html>
+              <head>
+                <title>AIS | Digital Services</title>
+                <meta name="description" content="AIS delivers secure digital services for public sector agencies." />
+              </head>
+              <body><h1>Digital Services</h1></body>
+            </html>
+            """,
+        )
+        ais_record = {
+            "external_record_id": "vendor-ais",
+            "source_url": "https://govtribe.com/vendors/applied-information-sciences-abc12",
+            "govtribe_id": "vendor-ais",
+            "govtribe_url": "https://govtribe.com/vendors/applied-information-sciences-abc12",
+            "name": "Applied Information Sciences",
+            "uei": "AISUEI123456",
+            "parent_vendor": {},
+            "vendor_hierarchy": {},
+        }
+        ambiguous_workspace = root / "ambiguous-ais-workspace"
+        ambiguous_provider = FakeGovTribeBootstrapProvider(vendor_record=ais_record)
+        ambiguous_result = seed_workspace(
+            bundle_root=bundle_root,
+            workspace=ambiguous_workspace,
+            company_url=(ais_site / "index.html").resolve().as_uri(),
+            user_naics=[],
+            naics_status="confirmed",
+            explicit_name="",
+            explicit_summary="",
+            provider=ambiguous_provider,
+        )
+        ambiguous_vendor_profile = load_json(ambiguous_workspace / "procurement" / "vendor-profile.json", default={})
+        assert ambiguous_result["status"] == "OK", ambiguous_result
+        assert ambiguous_result["bootstrap_source"] == "website", ambiguous_result
+        assert ambiguous_result["govtribe_status"] == "GOVTRIBE_AMBIGUOUS_MATCH", ambiguous_result
+        assert ambiguous_result["govtribe_ambiguous_candidate"]["name"] == "Applied Information Sciences", ambiguous_result
+        assert ambiguous_provider.lookups == ["AIS"], ambiguous_provider.lookups
+        assert ambiguous_vendor_profile["bootstrap"]["method"] == "company_url_bootstrap_script_v1", ambiguous_vendor_profile
+        assert "uei" not in ambiguous_vendor_profile["company"], ambiguous_vendor_profile["company"]
+
+        parenthetical_site = root / "parenthetical-site"
+        parenthetical_workspace = root / "parenthetical-workspace"
+        write(
+            parenthetical_site / "index.html",
+            """
+            <html>
+              <head>
+                <title>AIS (Applied Information Sciences) | Digital Services</title>
+                <meta name="description" content="Applied Information Sciences delivers secure application modernization for federal agencies." />
+              </head>
+              <body><h1>Digital Services</h1></body>
+            </html>
+            """,
+        )
+        parenthetical_provider = FakeGovTribeBootstrapProvider(vendor_record=ais_record)
+        parenthetical_result = seed_workspace(
+            bundle_root=bundle_root,
+            workspace=parenthetical_workspace,
+            company_url=(parenthetical_site / "index.html").resolve().as_uri(),
+            user_naics=[],
+            naics_status="confirmed",
+            explicit_name="",
+            explicit_summary="",
+            provider=parenthetical_provider,
+        )
+        parenthetical_vendor_profile = load_json(parenthetical_workspace / "procurement" / "vendor-profile.json", default={})
+        assert parenthetical_result["status"] == "OK", parenthetical_result
+        assert parenthetical_result["bootstrap_source"] == "govtribe", parenthetical_result
+        assert parenthetical_result["govtribe_inferred_lookup"] == "Applied Information Sciences", parenthetical_result
+        assert parenthetical_provider.lookups == [
+            "AIS (Applied Information Sciences)",
+            "Applied Information Sciences",
+        ], parenthetical_provider.lookups
+        assert parenthetical_vendor_profile["company"]["name"] == "AIS (Applied Information Sciences)", parenthetical_vendor_profile["company"]
+        assert parenthetical_vendor_profile["company"]["website"] == (parenthetical_site / "index.html").resolve().as_uri(), parenthetical_vendor_profile["company"]
+        assert parenthetical_vendor_profile["company"]["uei"] == "AISUEI123456", parenthetical_vendor_profile["company"]
 
         govtribe_workspace = root / "govtribe-workspace"
         fake_provider = FakeGovTribeBootstrapProvider()

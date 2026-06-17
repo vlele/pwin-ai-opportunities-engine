@@ -2809,6 +2809,7 @@ def _normalize_vendor_record(record: dict[str, Any], *, source_config: dict[str,
     source_url = _record_url(record, default_url)
     name = _first_text(record, "name", "vendor_name", "recipient_name", "awardee") or "Vendor"
     dba = _first_text(record, "dba", "doing_business_as")
+    division = _first_text(record, "division", "division_name", "vendor_division")
     summary = _first_text(record, "govtribe_ai_summary", "summary", "description")
     naics_items = _record_naics_items(record)
     naics_codes = [item["code"] for item in naics_items if item.get("code")]
@@ -2844,6 +2845,7 @@ def _normalize_vendor_record(record: dict[str, Any], *, source_config: dict[str,
         "govtribe_url": source_url,
         "name": name,
         "dba": dba,
+        "division": division,
         "uei": _record_uei(record),
         "summary": summary,
         "location": _vendor_record_location(record),
@@ -2881,7 +2883,7 @@ def _select_vendor_record(records: list[dict[str, Any]], lookup: str) -> dict[st
                 return record
     lookup_name = _normalize_match_text(_vendor_lookup_query(lookup))
     for record in records:
-        for value in (_first_text(record, "name"), _first_text(record, "dba")):
+        for value in (_first_text(record, "name"), _first_text(record, "dba"), _first_text(record, "division")):
             if lookup_name and _normalize_match_text(value) == lookup_name:
                 return record
     return records[0]
