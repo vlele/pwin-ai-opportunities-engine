@@ -179,17 +179,17 @@ class FakeGovTribeVendorClient:
         self._records = records if records is not None else [
             {
                 "govtribe_id": "vendor-123",
-                "govtribe_url": "https://govtribe.com/vendors/halvik-corp-5grr4",
-                "uei": "ABC123DEF456",
-                "name": "Halvik, LLC",
+                "govtribe_url": "https://govtribe.com/vendors/demogov-services-demo1",
+                "uei": "DEMOUEI12345",
+                "name": "DemoGov Services, LLC",
                 "parent_or_child": "Child",
                 "parent": {
                     "govtribe_id": "parent-123",
-                    "uei": "PARENTUEI123",
-                    "name": "Halvik Parent Inc.",
-                    "govtribe_url": "https://govtribe.com/vendors/halvik-parent",
+                    "uei": "DEMOPARENT123",
+                    "name": "DemoGov Holdings Inc.",
+                    "govtribe_url": "https://govtribe.com/vendors/demogov-holdings",
                 },
-                "govtribe_ai_summary": "Halvik provides federal IT modernization and cybersecurity services.",
+                "govtribe_ai_summary": "DemoGov provides federal IT modernization and cybersecurity services.",
                 "location": {"city": "Vienna", "state": "VA", "country": "USA"},
                 "sba_certifications": ["SBA Certified 8A Program Participant"],
                 "business_types": ["Service Disabled Veteran Owned Business", "For Profit Organization"],
@@ -677,7 +677,7 @@ class FakeGovTribeVendorIntelClient(FakeGovTribeVendorClient):
                             "name": "Cloud migration support subaward",
                             "award_date": "2024-02-01",
                             "prime_contractor": {"name": "Large Prime Integrator"},
-                            "sub_contractor": {"name": "Halvik, LLC", "uei": "ABC123DEF456"},
+                            "sub_contractor": {"name": "DemoGov Services, LLC", "uei": "DEMOUEI12345"},
                             "funding_federal_agency": {"name": "Department of Treasury"},
                         }
                     ],
@@ -698,7 +698,7 @@ class FakeGovTribeVendorRetryClient(FakeGovTribeVendorClient):
     def call_tool(self, name: str, arguments: dict[str, object] | None = None) -> dict[str, object]:
         args = arguments or {}
         self.calls.append((name, args))
-        if args.get("query") == "halvik corp":
+        if args.get("query") == "demogov services":
             return {"structuredContent": {"records": []}}
         return {"structuredContent": {"records": self._records}}
 
@@ -872,7 +872,7 @@ def main() -> int:
         missing_retrieval = provider.search_scan_opportunities(vendor_profile={}, preferences={})
         if missing_retrieval.get("status") != "not_configured":
             failures.append("govtribe_retrieval_missing_key_status")
-        missing_vendor = provider.resolve_vendor_profile(lookup="Halvik, LLC")
+        missing_vendor = provider.resolve_vendor_profile(lookup="DemoGov Services, LLC")
         if missing_vendor.get("status") != "not_configured":
             failures.append("govtribe_vendor_missing_key_status")
 
@@ -895,7 +895,7 @@ def main() -> int:
         )
         if no_tool_retrieval.get("status") != "tool_contract_unavailable":
             failures.append("govtribe_retrieval_no_tool_contract_status")
-        no_tool_vendor = provider.resolve_vendor_profile(lookup="Halvik, LLC")
+        no_tool_vendor = provider.resolve_vendor_profile(lookup="DemoGov Services, LLC")
         if no_tool_vendor.get("status") != "tool_contract_unavailable":
             failures.append("govtribe_vendor_no_tool_contract_status")
 
@@ -909,11 +909,11 @@ def main() -> int:
             },
             client=vendor_client,  # type: ignore[arg-type]
         )
-        vendor_result = provider.resolve_vendor_profile(lookup="ABC123DEF456")
+        vendor_result = provider.resolve_vendor_profile(lookup="DEMOUEI12345")
         if vendor_result.get("status") != "ok" or not vendor_result.get("matched"):
             failures.append("govtribe_vendor_uei_status")
         vendor_record = vendor_result.get("vendor_record", {})
-        if not isinstance(vendor_record, dict) or vendor_record.get("uei") != "ABC123DEF456":
+        if not isinstance(vendor_record, dict) or vendor_record.get("uei") != "DEMOUEI12345":
             failures.append("govtribe_vendor_uei_normalized")
         if isinstance(vendor_record, dict) and "541512" not in vendor_record.get("naics", []):
             failures.append("govtribe_vendor_naics_normalized")
@@ -926,7 +926,7 @@ def main() -> int:
             failures.append("govtribe_vendor_certifications_normalized")
         if isinstance(vendor_record, dict) and vendor_record.get("parent_or_child") != "Child":
             failures.append("govtribe_vendor_parent_or_child_normalized")
-        if isinstance(vendor_record, dict) and vendor_record.get("parent_vendor", {}).get("name") != "Halvik Parent Inc.":
+        if isinstance(vendor_record, dict) and vendor_record.get("parent_vendor", {}).get("name") != "DemoGov Holdings Inc.":
             failures.append("govtribe_vendor_parent_normalized")
         if isinstance(vendor_record, dict) and "GSA MAS" not in vendor_record.get("contract_vehicles", []):
             failures.append("govtribe_vendor_vehicle_normalized")
@@ -938,7 +938,7 @@ def main() -> int:
         uei_args = vendor_client.calls[-1][1]
         if vendor_client.calls[-1][0] != "Search_Vendors":
             failures.append("govtribe_vendor_typed_tool")
-        if uei_args.get("uei_values") != ["ABC123DEF456"]:
+        if uei_args.get("uei_values") != ["DEMOUEI12345"]:
             failures.append("govtribe_vendor_uei_filter")
         if uei_args.get("search_mode") != "keyword":
             failures.append("govtribe_vendor_keyword_mode")
@@ -950,18 +950,18 @@ def main() -> int:
         if isinstance(fields, list) and ("parent_or_child" not in fields or "parent" not in fields):
             failures.append("govtribe_vendor_hierarchy_fields_to_return")
 
-        name_result = provider.resolve_vendor_profile(lookup="Halvik, LLC")
+        name_result = provider.resolve_vendor_profile(lookup="DemoGov Services, LLC")
         if name_result.get("status") != "ok":
             failures.append("govtribe_vendor_name_status")
         name_args = vendor_client.calls[-1][1]
-        if name_args.get("query") != "Halvik, LLC":
+        if name_args.get("query") != "DemoGov Services, LLC":
             failures.append("govtribe_vendor_name_query")
 
-        url_result = provider.resolve_vendor_profile(lookup="https://govtribe.com/vendors/halvik-corp-5grr4")
+        url_result = provider.resolve_vendor_profile(lookup="https://govtribe.com/vendors/demogov-services-demo1")
         if url_result.get("status") != "ok":
             failures.append("govtribe_vendor_url_status")
         url_args = vendor_client.calls[-1][1]
-        if url_args.get("query") != "halvik corp":
+        if url_args.get("query") != "demogov services":
             failures.append("govtribe_vendor_url_query")
         if "govtribe_ids" in url_args:
             failures.append("govtribe_vendor_url_no_slug_id_filter")
@@ -975,11 +975,11 @@ def main() -> int:
             },
             client=retry_client,  # type: ignore[arg-type]
         )
-        retry_result = retry_provider.resolve_vendor_profile(lookup="https://govtribe.com/vendors/halvik-corp-5grr4")
+        retry_result = retry_provider.resolve_vendor_profile(lookup="https://govtribe.com/vendors/demogov-services-demo1")
         if retry_result.get("status") != "ok":
             failures.append("govtribe_vendor_url_retry_status")
         retry_queries = [call[1].get("query") for call in retry_client.calls]
-        if retry_queries != ["halvik corp", "halvik corp 5grr4"]:
+        if retry_queries != ["demogov services", "demogov services demo1"]:
             failures.append("govtribe_vendor_url_retry_queries")
 
         no_match_provider = GovTribeMCPCommercialIntelProvider(
@@ -999,7 +999,7 @@ def main() -> int:
             },
             client=intel_client,  # type: ignore[arg-type]
         )
-        intel_result = intel_provider.resolve_vendor_profile(lookup="ABC123DEF456")
+        intel_result = intel_provider.resolve_vendor_profile(lookup="DEMOUEI12345")
         intel_record = intel_result.get("vendor_record", {})
         if intel_result.get("status") != "ok" or not isinstance(intel_record, dict):
             failures.append("govtribe_vendor_intel_status")
@@ -1067,7 +1067,7 @@ def main() -> int:
         sci_args = intel_call_args.get("Search_Service_Contract_Inventory", {})
         subcategory_args = intel_call_args.get("Search_FCV_Subcategories", {})
         sub_award_args = intel_call_args.get("Search_Federal_Contract_Sub_Awards", {})
-        if award_args.get("vendor_ids") != ["ABC123DEF456", "vendor-123"]:
+        if award_args.get("vendor_ids") != ["DEMOUEI12345", "vendor-123"]:
             failures.append("govtribe_vendor_award_aggregation_vendor_filter")
         if award_args.get("per_page") != 0:
             failures.append("govtribe_vendor_award_aggregation_per_page_zero")
@@ -1085,11 +1085,11 @@ def main() -> int:
         ):
             if expected_aggregation not in award_args.get("aggregations", []):
                 failures.append(f"govtribe_vendor_award_aggregation_requested_{expected_aggregation}")
-        if vehicle_args.get("vendor_ids") != ["ABC123DEF456", "vendor-123"]:
+        if vehicle_args.get("vendor_ids") != ["DEMOUEI12345", "vendor-123"]:
             failures.append("govtribe_vendor_vehicle_vendor_filter")
         if vehicle_args.get("per_page") != 15:
             failures.append("govtribe_vendor_vehicle_per_page")
-        if sci_args.get("vendor_ids") != ["ABC123DEF456", "vendor-123"]:
+        if sci_args.get("vendor_ids") != ["DEMOUEI12345", "vendor-123"]:
             failures.append("govtribe_vendor_sci_vendor_filter")
         if sci_args.get("per_page") != 0:
             failures.append("govtribe_vendor_sci_per_page_zero")
@@ -1102,11 +1102,11 @@ def main() -> int:
         ):
             if expected_aggregation not in sci_args.get("aggregations", []):
                 failures.append(f"govtribe_vendor_sci_aggregation_requested_{expected_aggregation}")
-        if subcategory_args.get("vendor_ids") != ["ABC123DEF456", "vendor-123"]:
+        if subcategory_args.get("vendor_ids") != ["DEMOUEI12345", "vendor-123"]:
             failures.append("govtribe_vendor_fcv_subcategory_vendor_filter")
         if subcategory_args.get("per_page") != 20:
             failures.append("govtribe_vendor_fcv_subcategory_per_page")
-        if sub_award_args.get("vendor_ids") != ["ABC123DEF456", "vendor-123"]:
+        if sub_award_args.get("vendor_ids") != ["DEMOUEI12345", "vendor-123"]:
             failures.append("govtribe_vendor_sub_award_vendor_filter")
         if sub_award_args.get("per_page") != 10:
             failures.append("govtribe_vendor_sub_award_per_page")
@@ -1132,7 +1132,7 @@ def main() -> int:
             },
             client=limited_client,  # type: ignore[arg-type]
         )
-        limited_result = limited_provider.resolve_vendor_profile(lookup="ABC123DEF456")
+        limited_result = limited_provider.resolve_vendor_profile(lookup="DEMOUEI12345")
         if limited_result.get("status") != "ok":
             failures.append("govtribe_vendor_limited_aggregation_status")
         limited_award_args = {name: args for name, args in limited_client.calls}.get("Search_Federal_Contract_Awards", {})
@@ -1194,7 +1194,7 @@ def main() -> int:
 
         polluted_queries = _scan_retrieval_queries(
             {
-                "company": {"name": "Halvik, LLC", "summary": "Federal IT services contractor."},
+                "company": {"name": "DemoGov Services, LLC", "summary": "Federal IT services contractor."},
                 "core_competencies": ["about us", "cybersecurity"],
                 "other_taxonomy_tags": {"keywords": ["logistics"]},
                 "fit_narrative": "Prioritize cybersecurity.",
@@ -1308,13 +1308,13 @@ def main() -> int:
         )
         structured_error = structured_error_provider.enrich_scan(
             record={
-                "title": "Halvik Federal IT Services",
+                "title": "DemoGov Federal IT Services",
                 "buyer": "Department of Homeland Security",
-                "solicitation_number": "HALVIK-2026-001",
+                "solicitation_number": "DEMOGOV-2026-001",
                 "summary": "IT services support.",
             },
             hydrated_text="IT services support.",
-            vendor_profile={"company": {"name": "Halvik"}},
+            vendor_profile={"company": {"name": "DemoGov"}},
             preferences={},
         )
         structured_enrichment = structured_error.get("enrichment", {})
@@ -1339,7 +1339,7 @@ def main() -> int:
         )
         text_error_retrieval = text_error_provider.search_scan_opportunities(
             vendor_profile={
-                "company": {"name": "Halvik", "summary": "Federal IT services contractor."},
+                "company": {"name": "DemoGov", "summary": "Federal IT services contractor."},
                 "core_competencies": ["cybersecurity"],
                 "naics": {"confirmed": ["541512"]},
             },

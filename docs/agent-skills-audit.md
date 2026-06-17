@@ -58,7 +58,7 @@ Negative near-miss coverage:
 Required local checks:
 
 ```bash
-python3 /Users/jhariani/.codex/skills/.system/skill-creator/scripts/quick_validate.py .
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" .
 python3 scripts/tests/run_skill_contract_tests.py
 python3 scripts/tests/run_bootstrap_tests.py
 python3 scripts/tests/run_commercial_intel_tests.py

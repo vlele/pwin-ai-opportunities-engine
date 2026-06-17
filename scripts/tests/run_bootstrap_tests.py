@@ -48,33 +48,33 @@ class FakeGovTribeBootstrapProvider:
             "source_id": "govtribe_mcp_commercial_intel",
             "source_name": "GovTribe MCP Commercial Intelligence",
             "external_record_id": "vendor-123",
-            "source_url": "https://govtribe.com/vendors/halvik-corp-5grr4",
+            "source_url": "https://govtribe.com/vendors/demogov-services-demo1",
             "govtribe_id": "vendor-123",
-            "govtribe_url": "https://govtribe.com/vendors/halvik-corp-5grr4",
-            "name": "Halvik, LLC",
+            "govtribe_url": "https://govtribe.com/vendors/demogov-services-demo1",
+            "name": "DemoGov Services, LLC",
             "dba": "",
             "division": "",
-            "uei": "VMRTJLWMQRH7",
+            "uei": "DEMOUEI12345",
             "parent_or_child": "Child",
             "parent_vendor": {
-                "name": "Halvik Parent Inc.",
-                "uei": "PARENTUEI123",
+                "name": "DemoGov Holdings Inc.",
+                "uei": "DEMOPARENT123",
                 "govtribe_id": "parent-123",
-                "govtribe_url": "https://govtribe.com/vendors/halvik-parent",
+                "govtribe_url": "https://govtribe.com/vendors/demogov-holdings",
             },
             "vendor_hierarchy": {
                 "parent_or_child": "Child",
                 "parent": {
-                    "name": "Halvik Parent Inc.",
-                    "uei": "PARENTUEI123",
+                    "name": "DemoGov Holdings Inc.",
+                    "uei": "DEMOPARENT123",
                     "govtribe_id": "parent-123",
-                    "govtribe_url": "https://govtribe.com/vendors/halvik-parent",
+                    "govtribe_url": "https://govtribe.com/vendors/demogov-holdings",
                 },
             },
             "summary": (
-                "Halvik provides software engineering, cloud services, cybersecurity, data analytics, "
+                "DemoGov provides software engineering, cloud services, cybersecurity, data analytics, "
                 "and program management support to federal agencies.\n"
-                "Halvik has secured positions on GSA MAS and the One Acquisition Solution for "
+                "DemoGov has secured positions on GSA MAS and the One Acquisition Solution for "
                 "Integrated Services Small Business (OASIS SB) IDIQ."
             ),
             "location": "Vienna, VA, USA",
@@ -157,7 +157,7 @@ class FakeGovTribeBootstrapProvider:
             "govtribe_sub_award_profile": {
                 "top_prime_contractors": [{"name": "Large Prime Integrator"}],
                 "sub_award_signals": [
-                    "Cloud migration support subaward - Large Prime Integrator - Halvik, LLC - 2024-02-01"
+                    "Cloud migration support subaward - Large Prime Integrator - DemoGov Services, LLC - 2024-02-01"
                 ],
             },
             "award_signals": ["VA Modernization Support - VA-1 - Department of Veterans Affairs"],
@@ -265,7 +265,7 @@ def main() -> int:
             """
             <html>
               <head>
-                <title>Halvik, LLC | About Us</title>
+                <title>DemoGov Services, LLC | About Us</title>
               </head>
               <body>
                 <h1>About Us</h1>
@@ -284,8 +284,8 @@ def main() -> int:
             company_url=(nav_site / "index.html").resolve().as_uri(),
             user_naics=["519290"],
             naics_status="confirmed",
-            explicit_name="Halvik, LLC",
-            explicit_summary="Halvik supports federal cybersecurity programs.",
+            explicit_name="DemoGov Services, LLC",
+            explicit_summary="DemoGov supports federal cybersecurity programs.",
             provider=FakeGovTribeBootstrapProvider(status="not_configured"),
         )
 
@@ -335,8 +335,8 @@ def main() -> int:
             """
             <html>
               <head>
-                <title>Halvik | Federal Technology Delivery</title>
-                <meta name="description" content="Halvik supports federal software engineering, cloud modernization, and cybersecurity programs." />
+                <title>DemoGov Services | Federal Technology Delivery</title>
+                <meta name="description" content="DemoGov Services supports federal software engineering, cloud modernization, and cybersecurity programs." />
               </head>
               <body>
                 <h1>Federal Technology Delivery</h1>
@@ -361,15 +361,15 @@ def main() -> int:
         hybrid_url = (hybrid_site / "index.html").resolve().as_uri()
         assert hybrid_result["status"] == "OK", hybrid_result
         assert hybrid_result["bootstrap_source"] == "govtribe", hybrid_result
-        assert hybrid_result["govtribe_inferred_lookup"] == "Halvik", hybrid_result
+        assert hybrid_result["govtribe_inferred_lookup"] == "DemoGov Services", hybrid_result
         assert hybrid_result["govtribe_match_confidence"] == "near_exact_name", hybrid_result
-        assert hybrid_provider.lookups == ["Halvik"], hybrid_provider.lookups
+        assert hybrid_provider.lookups == ["DemoGov Services"], hybrid_provider.lookups
         assert hybrid_vendor_profile["bootstrap"]["method"] == "govtribe_vendor_bootstrap_script_v1", hybrid_vendor_profile
         assert hybrid_vendor_profile["bootstrap"]["inputs"]["plain_language_summary"] == "", hybrid_vendor_profile
-        assert hybrid_vendor_profile["company"]["name"] == "Halvik", hybrid_vendor_profile["company"]
+        assert hybrid_vendor_profile["company"]["name"] == "DemoGov Services", hybrid_vendor_profile["company"]
         assert hybrid_vendor_profile["company"]["website"] == hybrid_url, hybrid_vendor_profile["company"]
-        assert hybrid_vendor_profile["company"]["summary"].startswith("Halvik supports federal software"), hybrid_vendor_profile["company"]
-        assert hybrid_vendor_profile["company"]["uei"] == "VMRTJLWMQRH7", hybrid_vendor_profile["company"]
+        assert hybrid_vendor_profile["company"]["summary"].startswith("DemoGov Services supports federal software"), hybrid_vendor_profile["company"]
+        assert hybrid_vendor_profile["company"]["uei"] == "DEMOUEI12345", hybrid_vendor_profile["company"]
         assert any(
             item.get("field") == "company.website"
             and item.get("source") == hybrid_url
@@ -414,7 +414,7 @@ def main() -> int:
         assert no_match_result["status"] == "OK", no_match_result
         assert no_match_result["bootstrap_source"] == "website", no_match_result
         assert no_match_result["govtribe_status"] == "GOVTRIBE_NO_MATCH", no_match_result
-        assert no_match_provider.lookups == ["Halvik"], no_match_provider.lookups
+        assert no_match_provider.lookups == ["DemoGov Services"], no_match_provider.lookups
         assert no_match_vendor_profile["bootstrap"]["method"] == "company_url_bootstrap_script_v1", no_match_vendor_profile
 
         ais_site = root / "ais-site"
@@ -423,8 +423,8 @@ def main() -> int:
             """
             <html>
               <head>
-                <title>AIS | Digital Services</title>
-                <meta name="description" content="AIS delivers secure digital services for public sector agencies." />
+                <title>AFA | Digital Services</title>
+                <meta name="description" content="AFA delivers secure digital services for public sector agencies." />
               </head>
               <body><h1>Digital Services</h1></body>
             </html>
@@ -432,11 +432,11 @@ def main() -> int:
         )
         ais_record = {
             "external_record_id": "vendor-ais",
-            "source_url": "https://govtribe.com/vendors/applied-information-sciences-abc12",
+            "source_url": "https://govtribe.com/vendors/acme-federal-analytics-demo1",
             "govtribe_id": "vendor-ais",
-            "govtribe_url": "https://govtribe.com/vendors/applied-information-sciences-abc12",
-            "name": "Applied Information Sciences",
-            "uei": "AISUEI123456",
+            "govtribe_url": "https://govtribe.com/vendors/acme-federal-analytics-demo1",
+            "name": "Acme Federal Analytics",
+            "uei": "ACMEUEI12345",
             "parent_vendor": {},
             "vendor_hierarchy": {},
         }
@@ -456,8 +456,8 @@ def main() -> int:
         assert ambiguous_result["status"] == "OK", ambiguous_result
         assert ambiguous_result["bootstrap_source"] == "website", ambiguous_result
         assert ambiguous_result["govtribe_status"] == "GOVTRIBE_AMBIGUOUS_MATCH", ambiguous_result
-        assert ambiguous_result["govtribe_ambiguous_candidate"]["name"] == "Applied Information Sciences", ambiguous_result
-        assert ambiguous_provider.lookups == ["AIS"], ambiguous_provider.lookups
+        assert ambiguous_result["govtribe_ambiguous_candidate"]["name"] == "Acme Federal Analytics", ambiguous_result
+        assert ambiguous_provider.lookups == ["AFA"], ambiguous_provider.lookups
         assert ambiguous_vendor_profile["bootstrap"]["method"] == "company_url_bootstrap_script_v1", ambiguous_vendor_profile
         assert "uei" not in ambiguous_vendor_profile["company"], ambiguous_vendor_profile["company"]
 
@@ -468,8 +468,8 @@ def main() -> int:
             """
             <html>
               <head>
-                <title>AIS (Applied Information Sciences) | Digital Services</title>
-                <meta name="description" content="Applied Information Sciences delivers secure application modernization for federal agencies." />
+                <title>AFA (Acme Federal Analytics) | Digital Services</title>
+                <meta name="description" content="Acme Federal Analytics delivers secure application modernization for federal agencies." />
               </head>
               <body><h1>Digital Services</h1></body>
             </html>
@@ -489,21 +489,21 @@ def main() -> int:
         parenthetical_vendor_profile = load_json(parenthetical_workspace / "procurement" / "vendor-profile.json", default={})
         assert parenthetical_result["status"] == "OK", parenthetical_result
         assert parenthetical_result["bootstrap_source"] == "govtribe", parenthetical_result
-        assert parenthetical_result["govtribe_inferred_lookup"] == "Applied Information Sciences", parenthetical_result
+        assert parenthetical_result["govtribe_inferred_lookup"] == "Acme Federal Analytics", parenthetical_result
         assert parenthetical_provider.lookups == [
-            "AIS (Applied Information Sciences)",
-            "Applied Information Sciences",
+            "AFA (Acme Federal Analytics)",
+            "Acme Federal Analytics",
         ], parenthetical_provider.lookups
-        assert parenthetical_vendor_profile["company"]["name"] == "AIS (Applied Information Sciences)", parenthetical_vendor_profile["company"]
+        assert parenthetical_vendor_profile["company"]["name"] == "AFA (Acme Federal Analytics)", parenthetical_vendor_profile["company"]
         assert parenthetical_vendor_profile["company"]["website"] == (parenthetical_site / "index.html").resolve().as_uri(), parenthetical_vendor_profile["company"]
-        assert parenthetical_vendor_profile["company"]["uei"] == "AISUEI123456", parenthetical_vendor_profile["company"]
+        assert parenthetical_vendor_profile["company"]["uei"] == "ACMEUEI12345", parenthetical_vendor_profile["company"]
 
         govtribe_workspace = root / "govtribe-workspace"
         fake_provider = FakeGovTribeBootstrapProvider()
         govtribe_result = seed_workspace_from_govtribe(
             bundle_root=bundle_root,
             workspace=govtribe_workspace,
-            govtribe_lookup="https://govtribe.com/vendors/halvik-corp-5grr4",
+            govtribe_lookup="https://govtribe.com/vendors/demogov-services-demo1",
             company_url="",
             user_naics=[],
             naics_status="confirmed",
@@ -520,12 +520,12 @@ def main() -> int:
 
         assert govtribe_result["status"] == "OK", govtribe_result
         assert govtribe_result["bootstrap_source"] == "govtribe", govtribe_result
-        assert fake_provider.lookups == ["https://govtribe.com/vendors/halvik-corp-5grr4"], fake_provider.lookups
+        assert fake_provider.lookups == ["https://govtribe.com/vendors/demogov-services-demo1"], fake_provider.lookups
         assert govtribe_vendor_profile["bootstrap"]["method"] == "govtribe_vendor_bootstrap_script_v1", govtribe_vendor_profile
-        assert govtribe_vendor_profile["company"]["name"] == "Halvik, LLC", govtribe_vendor_profile["company"]
-        assert govtribe_vendor_profile["company"]["uei"] == "VMRTJLWMQRH7", govtribe_vendor_profile["company"]
-        assert govtribe_vendor_profile["company"]["govtribe_url"] == "https://govtribe.com/vendors/halvik-corp-5grr4", govtribe_vendor_profile["company"]
-        assert govtribe_vendor_profile["company"]["parent"]["name"] == "Halvik Parent Inc.", govtribe_vendor_profile["company"]
+        assert govtribe_vendor_profile["company"]["name"] == "DemoGov Services, LLC", govtribe_vendor_profile["company"]
+        assert govtribe_vendor_profile["company"]["uei"] == "DEMOUEI12345", govtribe_vendor_profile["company"]
+        assert govtribe_vendor_profile["company"]["govtribe_url"] == "https://govtribe.com/vendors/demogov-services-demo1", govtribe_vendor_profile["company"]
+        assert govtribe_vendor_profile["company"]["parent"]["name"] == "DemoGov Holdings Inc.", govtribe_vendor_profile["company"]
         assert govtribe_vendor_profile["govtribe_vendor_hierarchy"]["parent_or_child"] == "Child", govtribe_vendor_profile
         assert "OASIS SB" not in govtribe_vendor_profile["company"]["summary"], govtribe_vendor_profile["company"]
         assert "541512" in govtribe_vendor_profile["naics"]["candidates"], govtribe_vendor_profile["naics"]
@@ -586,7 +586,7 @@ def main() -> int:
             assert bad_value not in noisy_payload, noisy_payload
         assert "OASIS SB" not in noisy_payload, noisy_payload
         assert "541512 - Computer Systems Design Services" in govtribe_starter, govtribe_starter
-        assert "GovTribe vendor: https://govtribe.com/vendors/halvik-corp-5grr4" in govtribe_starter, govtribe_starter
+        assert "GovTribe vendor: https://govtribe.com/vendors/demogov-services-demo1" in govtribe_starter, govtribe_starter
         assert "GSA MAS" in govtribe_starter, govtribe_starter
         assert "Vienna, VA 22182, USA" in govtribe_starter, govtribe_starter
         assert "Total Small Business" in govtribe_starter, govtribe_starter
@@ -597,14 +597,14 @@ def main() -> int:
         assert "GovTribe award-history signal" in govtribe_starter, govtribe_starter
         assert "min obligated $1.0K" in govtribe_starter, govtribe_starter
         assert "GovTribe Service Contract Inventory signal" in govtribe_starter, govtribe_starter
-        assert "move up the vendor chain to Halvik Parent Inc." in govtribe_starter, govtribe_starter
-        assert "Company URL: https://govtribe.com/vendors/halvik-corp-5grr4" not in govtribe_starter, govtribe_starter
+        assert "move up the vendor chain to DemoGov Holdings Inc." in govtribe_starter, govtribe_starter
+        assert "Company URL: https://govtribe.com/vendors/demogov-services-demo1" not in govtribe_starter, govtribe_starter
         assert "User-supplied NAICS: None provided" in govtribe_starter, govtribe_starter
         assert "User-supplied NAICS: 519290" not in govtribe_starter, govtribe_starter
         assert "GovTribe-derived facts remain provisional until the user confirms them." in govtribe_starter, govtribe_starter
         assert "GovTribe subscription-derived facts" in govtribe_starter, govtribe_starter
         assert "GovTribe subscription-derived facts" in govtribe_memory, govtribe_memory
-        assert "move up the vendor chain to Halvik Parent Inc." in govtribe_memory, govtribe_memory
+        assert "move up the vendor chain to DemoGov Holdings Inc." in govtribe_memory, govtribe_memory
         assert "Service contract pricing signal" in govtribe_memory, govtribe_memory
         assert "GOVTRIBE_MCP_API_KEY" not in govtribe_payload, govtribe_payload
         provenance = govtribe_vendor_profile["provenance"]["facts"]
@@ -614,14 +614,14 @@ def main() -> int:
         assert all(item.get("source") == "govtribe_mcp_commercial_intel" for item in provenance if item.get("provenance") == "govtribe_subscription_derived"), provenance
         govtribe_source = next(item for item in govtribe_registry["sources"] if item.get("id") == "govtribe_mcp_commercial_intel")
         assert govtribe_source["enabled"] is True, govtribe_source
-        assert govtribe_result["recommended_next_moves"][0].startswith("GovTribe resolved Halvik, LLC as a child entity"), govtribe_result
+        assert govtribe_result["recommended_next_moves"][0].startswith("GovTribe resolved DemoGov Services, LLC as a child entity"), govtribe_result
 
         name_workspace = root / "govtribe-name-workspace"
         name_provider = FakeGovTribeBootstrapProvider()
         name_result = seed_workspace_from_govtribe(
             bundle_root=bundle_root,
             workspace=name_workspace,
-            govtribe_lookup="Halvik, LLC",
+            govtribe_lookup="DemoGov Services, LLC",
             company_url="",
             user_naics=[],
             naics_status="confirmed",
@@ -630,15 +630,15 @@ def main() -> int:
             provider=name_provider,
         )
         assert name_result["status"] == "OK", name_result
-        assert name_provider.lookups == ["Halvik, LLC"], name_provider.lookups
+        assert name_provider.lookups == ["DemoGov Services, LLC"], name_provider.lookups
         name_vendor_profile = load_json(name_workspace / "procurement" / "vendor-profile.json", default={})
-        assert name_vendor_profile["company"]["name"] == "Halvik, LLC", name_vendor_profile
+        assert name_vendor_profile["company"]["name"] == "DemoGov Services, LLC", name_vendor_profile
 
         fallback_workspace = root / "govtribe-fallback-workspace"
         fallback_result = seed_workspace_from_govtribe(
             bundle_root=bundle_root,
             workspace=fallback_workspace,
-            govtribe_lookup="Halvik, LLC",
+            govtribe_lookup="DemoGov Services, LLC",
             company_url=(site / "index.html").resolve().as_uri(),
             user_naics=["541512"],
             naics_status="confirmed",

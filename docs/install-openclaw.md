@@ -65,13 +65,13 @@ export PWIN_AI_OPPS_ROOT="$HOME/.openclaw/skills/pwin-ai-opportunities"
 Bootstrap a workspace from a company site:
 
 ```text
-Use pwin-ai-opportunities and bootstrap this workspace from https://ais.com.
+Use pwin-ai-opportunities and bootstrap this workspace from https://example.com.
 ```
 
 Bootstrap with confirmed NAICS:
 
 ```text
-Use pwin-ai-opportunities and bootstrap this workspace from https://ais.com
+Use pwin-ai-opportunities and bootstrap this workspace from https://example.com
 with confirmed NAICS 541511 and 541512.
 ```
 

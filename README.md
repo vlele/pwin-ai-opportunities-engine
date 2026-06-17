@@ -62,7 +62,7 @@ with confirmed NAICS 541511 and 541512.
 If you already have a GovTribe vendor profile and `GOVTRIBE_MCP_API_KEY` is configured, you can bootstrap from that record instead:
 
 ```text
-Use pwin-ai-opportunities and bootstrap this workspace from https://govtribe.com/vendors/halvik-corp-5grr4.
+Use pwin-ai-opportunities and bootstrap this workspace from https://govtribe.com/vendors/demogov-services-demo1.
 ```
 
 That creates or updates:

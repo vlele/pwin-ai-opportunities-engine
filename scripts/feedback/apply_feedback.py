@@ -23,7 +23,7 @@ REASON_CODE_PATTERNS = (
     ("right_buyer", ("right buyer", "good buyer")),
     ("wrong_buyer", ("wrong buyer", "bad buyer")),
     ("right_work", ("right work", "good fit")),
-    ("wrong_work", ("wrong work", "poor fit", "not our lane")),
+    ("wrong_work", ("wrong work", "poor fit", "not a target fit")),
     ("too_small", ("too small",)),
     ("too_large", ("too large",)),
     ("wrong_location", ("wrong location",)),

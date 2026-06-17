@@ -22,7 +22,7 @@ Keep `OPENAI_API_KEY` only for optional semantic reasoning in `scripts/common/op
 ## Test Commands
 
 ```bash
-python3 /Users/jhariani/.codex/skills/.system/skill-creator/scripts/quick_validate.py /Users/jhariani/.codex/worktrees/347d/pwin-ai-opportunities-engine
+python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" .
 python3 scripts/tests/run_bootstrap_tests.py
 python3 scripts/tests/run_source_policy_tests.py
 python3 scripts/tests/run_commercial_intel_tests.py
