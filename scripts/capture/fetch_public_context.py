@@ -869,6 +869,7 @@ def _source_quality_score(
         and (priority_overlap > 0 or not priority_keyword_tokens)
         or (category == "leadership" and not requirement_keywords_present and entity_overlap > 0)
     )
+    policy_ref_hits = 0
     if category == "policy_compliance":
         policy_ref_hits = 0
         url_text = url.lower()
@@ -892,8 +893,17 @@ def _source_quality_score(
                 "marker_hit": marker_hit,
                 "requirement_relevant": False,
             }
-        else:
-            score += min(6, policy_ref_hits * 3)
+        minimum_policy_overlap = 1 if policy_refs else 2
+        if not marker_hit or objective_overlap < minimum_policy_overlap or (priority_keyword_tokens and priority_overlap == 0):
+            return {
+                "quality_score": -10,
+                "entity_overlap": entity_overlap,
+                "objective_overlap": objective_overlap,
+                "marker_hit": marker_hit,
+                "requirement_relevant": False,
+            }
+        score += min(6, policy_ref_hits * 3)
+        requirement_relevant = marker_hit and objective_overlap >= minimum_policy_overlap and (policy_ref_hits > 0 if policy_refs else True)
     if category == "acquisition_forecast":
         if not marker_hit:
             return {
@@ -1611,10 +1621,6 @@ def fetch_public_research(
     for ref in policy_refs[:4]:
         for domain in ref.get("domains", []):
             policy_queries.append(f'site:{domain} "{ref["label"]}" filetype:pdf')
-    if not policy_queries:
-        for domain in _category_allowed_domains("policy_compliance", domains, buyer, policy_refs):
-            for term in ("privacy", "security", "zero trust", "section 508", "fedramp"):
-                policy_queries.append(f'site:{domain} "{primary_label}" "{term}" filetype:pdf')
     policy_queries = _dedupe_strings(policy_queries)
 
     mission_sources, mission_gaps = _discover_sources(
@@ -1667,16 +1673,19 @@ def fetch_public_research(
         policy_refs,
         max_sources=2,
     )
-    policy_sources, policy_gaps = _discover_sources(
-        "policy_compliance",
-        policy_queries,
-        _category_allowed_domains("policy_compliance", domains, buyer, policy_refs),
-        labels,
-        priority_keywords or keywords,
-        keywords,
-        policy_refs,
-        max_sources=3,
-    )
+    if policy_refs:
+        policy_sources, policy_gaps = _discover_sources(
+            "policy_compliance",
+            policy_queries,
+            _category_allowed_domains("policy_compliance", domains, buyer, policy_refs),
+            labels,
+            priority_keywords or keywords,
+            keywords,
+            policy_refs,
+            max_sources=3,
+        )
+    else:
+        policy_sources, policy_gaps = ([], ["No explicit policy or control framework was cited in the current package."])
     public_discourse_sources, discourse_gaps = _discover_sources(
         "public_discourse",
         public_discourse_queries,
@@ -1738,7 +1747,7 @@ def fetch_public_research(
         "budget_document_signals": [_snippet_line(source) for source in budget_sources],
         "acquisition_forecast_signals": [_snippet_line(source) for source in forecast_sources],
         "oversight_signals": [_snippet_line(source) for source in oversight_sources],
-        "policy_compliance_signals": [_snippet_line(source) for source in policy_sources],
+        "policy_compliance_signals": [_snippet_line(source) for source in policy_sources if bool(source.get("requirement_relevant"))],
         "leadership_priority_signals": [_snippet_line(source) for source in leadership_sources],
         "public_discourse_signals": [_snippet_line(source) for source in public_discourse_sources],
         "source_log": source_log,

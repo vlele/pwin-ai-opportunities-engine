@@ -19,6 +19,11 @@ except ImportError:  # pragma: no cover - optional dependency
     PdfReader = None
 
 try:
+    import fitz
+except ImportError:  # pragma: no cover - optional dependency
+    fitz = None
+
+try:
     from docx import Document
 except ImportError:  # pragma: no cover - optional dependency
     Document = None
@@ -72,16 +77,132 @@ STRUCTURED_LINE_MARKERS = (
 )
 TOC_LINE_RE = re.compile(r"\.{5,}\s*\d+\s*$")
 SECTION_HEADING_RE = re.compile(r"^\s*\d+(?:\.\d+){0,3}\s+[A-Z][A-Za-z0-9/\-() ,]+$")
-PREFERRED_SECTION_STARTS = (
-    ("1.3 Scope", ("1.4", "1.5", "2.0")),
-    ("1.5 General Requirements", ("2.0",)),
-    ("2.0 Period of Performance", ("3.0", "4.0", "5.0")),
-    ("5.0 Deliverables", ("6.0",)),
+PREFERRED_SECTION_HINTS: tuple[tuple[str, int], ...] = (
+    ("statement of work", 6),
+    ("performance work statement", 6),
+    ("description/specifications/work statement", 6),
+    ("description specifications work statement", 6),
+    ("statement of objectives", 5),
+    ("statement of objective", 5),
+    ("scope", 5),
+    ("general requirements", 5),
+    ("requirements", 4),
+    ("specific tasks", 5),
+    ("tasks", 4),
+    ("deliverables", 5),
+    ("period of performance", 4),
+    ("background", 3),
+    ("purpose", 3),
+    ("evaluation factors", 3),
+    ("instructions to offerors", 3),
+    ("instructions to offeror", 3),
+)
+ATTACHMENT_TABLE_ROW_RE = re.compile(
+    r"^\s*(?:CLIN|SubCLIN|Task|Subtask|AQL|PRS|Performance Objective|Deliverable|Transition|SLIN)\b",
+    re.IGNORECASE,
+)
+ATTACHMENT_MATRIX_MARKERS = (
+    "clin",
+    "subclin",
+    "task",
+    "subtask",
+    "matrix",
+    "deliverable",
+    "aql",
+    "prs",
+    "acceptable quality level",
+    "performance requirement",
+)
+ATTACHMENT_ACCEPTANCE_MARKERS = (
+    "acceptance criteria",
+    "acceptable quality level",
+    "aql",
+    "inspection",
+    "surveillance method",
+    "performance threshold",
+    "quality level",
+)
+ATTACHMENT_INCENTIVE_MARKERS = (
+    "incentive",
+    "disincentive",
+    "remedy",
+    "deduction",
+    "service credit",
+    "liquidated damages",
+)
+ATTACHMENT_PRICING_MARKERS = (
+    "unit price",
+    "extended price",
+    "total evaluated price",
+    "price schedule",
+    "rate card",
+    "hourly rate",
+    "fully burdened",
+    "labor rate",
+    "cost proposal",
+    "price proposal",
+    "contract line item",
+)
+SECTION_BLOCK_HINTS = (
+    "statement of objectives",
+    "statement of objective",
+    "statement of work",
+    "performance work statement",
+    "description/specifications/work statement",
+    "description specifications work statement",
+    "scope",
+    "general requirements",
+    "requirements",
+    "deliverables",
+    "specific tasks",
+    "tasks",
+    "task order",
+    "period of performance",
+    "background",
+    "purpose",
+    "evaluation factors",
+    "instructions to offerors",
+    "instructions to offeror",
+)
+SECTION_BLOCK_SKIP_HINTS = (
+    "table of contents",
+    "clauses incorporated by reference",
+    "representations and certifications",
+)
+SECTION_HEADING_HINT_RE = re.compile(
+    r"^\s*(?:section\s+[a-z0-9]+(?:\s*[-–]\s*)?|\d+(?:\.\d+){0,3}\s+)[a-z].{2,140}$",
+    re.IGNORECASE,
+)
+ACTION_VERB_HINTS = (
+    "shall",
+    "must",
+    "provide",
+    "deliver",
+    "maintain",
+    "support",
+    "perform",
+    "report",
+    "transition",
 )
 
 
 def _normalize_text(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        cleaned = _normalize_text(value)
+        if not cleaned:
+            continue
+        key = cleaned.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(cleaned)
+    return deduped
 
 
 def _normalize_preserve_lines(value: object, max_chars: int = 8000) -> str:
@@ -106,34 +227,69 @@ def _page_is_toc_like(text: str) -> bool:
     return any("table of contents" in line.lower() for line in lines) or (toc_like >= 4 and toc_like >= max(2, len(lines) // 3))
 
 
+def _section_hint_weight(line: str) -> int:
+    lowered = line.lower()
+    if any(skip in lowered for skip in SECTION_BLOCK_SKIP_HINTS):
+        return 0
+    return max((weight for hint, weight in PREFERRED_SECTION_HINTS if hint in lowered), default=0)
+
+
+def _normalized_attachment_name(filename: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(filename or "").lower()).strip()
+
+
 def _preferred_pdf_section_excerpt(text: str, max_chars: int = 12000) -> str:
     lines = [line.strip() for line in _normalize_preserve_lines(text, max_chars=30000).splitlines() if line.strip()]
     if not lines:
         return ""
-    sections: list[str] = []
-    lowered_lines = [line.lower() for line in lines]
-    for start_label, stop_prefixes in PREFERRED_SECTION_STARTS:
-        start_lower = start_label.lower()
-        try:
-            start_index = next(index for index, line in enumerate(lowered_lines) if line.startswith(start_lower))
-        except StopIteration:
+    heading_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if (SECTION_HEADING_RE.match(line) or SECTION_HEADING_HINT_RE.match(line)) and not _is_toc_like_line(line)
+    ]
+    if not heading_indexes:
+        return ""
+    sections: list[tuple[int, int, str]] = []
+    for position, start_index in enumerate(heading_indexes):
+        heading = lines[start_index]
+        hint_weight = _section_hint_weight(heading)
+        if hint_weight <= 0:
             continue
-        captured: list[str] = [lines[start_index]]
-        for line in lines[start_index + 1:]:
+        next_heading_index = heading_indexes[position + 1] if position + 1 < len(heading_indexes) else len(lines)
+        captured: list[str] = [heading]
+        action_hits = 0
+        structured_hits = 0
+        for line in lines[start_index + 1:next_heading_index]:
             lower = line.lower()
             if _is_toc_like_line(line):
                 continue
-            if any(lower.startswith(prefix.lower()) for prefix in stop_prefixes):
-                break
-            if SECTION_HEADING_RE.match(line) and not any(token in lower for token in ("shall", "must", "provide", "deliver", "maintain", "report", "support")):
-                break
             captured.append(line)
-            if len(" ".join(captured)) >= 1800:
+            if any(token in lower for token in ACTION_VERB_HINTS):
+                action_hits += 1
+            if any(token in lower for token in STRUCTURED_LINE_MARKERS):
+                structured_hits += 1
+            if len(" ".join(captured)) >= 2200:
                 break
         block = "\n".join(captured).strip()
-        if len(block) >= 80:
-            sections.append(block)
-    return "\n\n".join(sections)[:max_chars]
+        if len(block) < 80:
+            continue
+        score = (hint_weight * 10) + min(action_hits, 8) + min(structured_hits, 8)
+        sections.append((score, start_index, block))
+    if not sections:
+        return ""
+    selected: list[str] = []
+    seen: set[str] = set()
+    total_chars = 0
+    for _, _, block in sorted(sections, key=lambda item: (-item[0], item[1])):
+        key = _normalize_text(block[:240])
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        selected.append(block)
+        total_chars += len(block) + 2
+        if len(selected) >= 6 or total_chars >= max_chars:
+            break
+    return "\n\n".join(selected)[:max_chars]
 
 
 def _filename_from_headers(url: str, headers: Any) -> str:
@@ -148,15 +304,16 @@ def _filename_from_headers(url: str, headers: Any) -> str:
 
 
 def _attachment_category(filename: str) -> str:
-    lowered = filename.lower()
+    lowered = _normalized_attachment_name(filename)
     if (
-        "sow" in lowered
+        " sow " in f" {lowered} "
         or "statement of work" in lowered
         or "performance work statement" in lowered
         or "draft pws" in lowered
-        or "pws" in lowered
+        or " pws " in f" {lowered} "
         or "soo" in lowered
         or "statement of objectives" in lowered
+        or "statement of objective" in lowered
     ):
         return "statement_of_work"
     if "rftop" in lowered or "evaluation" in lowered or "instruction" in lowered or "section l" in lowered or "section m" in lowered:
@@ -171,12 +328,29 @@ def _attachment_category(filename: str) -> str:
         return "pricing"
     if "subcontract" in lowered:
         return "subcontracting"
-    if lowered.endswith(".pdf") and ("rfp" in lowered or "solicitation" in lowered):
+    if ("rfp" in lowered or "rfq" in lowered or "solicitation" in lowered or "soliciation" in lowered):
         return "solicitation"
     return "other"
 
 
-def _extract_pdf_text(data: bytes, max_pages: int = 18) -> str:
+def _refine_attachment_category(initial_category: str, filename: str, text: str) -> str:
+    lower = f"{_normalized_attachment_name(filename)} {_normalize_text(text[:5000]).lower()}".strip()
+    if not lower:
+        return initial_category
+    if any(token in lower for token in ("statement of work", "performance work statement", "statement of objectives", "statement of objective", " draft pws ", " section c - description/specifications/work statement ")):
+        return "statement_of_work"
+    if any(token in lower for token in ("section l", "section m", "evaluation factors for award", "instructions to offerors", "instruction to offerors", "best value", "past performance questionnaire")):
+        return "instructions_evaluation"
+    if any(token in lower for token in ("question matrix", "questions and answers", "question responses", "projnet question responses", "q and a", "offeror questions")):
+        return "questions_answers"
+    if any(token in lower for token in ("amendment of solicitation", "amendment ", "sf30", "modification of contract")):
+        return "amendment"
+    if initial_category == "other" and any(token in lower for token in ("solicitation/award", "request for quotation", "request for proposal", "combined synopsis", "combined synopsis/solicitation")):
+        return "solicitation"
+    return initial_category
+
+
+def _extract_pdf_text_pypdf2(data: bytes, max_pages: int = 40) -> str:
     if PdfReader is None:
         raise RuntimeError("PyPDF2 unavailable")
     reader = PdfReader(io.BytesIO(data))
@@ -184,7 +358,45 @@ def _extract_pdf_text(data: bytes, max_pages: int = 18) -> str:
     for page in reader.pages[:max_pages]:
         page_texts.append(page.extract_text() or "")
     filtered_pages = [page for page in page_texts if not _page_is_toc_like(page)]
-    combined = "\n".join(filtered_pages or page_texts)
+    return "\n".join(filtered_pages or page_texts)
+
+
+def _extract_pdf_text_fitz(data: bytes, max_pages: int = 40) -> str:
+    if fitz is None:
+        raise RuntimeError("fitz unavailable")
+    document = fitz.open(stream=data, filetype="pdf")
+    page_texts: list[str] = []
+    for page_index in range(min(len(document), max_pages)):
+        page = document.load_page(page_index)
+        page_texts.append(page.get_text("text") or "")
+    filtered_pages = [page for page in page_texts if not _page_is_toc_like(page)]
+    return "\n".join(filtered_pages or page_texts)
+
+
+def _pdf_text_quality_score(text: str) -> tuple[int, int, int]:
+    cleaned = _normalize_preserve_lines(text, max_chars=60000)
+    lines = [line for line in cleaned.splitlines() if line.strip()]
+    heading_count = sum(1 for line in lines if SECTION_HEADING_RE.match(line) or SECTION_HEADING_HINT_RE.match(line))
+    action_count = sum(1 for line in lines if any(term in line.lower() for term in ACTION_VERB_HINTS))
+    return (len(cleaned), heading_count, action_count)
+
+
+def _extract_pdf_text(data: bytes, max_pages: int = 40) -> str:
+    candidates: list[str] = []
+    errors: list[Exception] = []
+    for extractor in (_extract_pdf_text_pypdf2, _extract_pdf_text_fitz):
+        try:
+            extracted = extractor(data, max_pages=max_pages)
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            errors.append(exc)
+            continue
+        if extracted.strip():
+            candidates.append(extracted)
+    if not candidates:
+        if errors:
+            raise errors[0]
+        raise RuntimeError("No PDF extractor available")
+    combined = max(candidates, key=_pdf_text_quality_score)
     preferred = _preferred_pdf_section_excerpt(combined, max_chars=12000)
     if preferred:
         return f"{preferred}\n\n{combined}"
@@ -196,6 +408,12 @@ def _extract_docx_text(data: bytes) -> str:
         raise RuntimeError("python-docx unavailable")
     document = Document(io.BytesIO(data))
     values = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
+    for table in document.tables:
+        for row in table.rows:
+            cells = [_normalize_text(cell.text) for cell in row.cells if _normalize_text(cell.text)]
+            if not cells:
+                continue
+            values.append(" | ".join(cells[:10]))
     return "\n".join(values)
 
 
@@ -204,10 +422,18 @@ def _extract_xlsx_text(data: bytes, max_strings: int = 120) -> str:
         names = archive.namelist()
         sheet_names: list[str] = []
         shared_strings: list[str] = []
+        workbook_rels: dict[str, str] = {}
         if "xl/workbook.xml" in names:
             workbook = ET.fromstring(archive.read("xl/workbook.xml"))
             ns = {"main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
             sheet_names = [node.attrib.get("name", "") for node in workbook.findall(".//main:sheets/main:sheet", ns)]
+            rel_ns = {"rel": "http://schemas.openxmlformats.org/officeDocument/2006/relationships"}
+            if "xl/_rels/workbook.xml.rels" in names:
+                rel_root = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+                workbook_rels = {
+                    node.attrib.get("Id", ""): node.attrib.get("Target", "")
+                    for node in rel_root.findall(".//rel:Relationship", rel_ns)
+                }
         if "xl/sharedStrings.xml" in names:
             strings_root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
             for node in strings_root.iter():
@@ -219,6 +445,48 @@ def _extract_xlsx_text(data: bytes, max_strings: int = 120) -> str:
         if shared_strings:
             sample = [value for value in shared_strings if value][:max_strings]
             lines.append("Shared strings: " + " | ".join(sample[:40]))
+        if "xl/workbook.xml" in names:
+            workbook = ET.fromstring(archive.read("xl/workbook.xml"))
+            ns = {
+                "main": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+                "rel": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+            }
+            sheet_nodes = workbook.findall(".//main:sheets/main:sheet", ns)
+            for sheet_node in sheet_nodes[:4]:
+                sheet_name = sheet_node.attrib.get("name", "") or "Sheet"
+                rel_id = sheet_node.attrib.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id", "")
+                target = workbook_rels.get(rel_id, "")
+                if not target:
+                    continue
+                sheet_path = f"xl/{target.lstrip('./')}"
+                if sheet_path not in names:
+                    continue
+                root = ET.fromstring(archive.read(sheet_path))
+                row_texts: list[str] = []
+                for row in root.findall(".//main:sheetData/main:row", ns)[:20]:
+                    values: list[str] = []
+                    for cell in row.findall("main:c", ns):
+                        raw_value = ""
+                        cell_type = cell.attrib.get("t", "")
+                        if cell_type == "inlineStr":
+                            raw_value = "".join(node.text or "" for node in cell.findall(".//main:t", ns)).strip()
+                        else:
+                            value_node = cell.find("main:v", ns)
+                            raw_value = (value_node.text or "").strip() if value_node is not None else ""
+                            if raw_value and cell_type == "s":
+                                try:
+                                    raw_value = shared_strings[int(raw_value)]
+                                except (ValueError, IndexError):
+                                    pass
+                        cleaned = _normalize_text(raw_value)
+                        if cleaned:
+                            values.append(cleaned)
+                    if values:
+                        row_texts.append(" | ".join(values[:10]))
+                    if len(row_texts) >= 6:
+                        break
+                if row_texts:
+                    lines.append(f"{sheet_name}: " + " || ".join(row_texts[:4]))
         return "\n".join(lines)
 
 
@@ -246,6 +514,195 @@ def _extract_attachment_text(filename: str, content_type: str, data: bytes) -> t
     except Exception as exc:  # pragma: no cover - defensive fallback
         return "", f"parse_error:{exc.__class__.__name__}"
     return "", "unsupported"
+
+
+def _pdf_page_count(data: bytes) -> int:
+    if PdfReader is None:
+        if fitz is None:
+            return 0
+    try:
+        if PdfReader is not None:
+            return len(PdfReader(io.BytesIO(data)).pages)
+    except Exception:
+        pass
+    if fitz is None:
+        return 0
+    try:
+        return len(fitz.open(stream=data, filetype="pdf"))
+    except Exception:  # pragma: no cover - defensive fallback
+        return 0
+
+
+def _is_structure_heading(line: str) -> bool:
+    cleaned = _normalize_text(line)
+    if not cleaned or _is_toc_like_line(cleaned):
+        return False
+    lower = cleaned.lower()
+    if any(hint == lower or lower.startswith(f"{hint} ") for hint in SECTION_BLOCK_HINTS):
+        return True
+    if SECTION_HEADING_RE.match(cleaned) or SECTION_HEADING_HINT_RE.match(cleaned):
+        return True
+    return False
+
+
+def _heading_title(line: str) -> str:
+    cleaned = _normalize_text(line)
+    match = re.match(r"^(?:section\s+[a-z0-9]+(?:\s*[-–]\s*)?|\d+(?:\.\d+){0,3}\s+)?(.+)$", cleaned, re.IGNORECASE)
+    title = match.group(1) if match else cleaned
+    return title.strip(" .:-")
+
+
+def _section_block_priority(title: str, body: str) -> int:
+    lower = f"{title} {body}".lower()
+    score = 0
+    for hint in SECTION_BLOCK_HINTS:
+        if hint in lower:
+            score += 4
+    for verb in ACTION_VERB_HINTS:
+        if verb in lower:
+            score += 1
+    if any(marker in lower for marker in ("clin", "task", "deliverable", "transition", "period of performance", "base period", "option year")):
+        score += 3
+    return score
+
+
+def _extract_text_structures(text: str, *, max_sections: int = 12, max_rows: int = 36) -> dict[str, Any]:
+    raw_lines = [line.strip() for line in str(text or "").replace("\r", "\n").split("\n") if line.strip()]
+    headings: list[str] = []
+    section_blocks: list[dict[str, str]] = []
+    structured_rows: list[str] = []
+    seen_sections: set[str] = set()
+    seen_rows: set[str] = set()
+
+    for raw_line in raw_lines:
+        if (
+            ATTACHMENT_TABLE_ROW_RE.match(raw_line)
+            or "|" in raw_line
+            or "\t" in raw_line
+            or re.search(r" {2,}", raw_line)
+        ):
+            normalized_row = _normalize_text(raw_line)
+            normalized_row = re.sub(r"\s*(?:\||\t| {2,})\s*", "; ", normalized_row).strip(" ;:-")
+            if len(normalized_row) >= 24:
+                row_key = normalized_row.lower()
+                if row_key not in seen_rows:
+                    seen_rows.add(row_key)
+                    structured_rows.append(normalized_row[:420])
+
+    index = 0
+    while index < len(raw_lines):
+        line = raw_lines[index]
+        if not _is_structure_heading(line):
+            index += 1
+            continue
+        title = _heading_title(line)
+        lower_title = title.lower()
+        headings.append(title)
+        if any(skip in lower_title for skip in SECTION_BLOCK_SKIP_HINTS):
+            index += 1
+            continue
+        body_lines: list[str] = []
+        lookahead = index + 1
+        while lookahead < len(raw_lines):
+            candidate = raw_lines[lookahead]
+            if _is_structure_heading(candidate):
+                break
+            if not _is_toc_like_line(candidate):
+                body_lines.append(candidate)
+            if len(" ".join(body_lines)) >= 2200:
+                break
+            lookahead += 1
+        body = _normalize_text(" ".join(body_lines))
+        if body and _section_block_priority(title, body) >= 4:
+            section_text = _normalize_text(f"{title}; {body}")[:1200]
+            key = section_text.lower()
+            if key not in seen_sections:
+                seen_sections.add(key)
+                section_blocks.append(
+                    {
+                        "title": title[:180],
+                        "text": section_text,
+                    }
+                )
+        index = lookahead if lookahead > index else index + 1
+
+    section_blocks.sort(key=lambda item: _section_block_priority(item.get("title", ""), item.get("text", "")), reverse=True)
+    return {
+        "headings": _dedupe_strings(headings)[:24],
+        "section_blocks": section_blocks[:max_sections],
+        "structured_rows": structured_rows[:max_rows],
+    }
+
+
+def _attachment_analysis(
+    *,
+    filename: str,
+    content_type: str,
+    category: str,
+    parser_status: str,
+    text: str,
+    data: bytes,
+) -> dict[str, Any]:
+    lines = [line.strip() for line in _normalize_preserve_lines(text, max_chars=40000).splitlines() if line.strip()]
+    lower_lines = [line.lower() for line in lines]
+    joined_lower = "\n".join(lower_lines)
+    char_count = len(text.strip())
+    line_count = len(lines)
+    page_count = _pdf_page_count(data) if filename.lower().endswith(".pdf") else 0
+    table_like_line_count = sum(
+        1
+        for line in lines
+        if len(line) >= 20 and ("|" in line or "\t" in line or re.search(r" {2,}", line) or ATTACHMENT_TABLE_ROW_RE.match(line))
+    )
+    matrix_marker_count = sum(1 for line in lower_lines if any(marker in line for marker in ATTACHMENT_MATRIX_MARKERS))
+    acceptance_marker_count = sum(1 for line in lower_lines if any(marker in line for marker in ATTACHMENT_ACCEPTANCE_MARKERS))
+    incentive_marker_count = sum(1 for line in lower_lines if any(marker in line for marker in ATTACHMENT_INCENTIVE_MARKERS))
+    pricing_marker_count = sum(1 for line in lower_lines if any(marker in line for marker in ATTACHMENT_PRICING_MARKERS))
+    flags: list[str] = []
+
+    if parser_status.startswith(("parse_error", "dependency_missing")) or parser_status == "unsupported":
+        flags.append("parse_failed_or_unsupported")
+    if filename.lower().endswith(".pdf"):
+        if page_count >= 4 and char_count < max(900, page_count * 180):
+            flags.append("ocr_or_image_heavy_pdf")
+        elif len(data) >= 600_000 and char_count < 1200:
+            flags.append("ocr_or_image_heavy_pdf")
+    if parser_status.startswith("parsed") and char_count < 400:
+        flags.append("thin_text_extraction")
+    if table_like_line_count >= 5 or matrix_marker_count >= 4:
+        flags.append("table_or_matrix_heavy")
+    if sum(1 for line in lines if ATTACHMENT_TABLE_ROW_RE.match(line)) >= 3:
+        flags.append("clin_or_task_matrix_visible")
+    if acceptance_marker_count >= 2:
+        flags.append("acceptance_or_aql_visible")
+    if incentive_marker_count >= 2:
+        flags.append("incentive_or_remedy_visible")
+    if category == "pricing" or filename.lower().endswith(".xlsx") or (pricing_marker_count >= 3 and table_like_line_count >= 2):
+        flags.append("pricing_sheet_or_rate_table")
+    if category in {"statement_of_work", "solicitation"} and "statement of work" in joined_lower and char_count < 900:
+        flags.append("scope_document_underparsed")
+
+    review_required = any(
+        flag in flags
+        for flag in (
+            "parse_failed_or_unsupported",
+            "ocr_or_image_heavy_pdf",
+            "thin_text_extraction",
+            "scope_document_underparsed",
+        )
+    )
+    return {
+        "text_char_count": char_count,
+        "line_count": line_count,
+        "page_count": page_count,
+        "table_like_line_count": table_like_line_count,
+        "matrix_marker_count": matrix_marker_count,
+        "acceptance_marker_count": acceptance_marker_count,
+        "incentive_marker_count": incentive_marker_count,
+        "pricing_marker_count": pricing_marker_count,
+        "analysis_flags": flags,
+        "review_required": review_required,
+    }
 
 
 def _attachment_snippets(text: str, max_snippets: int = 6) -> list[str]:
@@ -284,7 +741,7 @@ def _download_attachment(
     filename_hint: str = "",
     content_type_hint: str = "",
     timeout: int = 45,
-    max_bytes: int = 8_000_000,
+    max_bytes: int = 25_000_000,
 ) -> dict[str, Any]:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -313,19 +770,40 @@ def _attachment_record_from_bytes(
     local_path: str = "",
 ) -> dict[str, Any]:
     text, parser_status = _extract_attachment_text(filename, content_type, data)
-    structured_excerpt = _normalize_preserve_lines(text, max_chars=24000)
+    structured_excerpt = _normalize_preserve_lines(text, max_chars=120000)
+    category = _refine_attachment_category(_attachment_category(filename), filename, structured_excerpt)
+    analysis = _attachment_analysis(
+        filename=filename,
+        content_type=content_type,
+        category=category,
+        parser_status=parser_status,
+        text=structured_excerpt,
+        data=data,
+    )
     record = {
         "url": url,
         "filename": filename,
         "content_type": content_type,
         "size_bytes": len(data),
         "truncated": truncated,
-        "category": _attachment_category(filename),
         "parser_status": parser_status,
-        "text_excerpt": structured_excerpt[:12000],
+        "text_excerpt": structured_excerpt[:18000],
         "structured_text_excerpt": structured_excerpt,
-        "snippets": _attachment_snippets(text),
+        "category": category,
+        **analysis,
     }
+    structures = _extract_text_structures(structured_excerpt)
+    record["headings"] = structures.get("headings", [])
+    record["section_blocks"] = structures.get("section_blocks", [])
+    record["structured_rows"] = structures.get("structured_rows", [])
+    record["snippets"] = _attachment_snippets(
+        "\n".join(
+            [
+                *(block.get("text", "") for block in record["section_blocks"] if isinstance(block, dict)),
+                structured_excerpt,
+            ]
+        )
+    )
     if local_path:
         record["local_path"] = local_path
     return record
@@ -335,7 +813,7 @@ def load_local_attachments(
     file_paths: list[str] | None,
     *,
     max_attachments: int = 20,
-    max_bytes: int = 8_000_000,
+    max_bytes: int = 25_000_000,
 ) -> dict[str, Any]:
     attachments: list[dict[str, Any]] = []
     errors: list[str] = []

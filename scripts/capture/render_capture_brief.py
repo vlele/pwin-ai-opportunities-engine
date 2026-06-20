@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+import html
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,23 @@ def _markdown_list(items: list[str], empty: str = "none found") -> str:
     if not items:
         return f"- {empty}"
     return "\n".join(f"- {item}" for item in items)
+
+
+def _strategy_row_list(rows: list[dict[str, Any]] | list[str], empty: str) -> str:
+    if not rows:
+        return f"- {empty}"
+    if rows and isinstance(rows[0], dict):
+        lines: list[str] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            text = str(row.get("text") or "").strip()
+            anchor = str(row.get("evidence_anchor") or "").strip()
+            if not text:
+                continue
+            lines.append(f"- {text}" + (f" Anchor: {anchor}" if anchor else ""))
+        return "\n".join(lines) if lines else f"- {empty}"
+    return _markdown_list([str(item) for item in rows if str(item).strip()], empty=empty)
 
 
 def _score_rows(rows: list[dict[str, Any]]) -> str:
@@ -62,6 +81,7 @@ def _opportunity_snapshot(snapshot: dict[str, Any]) -> str:
         ("Agency / Bureau / Program", "agency_bureau_program"),
         ("Notice Type", "notice_type"),
         ("NAICS", "naics"),
+        ("NAICS Size Standard", "naics_size_standard"),
         ("PSC / Other Taxonomy", "psc"),
         ("Contract Vehicle", "contract_vehicle"),
         ("Contract Structure", "contract_structure"),
@@ -72,6 +92,8 @@ def _opportunity_snapshot(snapshot: dict[str, Any]) -> str:
         ("Due Date", "due_date"),
         ("Days Until Due", "days_until_due"),
         ("Estimated Value", "estimated_value"),
+        ("Period of Performance", "period_of_performance"),
+        ("Funds Status", "funds_status"),
         ("Place of Performance", "place_of_performance"),
         ("Opportunity URL", "opportunity_url"),
         ("Scan Bucket", "scan_bucket"),
@@ -86,6 +108,133 @@ def _opportunity_snapshot(snapshot: dict[str, Any]) -> str:
             value = f"[{value}]({value})"
         lines.append(f"- {label}: {value or 'N/A'}")
     return "\n".join(lines)
+
+
+def _timeline_datetime(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _timeline_numeric(value: object) -> float:
+    dt = _timeline_datetime(value)
+    if dt is None:
+        return 0.0
+    return dt.toordinal() + ((dt.hour * 60) + dt.minute) / 1440.0
+
+
+def _timeline_color(kind: str) -> str:
+    palette = {
+        "capture": "#475569",
+        "issue": "#2563eb",
+        "amendment": "#7c3aed",
+        "due": "#c2410c",
+        "award": "#b45309",
+        "base_start": "#0f766e",
+        "base_end": "#0369a1",
+        "option_start": "#0f766e",
+        "option_end": "#0369a1",
+    }
+    return palette.get(kind, "#334155")
+
+
+def _timeline_svg(milestones: list[dict[str, Any]]) -> str:
+    dated = [item for item in milestones if _timeline_datetime(item.get("date_iso"))]
+    if len(dated) < 2:
+        return ""
+    ordered = sorted(dated, key=lambda item: (_timeline_numeric(item.get("date_iso")), str(item.get("label", ""))))
+    width = 980
+    height = 250
+    left = 72
+    right = 44
+    axis_y = 132
+    usable_width = width - left - right
+    numbers = [_timeline_numeric(item.get("date_iso")) for item in ordered]
+    min_value = min(numbers)
+    max_value = max(numbers)
+    lanes = [74, 192]
+    label_offsets = [-18, 26]
+
+    def milestone_x(index: int, numeric: float) -> float:
+        if max_value <= min_value:
+            if len(ordered) == 1:
+                return left + usable_width / 2
+            return left + (usable_width * index / max(1, len(ordered) - 1))
+        return left + ((numeric - min_value) / (max_value - min_value)) * usable_width
+
+    points: list[tuple[dict[str, Any], float, float, int]] = []
+    last_x: float | None = None
+    lane_cursor = 0
+    for index, item in enumerate(ordered):
+        x = milestone_x(index, numbers[index])
+        if last_x is not None and abs(x - last_x) < 72:
+            lane_cursor = 1 - lane_cursor
+        else:
+            lane_cursor = index % 2
+        last_x = x
+        points.append((item, x, lanes[lane_cursor], lane_cursor))
+
+    start_label = html.escape(str(ordered[0].get("display_date") or ordered[0].get("date_iso") or "Start"))
+    end_label = html.escape(str(ordered[-1].get("display_date") or ordered[-1].get("date_iso") or "End"))
+    svg_parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" role="img" aria-label="Procurement timeline">',
+        f'<rect x="0" y="0" width="{width}" height="{height}" rx="18" fill="#f8fafc" stroke="#dbe4ee"/>',
+        f'<text x="{left}" y="34" font-family="Segoe UI, Arial, sans-serif" font-size="20" font-weight="700" fill="#102a43">Procurement Timeline</text>',
+        f'<text x="{left}" y="56" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#52606d">Deterministic SVG rendered from extracted solicitation milestones.</text>',
+        f'<line x1="{left}" y1="{axis_y}" x2="{width - right}" y2="{axis_y}" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>',
+        f'<text x="{left}" y="{axis_y + 28}" text-anchor="start" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#64748b">{start_label}</text>',
+        f'<text x="{width - right}" y="{axis_y + 28}" text-anchor="end" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#64748b">{end_label}</text>',
+    ]
+    for item, x, y, lane_index in points:
+        label = html.escape(str(item.get("label") or "Milestone"))
+        display_date = html.escape(str(item.get("display_date") or item.get("date_iso") or "Date unavailable"))
+        detail = html.escape(str(item.get("detail") or ""))
+        color = _timeline_color(str(item.get("kind") or ""))
+        anchor = "start" if x < left + usable_width * 0.2 else "end" if x > left + usable_width * 0.8 else "middle"
+        label_x = x if anchor == "middle" else x + 8 if anchor == "start" else x - 8
+        text_y = y + label_offsets[lane_index]
+        svg_parts.extend(
+            [
+                f'<line x1="{x:.1f}" y1="{axis_y}" x2="{x:.1f}" y2="{y}" stroke="{color}" stroke-width="2.5"/>',
+                f'<circle cx="{x:.1f}" cy="{y}" r="8" fill="{color}" stroke="#ffffff" stroke-width="2"/>',
+                f'<text x="{label_x:.1f}" y="{text_y}" text-anchor="{anchor}" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#0f172a">{label}</text>',
+                f'<text x="{label_x:.1f}" y="{text_y + 16}" text-anchor="{anchor}" font-family="Segoe UI, Arial, sans-serif" font-size="11" fill="#475569">{display_date}</text>',
+            ]
+        )
+        if detail:
+            svg_parts.append(
+                f'<text x="{label_x:.1f}" y="{text_y + 31}" text-anchor="{anchor}" font-family="Segoe UI, Arial, sans-serif" font-size="10" fill="#64748b">{detail}</text>'
+            )
+    svg_parts.append("</svg>")
+    return "\n".join(svg_parts)
+
+
+def _procurement_timeline_block(section: dict[str, Any]) -> str:
+    milestones = section.get("milestones", [])
+    if not isinstance(milestones, list) or not milestones:
+        return "- No procurement timeline milestones were extracted from current evidence."
+    milestone_lines = []
+    for item in milestones:
+        if not isinstance(item, dict):
+            continue
+        label = _md_cell(item.get("label"))
+        display_date = _md_cell(item.get("display_date"))
+        detail = str(item.get("detail") or "").strip()
+        milestone_lines.append(f"{label}: {display_date}" + (f" - {detail}" if detail else ""))
+    blocks = [
+        _markdown_list(milestone_lines, empty="No procurement timeline milestones were extracted from current evidence."),
+    ]
+    svg = _timeline_svg([item for item in milestones if isinstance(item, dict)])
+    if svg:
+        blocks.extend(["", svg])
+    notes = section.get("notes", [])
+    if isinstance(notes, list) and notes:
+        blocks.extend(["", "#### Timeline Notes", _markdown_list([str(note) for note in notes if str(note).strip()])])
+    return "\n".join(blocks)
 
 
 def _document_inventory_block(inventory: dict[str, Any]) -> str:
@@ -113,9 +262,18 @@ def _document_inventory_block(inventory: dict[str, Any]) -> str:
 
 
 def _customer_block(section: dict[str, Any]) -> str:
-    return "\n".join(
+    blocks = [
+        f"**Mission Problem:** {_md_cell(section.get('mission_problem'))}",
+    ]
+    if section.get("strategic_reasoning_summary"):
+        blocks.extend(
+            [
+                "",
+                f"**Strategic Capture Read:** {_md_cell(section.get('strategic_reasoning_summary'))}",
+            ]
+        )
+    blocks.extend(
         [
-            f"**Mission Problem:** {_md_cell(section.get('mission_problem'))}",
             "",
             "### Evidence-Backed Customer Priorities",
             _markdown_list(section.get("evidence_backed_priorities", [])),
@@ -126,6 +284,12 @@ def _customer_block(section: dict[str, Any]) -> str:
             "### Visible Pain Points",
             _markdown_list(section.get("pain_points", [])),
             "",
+            "### Reasoned Pain Points",
+            _markdown_list(section.get("strategic_pain_points", [])),
+            "",
+            "### Requirement Workstreams",
+            _markdown_list(section.get("requirement_workstreams", [])),
+            "",
             "### Repeated Language / Themes",
             _markdown_list(section.get("repeated_language", [])),
             "",
@@ -133,6 +297,7 @@ def _customer_block(section: dict[str, Any]) -> str:
             _markdown_list(section.get("unknowns", [])),
         ]
     )
+    return "\n".join(blocks)
 
 
 def _funding_block(section: dict[str, Any]) -> str:
@@ -163,6 +328,15 @@ def _acquisition_block(section: dict[str, Any]) -> str:
             f"**Requirement Type:** {_md_cell(section.get('requirement_type'))}",
             f"**Evaluation Basis:** {_md_cell(section.get('evaluation_basis'))}",
             f"**Transition Window:** {_md_cell(section.get('transition_window'))}",
+            "",
+            "### Solicitation Fact Checks",
+            _markdown_list(section.get("solicitation_facts", [])),
+            "",
+            "### Operational / Security Constraints",
+            _markdown_list(section.get("operational_constraints", [])),
+            "",
+            "### Staffing / Pricing Signals",
+            _markdown_list(section.get("staffing_pricing_signals", [])),
             "",
             "### Vehicle / Eligibility Assessment",
             _markdown_list(section.get("vehicle_assessment", [])),
@@ -330,16 +504,45 @@ def _subtle_signals_block(rows: list[dict[str, Any]]) -> str:
 
 
 def _win_strategy_block(section: dict[str, Any]) -> str:
-    return "\n".join(
+    blocks = []
+    if section.get("central_pain_point"):
+        blocks.extend(
+            [
+                f"**Central Pain Point:** {_md_cell(section.get('central_pain_point'))}",
+            ]
+        )
+    if section.get("reasoning_summary"):
+        blocks.extend(
+            [
+                f"**Reasoning Summary:** {_md_cell(section.get('reasoning_summary'))}",
+                "",
+            ]
+        )
+    blocks.extend(
         [
             "### Likely Customer Hot Buttons",
-            _markdown_list(section.get("hot_buttons", [])),
+            _strategy_row_list(section.get("hot_button_rows", []) or section.get("hot_buttons", []), "No validated hot buttons surfaced from the current package."),
             "",
             "### Proposed Win Themes",
-            _markdown_list(section.get("win_themes", [])),
+            _strategy_row_list(section.get("win_theme_rows", []) or section.get("win_themes", []), "Insufficient corroborated evidence to recommend win themes yet."),
             "",
             "### Discriminators",
-            _markdown_list(section.get("discriminators", [])),
+            _strategy_row_list(section.get("discriminator_rows", []) or section.get("discriminators", []), "Insufficient corroborated evidence to recommend differentiators yet."),
+            "",
+            "### Reasoning-Based Win Themes and Differentiators",
+            _strategy_row_list(
+                section.get("reasoning_based_win_theme_rows", []) or section.get("reasoning_based_win_themes", []),
+                "Reasoning-based win themes remain unverified until extracted scope sections or promoted solicitation facts surface.",
+            ),
+            "",
+            "### Reasoning-Based Proof Required",
+            _strategy_row_list(
+                section.get("reasoning_based_proof_requirement_rows", []) or section.get("reasoning_based_proof_requirements", []),
+                "Proof requirements remain provisional until extracted scope sections or promoted solicitation facts surface.",
+            ),
+            "",
+            "### Reasoning-Based Risk Implications",
+            _markdown_list(section.get("reasoning_based_risk_implications", [])),
             "",
             "### Ghosting Strategy",
             _markdown_list(section.get("ghosting_strategy", [])),
@@ -360,6 +563,7 @@ def _win_strategy_block(section: dict[str, Any]) -> str:
             _markdown_list(section.get("partner_strategy", [])),
         ]
     )
+    return "\n".join(blocks)
 
 
 def _questions_block(section: dict[str, Any]) -> str:
@@ -530,6 +734,7 @@ def render_capture_brief(template_path: Path, evidence: dict[str, Any]) -> str:
         "{{GENERATED_AT}}": evidence.get("generated_at", "N/A"),
         "{{EXECUTIVE_CAPTURE_JUDGMENT}}": _executive_judgment_block(evidence.get("capture_judgment", {})),
         "{{OPPORTUNITY_SNAPSHOT}}": _opportunity_snapshot(evidence.get("opportunity_snapshot", {})),
+        "{{PROCUREMENT_TIMELINE}}": _procurement_timeline_block(evidence.get("procurement_timeline", {})),
         "{{PURSUIT_RECOMMENDATION_AND_SCORE}}": _pursuit_block(evidence.get("pursuit_recommendation", {})),
         "{{EVIDENCE_LEDGER}}": _evidence_ledger_rows(evidence.get("evidence_ledger", [])),
         "{{DOCUMENT_INVENTORY}}": _document_inventory_block(evidence.get("document_inventory", {})),

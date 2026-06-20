@@ -1,0 +1,466 @@
+{
+  "lexical_contamination_terms": [
+    "homeownership centers",
+    "washington dockets",
+    "transaccess",
+    "arcis",
+    "office of housing",
+    "18 million",
+    "330,000"
+  ],
+  "core_reasoning_files": [
+    "capture/capture_decision.py",
+    "capture/run_capture_research.py"
+  ],
+  "cases": [
+    {
+      "id": "heldout-airfield-ops",
+      "expectation": "anchored",
+      "customer_priorities": {
+        "evidence_backed_priorities": [
+          "Continuity of airfield operations matters because outage response and field coordination are visible in the package."
+        ],
+        "likely_priorities": [
+          "Operational reporting cadence may influence confidence."
+        ]
+      },
+      "capability_fit": {
+        "capability_hits": [
+          "airfield outage response",
+          "site operations reporting"
+        ],
+        "past_performance_hits": [
+          "runway lighting sustainment"
+        ]
+      },
+      "partner_analysis": {
+        "best_partner_candidates": [],
+        "partner_outreach_action_items": []
+      },
+      "incumbent_analysis": {
+        "strength_signals": [
+          "Current contractor already knows the site access routine."
+        ]
+      },
+      "contract_type": "Firm Fixed Price",
+      "policy_signals": [],
+      "solicitation_facts": {
+        "quoted_facts": [
+          "Contract type: Firm Fixed Price",
+          "Evaluation basis: Best Value",
+          "Transition window: 30-day transition",
+          "Period of performance: Base year plus four option years"
+        ],
+        "staffing_roles": [
+          "Airfield electrician",
+          "Site supervisor"
+        ],
+        "period_of_performance": "Base year plus four option years",
+        "funds_status": ""
+      },
+      "attachment_workstreams": [
+        {
+          "title": "Runway outage response",
+          "objective": "Inspect runway lighting circuits and restore outages within required response windows.",
+          "evidence_snippets": [
+            "PWS 1.3 Scope: The contractor shall inspect runway lighting circuits, isolate faults, and restore outages within four hours of notification.",
+            "PWS 1.5 General Requirements: The contractor shall maintain field communications and provide daily status reports during outages and weather events."
+          ]
+        },
+        {
+          "title": "Airfield reporting cadence",
+          "objective": "Maintain daily operational reporting and weather-event coordination for site continuity.",
+          "evidence_snippets": [
+            "PWS 1.5 General Requirements: The contractor shall maintain field communications and provide daily status reports during outages and weather events."
+          ]
+        }
+      ],
+      "staffing_pricing_signals": {
+        "staffing_notes": [
+          "On-site execution appears mandatory for the visible labor mix, not a remote-support construct."
+        ],
+        "pricing_notes": [
+          "Contract posture is Firm Fixed Price."
+        ],
+        "evaluation_notes": [
+          "Evaluation basis surfaced in the solicitation package: Best Value."
+        ]
+      },
+      "attachment_anomalies": [],
+      "strategic_reasoning": {
+        "central_pain_point": "The buyer needs outage response and field coordination to work on day one.",
+        "reasoning_summary": "Operational continuity depends on rapid site response, status reporting, and low-friction mobilization.",
+        "reasoned_pain_points": [
+          "Day-one site execution is a likely evaluator anxiety because runway outages cannot wait for a slow ramp."
+        ],
+        "reasoned_win_themes": [
+          "Ready on day one where the work happens: make outage response, field communications, and daily status reporting the proof point."
+        ],
+        "reasoned_differentiators": [
+          "A requirement-specific mobilization and outage-response plan tied to site access and reporting cadence."
+        ],
+        "proof_requirements": [
+          "Show a sample outage-response rhythm, field-communications plan, and daily operations status report."
+        ],
+        "risk_implications": [
+          "Slow site access or weak outage escalation will look operationally unsafe."
+        ]
+      },
+      "expected_present_phrases": [
+        "outage response",
+        "daily status reporting"
+      ],
+      "expected_absent_phrases": [
+        "credible staffing plan",
+        "build a light compliance matrix"
+      ]
+    },
+    {
+      "id": "heldout-cold-chain-logistics",
+      "expectation": "anchored",
+      "customer_priorities": {
+        "evidence_backed_priorities": [
+          "Cold-chain integrity and discrepancy reporting appear central to the mission load."
+        ],
+        "likely_priorities": [
+          "Turnaround discipline may matter because inventory and shipment evidence are visible."
+        ]
+      },
+      "capability_fit": {
+        "capability_hits": [
+          "temperature-controlled logistics",
+          "lot traceability"
+        ],
+        "past_performance_hits": [
+          "medical inventory reporting"
+        ]
+      },
+      "partner_analysis": {
+        "best_partner_candidates": [],
+        "partner_outreach_action_items": []
+      },
+      "incumbent_analysis": {
+        "strength_signals": []
+      },
+      "contract_type": "Time and Materials",
+      "policy_signals": [],
+      "solicitation_facts": {
+        "quoted_facts": [
+          "Evaluation basis: Best Value",
+          "Period of performance: Base year plus two option years"
+        ],
+        "staffing_roles": [
+          "Warehouse lead",
+          "Quality specialist"
+        ],
+        "period_of_performance": "Base year plus two option years",
+        "funds_status": ""
+      },
+      "attachment_workstreams": [
+        {
+          "title": "Cold-chain inventory control",
+          "objective": "Maintain temperature-controlled inventory and lot traceability across receipt, storage, and shipment.",
+          "evidence_snippets": [
+            "PWS 2.1 Scope: The contractor shall maintain temperature-controlled inventory, document lot traceability, and resolve shipment discrepancies within one business day."
+          ]
+        },
+        {
+          "title": "Shipment discrepancy reporting",
+          "objective": "Provide discrepancy reporting and corrective-action tracking for delayed or compromised shipments.",
+          "evidence_snippets": [
+            "PWS 2.4 Deliverables: The contractor shall submit weekly discrepancy reports, corrective-action status, and inventory accuracy metrics."
+          ]
+        }
+      ],
+      "staffing_pricing_signals": {
+        "staffing_notes": [
+          "Operational reporting and quality review appear visible in the scope."
+        ],
+        "pricing_notes": [],
+        "evaluation_notes": [
+          "Evaluation basis surfaced in the solicitation package: Best Value."
+        ]
+      },
+      "attachment_anomalies": [],
+      "strategic_reasoning": {
+        "central_pain_point": "The buyer needs traceable cold-chain execution, not just warehouse labor.",
+        "reasoning_summary": "Lot traceability, discrepancy response, and recurring inventory evidence appear to be evaluator concerns.",
+        "reasoned_pain_points": [
+          "Shipment discrepancy response and cold-chain evidence will matter because both are visible in the package."
+        ],
+        "reasoned_win_themes": [
+          "Requirement throughput with documented discipline: show how the team will preserve lot traceability and move discrepancy reports without rework."
+        ],
+        "reasoned_differentiators": [
+          "A discrepancy-resolution loop tied directly to inventory accuracy metrics and weekly reporting."
+        ],
+        "proof_requirements": [
+          "Show sample discrepancy reports, corrective-action tracking, and inventory accuracy evidence."
+        ],
+        "risk_implications": [
+          "Weak lot traceability will undermine both compliance and mission confidence."
+        ]
+      },
+      "expected_present_phrases": [
+        "lot traceability",
+        "discrepancy"
+      ],
+      "expected_absent_phrases": [
+        "ghost generic it firms",
+        "light compliance matrix"
+      ]
+    },
+    {
+      "id": "heldout-benefits-appeals",
+      "expectation": "anchored",
+      "customer_priorities": {
+        "evidence_backed_priorities": [
+          "Case-file throughput and review quality appear central to the requirement."
+        ],
+        "likely_priorities": [
+          "Turnaround-time discipline may influence evaluator confidence."
+        ]
+      },
+      "capability_fit": {
+        "capability_hits": [
+          "case review operations",
+          "appeals documentation"
+        ],
+        "past_performance_hits": [
+          "benefits case processing"
+        ]
+      },
+      "partner_analysis": {
+        "best_partner_candidates": [],
+        "partner_outreach_action_items": []
+      },
+      "incumbent_analysis": {
+        "strength_signals": []
+      },
+      "contract_type": "Firm Fixed Price",
+      "policy_signals": [],
+      "solicitation_facts": {
+        "quoted_facts": [
+          "Contract type: Firm Fixed Price",
+          "Evaluation basis: Best Value"
+        ],
+        "staffing_roles": [
+          "Appeals analyst",
+          "Quality reviewer"
+        ],
+        "period_of_performance": "Base year plus three option years",
+        "funds_status": ""
+      },
+      "attachment_workstreams": [
+        {
+          "title": "Appeals file review",
+          "objective": "Review case files, validate medical necessity packets, and draft appeal-ready documentation within required turnaround times.",
+          "evidence_snippets": [
+            "PWS 3.2 Scope: The contractor shall review case files, validate supporting medical documentation, and draft appeal-ready summaries within five business days."
+          ]
+        },
+        {
+          "title": "Quality review and corrections",
+          "objective": "Maintain quality-review checkpoints and corrective-action tracking for returned or incomplete appeal packages.",
+          "evidence_snippets": [
+            "PWS 3.6 Quality Control: The contractor shall maintain corrective-action logs for incomplete appeal packages and report weekly turnaround metrics."
+          ]
+        }
+      ],
+      "staffing_pricing_signals": {
+        "staffing_notes": [
+          "The visible staffing mix points to case review and quality control discipline."
+        ],
+        "pricing_notes": [
+          "Contract posture is Firm Fixed Price."
+        ],
+        "evaluation_notes": [
+          "Evaluation basis surfaced in the solicitation package: Best Value."
+        ]
+      },
+      "attachment_anomalies": [],
+      "strategic_reasoning": {
+        "central_pain_point": "The buyer needs reliable case-file throughput and fewer returned packages.",
+        "reasoning_summary": "Appeal-ready documentation, turnaround time, and corrective-action logs look central to execution credibility.",
+        "reasoned_pain_points": [
+          "Returned or incomplete appeal packages will create visible customer pain if quality control is weak."
+        ],
+        "reasoned_win_themes": [
+          "QA/QC that protects mission outcomes and rework budgets: show how the team will reduce returned packages and protect turnaround times."
+        ],
+        "reasoned_differentiators": [
+          "A weekly turnaround and corrective-action control loop tied directly to appeal-package quality."
+        ],
+        "proof_requirements": [
+          "Show sample turnaround metrics, appeal-package reviews, and corrective-action logs."
+        ],
+        "risk_implications": [
+          "Weak quality review will show up immediately in returned packages and missed turnaround commitments."
+        ]
+      },
+      "expected_present_phrases": [
+        "returned packages",
+        "turnaround"
+      ],
+      "expected_absent_phrases": [
+        "generic it firms",
+        "compliance matrix"
+      ]
+    },
+    {
+      "id": "thin-policy-only",
+      "expectation": "thin",
+      "customer_priorities": {
+        "evidence_backed_priorities": [],
+        "likely_priorities": [
+          "A named security framework appears in the notice."
+        ]
+      },
+      "capability_fit": {
+        "capability_hits": [
+          "cloud security"
+        ],
+        "past_performance_hits": []
+      },
+      "partner_analysis": {
+        "best_partner_candidates": [],
+        "partner_outreach_action_items": []
+      },
+      "incumbent_analysis": {
+        "strength_signals": []
+      },
+      "contract_type": "Firm Fixed Price",
+      "policy_signals": [
+        "NIST SP 800-53"
+      ],
+      "solicitation_facts": {
+        "quoted_facts": [
+          "Contract type: Firm Fixed Price"
+        ],
+        "staffing_roles": [],
+        "period_of_performance": "",
+        "funds_status": ""
+      },
+      "attachment_workstreams": [],
+      "staffing_pricing_signals": {
+        "staffing_notes": [],
+        "pricing_notes": [],
+        "evaluation_notes": []
+      },
+      "attachment_anomalies": [],
+      "strategic_reasoning": {
+        "central_pain_point": "Thin evidence should not produce a strategic story.",
+        "reasoning_summary": "Only policy language is visible.",
+        "reasoned_pain_points": [
+          "Policy references alone are not enough to infer operational priorities."
+        ],
+        "reasoned_win_themes": [
+          "No-drama access and security compliance should anchor the solution story."
+        ],
+        "reasoned_differentiators": [
+          "Compliance readiness."
+        ],
+        "proof_requirements": [
+          "Security evidence."
+        ],
+        "risk_implications": [
+          "Thin evidence should stay thin."
+        ]
+      },
+      "expected_absent_phrases": [
+        "no-drama access",
+        "price discipline and scope control"
+      ]
+    },
+    {
+      "id": "thin-admin-support",
+      "expectation": "thin",
+      "customer_priorities": {
+        "evidence_backed_priorities": [],
+        "likely_priorities": []
+      },
+      "capability_fit": {
+        "capability_hits": [],
+        "past_performance_hits": []
+      },
+      "partner_analysis": {
+        "best_partner_candidates": [],
+        "partner_outreach_action_items": []
+      },
+      "incumbent_analysis": {
+        "strength_signals": []
+      },
+      "contract_type": "Time and Materials",
+      "policy_signals": [],
+      "solicitation_facts": {
+        "quoted_facts": [],
+        "staffing_roles": [],
+        "period_of_performance": "",
+        "funds_status": ""
+      },
+      "attachment_workstreams": [],
+      "staffing_pricing_signals": {
+        "staffing_notes": [],
+        "pricing_notes": [],
+        "evaluation_notes": []
+      },
+      "attachment_anomalies": [],
+      "strategic_reasoning": {
+        "central_pain_point": "No structured scope evidence is available.",
+        "reasoning_summary": "The package is too thin for operational reasoning.",
+        "reasoned_pain_points": [],
+        "reasoned_win_themes": [
+          "Ready on day one where the work happens."
+        ],
+        "reasoned_differentiators": [],
+        "proof_requirements": [
+          "Operational proof."
+        ],
+        "risk_implications": []
+      },
+      "expected_absent_phrases": [
+        "ready on day one",
+        "customer hot buttons remain partly inferred"
+      ]
+    }
+  ],
+  "generic_strategy_controls": [
+    {
+      "id": "manual-generic-strategy-regression",
+      "decision_sections": {
+        "win_strategy": {
+          "hot_buttons": [
+            "The customer needs a credible staffing plan for the visible labor mix and execution setting."
+          ],
+          "win_themes": [
+            "Show how the team will execute the primary requirement workstreams from day one, not just provide a labor category map."
+          ],
+          "discriminators": [
+            "A delivery story that links startup readiness, QA/QC rigor, reporting discipline, and workstream throughput in one narrative."
+          ]
+        }
+      },
+      "solicitation_facts": {
+        "quoted_facts": [
+          "Contract type: Firm Fixed Price"
+        ]
+      },
+      "attachment_workstreams": [
+        {
+          "title": "Generic support",
+          "objective": "Provide support services.",
+          "evidence_snippets": [
+            "PWS 1.1 Scope: The contractor shall provide administrative support services."
+          ]
+        }
+      ],
+      "attachment_bundle": {
+        "attachments": [
+          {
+            "category": "statement_of_work"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -22,6 +22,10 @@
 
 {{OPPORTUNITY_SNAPSHOT}}
 
+### Procurement Timeline
+
+{{PROCUREMENT_TIMELINE}}
+
 ## 3. Pursuit Recommendation and Score
 
 {{PURSUIT_RECOMMENDATION_AND_SCORE}}

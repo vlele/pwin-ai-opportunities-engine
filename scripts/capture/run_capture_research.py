@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from datetime import datetime
 import html
 import json
 import re
@@ -108,6 +109,8 @@ OBJECTIVE_SECTION_HEADING_RE = re.compile(r"^\s*\d+(?:\.\d+){0,3}\s+[A-Z][A-Za-z
 OBJECTIVE_TOC_LINE_RE = re.compile(r"\.{5,}\s*\d+\s*$")
 OBJECTIVE_TABLE_CELL_SPLIT_RE = re.compile(r"\s*(?:\||\t| {2,})\s*")
 OBJECTIVE_HEADING_PREFIX_RE = re.compile(r"^\s*(\d+(?:\.\d+){0,3})\s+(.+?)\s*$")
+WORKSTREAM_BULLET_RE = re.compile(r"^\s*[\u2022\u25cf\u00b7\uf0a7\-*]+\s*(.+?)\s*$")
+WORKSTREAM_PAGE_RE = re.compile(r"^page\s+\d+\s+of\s+\d+$", re.IGNORECASE)
 OBJECTIVE_BOILERPLATE_MARKERS = (
     "request for information",
     "responses are due",
@@ -122,6 +125,22 @@ OBJECTIVE_BOILERPLATE_MARKERS = (
     "standard form 30",
     "questions and answers",
     "vendor question",
+)
+OBJECTIVE_FORMATTING_MARKERS = (
+    "tracking, kerning, and leading",
+    "text size shall be no less than arial",
+    "shall not exceed ten pages",
+    "limited to no more than 15 pages",
+    "page limits",
+    "both sides of a sheet",
+    "proposal paragraphs shall correspond",
+    "amounts/prices shall be rounded",
+    "electronic media to the poc",
+    "offeror's quote must show",
+    "resume shall",
+    "margin",
+    "font",
+    "type size",
 )
 OBJECTIVE_MIN_REQUIREMENT_OVERLAP = 2
 OBJECTIVE_ADMIN_TOKENS = {
@@ -144,6 +163,44 @@ OBJECTIVE_PREFERRED_SECTION_HINTS = (
     "services required",
     "performance objectives",
     "requirements",
+)
+WORKSTREAM_SECTION_HINTS = (
+    "vision statement",
+    "background",
+    "description of services",
+    "electronic records management application",
+    "specific tasks",
+    "digitization",
+    "scanning",
+    "hosting",
+    "storage",
+    "dashboard",
+    "user administration",
+    "api",
+    "help desk",
+    "training",
+    "management reviews",
+    "independent audit",
+    "records management and retention",
+    "transition-in",
+    "transition in",
+    "transition out",
+)
+WORKSTREAM_SECTION_SKIP_HINTS = (
+    "table of contents",
+    "general information",
+    "acronyms",
+    "definitions and acronyms",
+    "government-furnished property",
+    "acceptance criteria",
+    "performance requirements summary",
+    "related documents",
+)
+WORKSTREAM_SERVICE_LIST_ANCHORS = (
+    "shall include but are not limited to",
+    "services support shall include",
+    "services shall include",
+    "tasks include",
 )
 OBJECTIVE_DEMOTED_SECTION_HINTS = (
     "introduction",
@@ -171,6 +228,53 @@ NO_FUNDING_CORROBORATION = "No funding corroboration found in current run; valid
 INCUMBENT_UNVERIFIED = "Incumbent unverified in current evidence."
 NO_OBJECTIVE_KPIS = "No objective-specific KPI signal found in current evidence."
 NO_SOLUTION_IMPLICATIONS = "Do not infer solution implications until the SOW/PWS task structure is validated."
+MONTH_NAMES = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+ATTACHMENT_FACT_CATEGORY_PRIORITY = {
+    "solicitation": 0,
+    "amendment": 1,
+    "instructions_evaluation": 2,
+    "statement_of_work": 3,
+    "questions_answers": 4,
+    "other": 5,
+}
+ATTACHMENT_FACT_SCOPE_PRIORITY = {
+    "statement_of_work": 0,
+    "solicitation": 1,
+    "amendment": 2,
+    "instructions_evaluation": 3,
+    "questions_answers": 4,
+    "other": 5,
+}
+GENERIC_STRATEGY_CUES = (
+    "credible staffing plan",
+    "day-one",
+    "day one",
+    "build a light compliance matrix",
+    "price-to-win",
+    "ghost",
+    "staffing plan",
+    "operating-readiness story",
+    "proof point",
+    "transition story",
+)
+GENERIC_STRATEGY_FIELDS = (
+    ("hot button", "hot_buttons"),
+    ("win theme", "win_themes"),
+    ("discriminator", "discriminators"),
+)
 
 
 def request_id_for(entry_value: str) -> str:
@@ -278,6 +382,19 @@ def _build_direct_local_context(resolved: dict[str, object]) -> dict[str, object
     }
 
 
+def _preferred_usaspending_search_text(resolved: dict[str, object], canonical_id: str) -> str:
+    candidates = [
+        str(resolved.get("notice_id", "") or "").strip(),
+        str(resolved.get("solicitation_number", "") or "").strip(),
+        str(canonical_id or "").strip(),
+        str(resolved.get("title", "") or "").strip(),
+    ]
+    for candidate in candidates:
+        if candidate and any(char.isdigit() for char in candidate):
+            return candidate
+    return next((candidate for candidate in candidates if candidate), "direct-local-capture")
+
+
 def _merge_attachment_bundles(primary: dict[str, object], supplemental: dict[str, object]) -> dict[str, object]:
     merged_contacts = [
         item
@@ -326,6 +443,12 @@ def _attachment_structured_rows(attachment_bundle: dict[str, object], max_items:
     )
     rows: list[str] = []
     for item in ordered:
+        for row in item.get("structured_rows", []) or []:
+            cleaned_row = _clean_excerpt(row, max_chars=360).strip(" ;:-")
+            if cleaned_row and not _is_boilerplate_objective_sentence(cleaned_row):
+                rows.append(cleaned_row)
+                if len(rows) >= max_items:
+                    return _dedupe_strings(rows)[:max_items]
         values = [*(item.get("snippets", []) or []), item.get("text_excerpt", "")]
         for value in values:
             raw = str(value or "")
@@ -344,6 +467,9 @@ def _attachment_structured_rows(attachment_bundle: dict[str, object], max_items:
                 if _is_toc_like_objective_line(current) or re.fullmatch(r"\d+", current):
                     index += 1
                     continue
+                if _is_boilerplate_objective_sentence(current):
+                    index += 1
+                    continue
                 if OBJECTIVE_ROW_PREFIX_RE.match(current):
                     combined = current
                     lookahead = index + 1
@@ -354,6 +480,9 @@ def _attachment_structured_rows(attachment_bundle: dict[str, object], max_items:
                         ).strip(" ;:-")
                         if not next_line or OBJECTIVE_ROW_PREFIX_RE.match(next_line):
                             break
+                        if _is_boilerplate_objective_sentence(next_line):
+                            lookahead += 1
+                            continue
                         if next_line.lower().startswith(("question", "answer", "note", "instruction")):
                             break
                         combined = f"{combined}; {next_line}"
@@ -377,6 +506,9 @@ def _attachment_structured_rows(attachment_bundle: dict[str, object], max_items:
                             lookahead += 1
                             continue
                         if _is_toc_like_objective_line(next_line) or re.fullmatch(r"\d+", next_line):
+                            lookahead += 1
+                            continue
+                        if _is_boilerplate_objective_sentence(next_line):
                             lookahead += 1
                             continue
                         if OBJECTIVE_SECTION_HEADING_RE.match(next_line) or OBJECTIVE_ROW_PREFIX_RE.match(next_line):
@@ -404,6 +536,226 @@ def _normalize_signal_text(value: object) -> str:
 
 def _attachment_text_value(item: dict[str, object], *, max_chars: int = 12000) -> str:
     return _clean_excerpt(item.get("structured_text_excerpt") or item.get("text_excerpt", ""), max_chars=max_chars)
+
+
+def _attachment_section_blocks(
+    attachment_bundle: dict[str, object],
+    *,
+    allowed_categories: set[str] | None = None,
+    max_items: int = 12,
+    include_filename: bool = False,
+) -> list[dict[str, str]]:
+    ordered = _ordered_attachment_items(
+        attachment_bundle,
+        allowed_categories=allowed_categories,
+        max_items=6,
+    )
+    blocks: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in ordered:
+        filename = str(item.get("filename", "attachment") or "attachment")
+        category = str(item.get("category", "other") or "other")
+        for block in item.get("section_blocks", []) or []:
+            if not isinstance(block, dict):
+                continue
+            title = _clean_excerpt(block.get("title", ""), max_chars=220).strip(" ;:-")
+            text = _clean_excerpt(block.get("text", ""), max_chars=960).strip()
+            if not text:
+                continue
+            key = _normalize_signal_text(f"{filename} {title} {text}")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            rendered = text if not include_filename else f"{filename}: {text}"
+            blocks.append(
+                {
+                    "filename": filename,
+                    "category": category,
+                    "title": title or _objective_heading_title(text),
+                    "text": rendered,
+                    "source_text": text,
+                }
+            )
+            if len(blocks) >= max_items:
+                return blocks[:max_items]
+    return blocks[:max_items]
+
+
+def _workstream_heading_title(line: str) -> str:
+    cleaned = _clean_excerpt(line, max_chars=240).strip()
+    match = OBJECTIVE_HEADING_PREFIX_RE.match(cleaned)
+    title = match.group(2) if match else cleaned
+    return re.sub(r"\s+", " ", title).strip(" .:-")
+
+
+def _is_workstream_heading(line: str) -> bool:
+    cleaned = _clean_excerpt(line, max_chars=240).strip()
+    if not cleaned or _is_toc_like_objective_line(cleaned) or WORKSTREAM_PAGE_RE.match(cleaned):
+        return False
+    return cleaned.lower() == "vision statement" or OBJECTIVE_SECTION_HEADING_RE.match(cleaned) is not None
+
+
+def _workstream_line_text(line: str) -> tuple[str, bool]:
+    cleaned = _clean_excerpt(line, max_chars=260).strip()
+    match = WORKSTREAM_BULLET_RE.match(cleaned)
+    if match:
+        return match.group(1).strip(" .;:-"), True
+    return cleaned.strip(" .;:-"), False
+
+
+def _workstream_summary(title: str, content_lines: list[str]) -> str:
+    summary_lines: list[str] = []
+    service_items: list[str] = []
+    in_service_list = False
+    for raw_line in content_lines:
+        cleaned, is_bullet = _workstream_line_text(raw_line)
+        if not cleaned or WORKSTREAM_PAGE_RE.match(cleaned) or _is_toc_like_objective_line(cleaned):
+            continue
+        lower = cleaned.lower()
+        if any(anchor in lower for anchor in WORKSTREAM_SERVICE_LIST_ANCHORS):
+            in_service_list = True
+            continue
+        if in_service_list and is_bullet:
+            service_items.append(cleaned)
+            continue
+        if in_service_list and service_items and len(cleaned.split()) > 10:
+            in_service_list = False
+        if _is_boilerplate_objective_sentence(cleaned):
+            continue
+        summary_lines.append(cleaned)
+    prefix = _clean_excerpt(" ".join(summary_lines[:4]).strip(), max_chars=420)
+    if service_items:
+        service_clause = ", ".join(_dedupe_strings(service_items)[:10])
+        if prefix:
+            return _clean_excerpt(f"{prefix} Key service areas include {service_clause}.", max_chars=900)
+        return _clean_excerpt(f"{title}: Key service areas include {service_clause}.", max_chars=900)
+    return prefix
+
+
+def _workstream_priority(title: str, objective: str) -> int:
+    lower = f"{title} {objective}".lower()
+    score = 0
+    weighted_terms = (
+        ("electronic records management application", 120),
+        ("description of services", 110),
+        ("records management and retention", 105),
+        ("transition-in", 100),
+        ("transition out", 95),
+        ("independent audit", 92),
+        ("digitization", 90),
+        ("scanning", 88),
+        ("dashboard", 86),
+        ("help desk", 86),
+        ("training", 84),
+        ("api", 82),
+        ("background", 78),
+        ("vision statement", 76),
+    )
+    for token, weight in weighted_terms:
+        if token in lower:
+            score = max(score, weight)
+    if any(token in lower for token in ("records", "retention", "security", "compliance", "transition", "audit")):
+        score += 15
+    return score
+
+
+def _section_backed_workstreams(attachment_bundle: dict[str, object], max_items: int = 8) -> list[dict[str, object]]:
+    block_workstreams: list[dict[str, object]] = []
+    seen_block_keys: set[str] = set()
+    for block in _attachment_section_blocks(
+        attachment_bundle,
+        allowed_categories={"statement_of_work", "solicitation", "instructions_evaluation", "amendment"},
+        max_items=18,
+        include_filename=True,
+    ):
+        title = str(block.get("title", "") or "").strip()
+        text = str(block.get("source_text", "") or block.get("text", "") or "").strip()
+        combined_lower = f"{title} {text}".lower()
+        if not text or any(hint in combined_lower for hint in WORKSTREAM_SECTION_SKIP_HINTS):
+            continue
+        if not any(hint in combined_lower for hint in WORKSTREAM_SECTION_HINTS) and not any(
+            anchor in combined_lower for anchor in WORKSTREAM_SERVICE_LIST_ANCHORS
+        ):
+            continue
+        summary = _clean_excerpt(text, max_chars=900)
+        key = _normalize_signal_text(f"{title} {summary}")
+        if not key or key in seen_block_keys:
+            continue
+        seen_block_keys.add(key)
+        block_workstreams.append(
+            {
+                "title": title,
+                "objective": summary,
+                "evidence_snippets": [str(block.get("text", "") or "").strip()],
+                "_priority": _workstream_priority(title, summary),
+            }
+        )
+    if block_workstreams:
+        block_workstreams.sort(key=lambda item: int(item.get("_priority", 0)), reverse=True)
+        trimmed: list[dict[str, object]] = []
+        for item in block_workstreams[:max_items]:
+            item.pop("_priority", None)
+            trimmed.append(item)
+        return trimmed
+
+    ordered = _ordered_attachment_items(
+        attachment_bundle,
+        allowed_categories={"statement_of_work", "solicitation", "instructions_evaluation", "amendment"},
+        max_items=6,
+    )
+    workstreams: list[dict[str, object]] = []
+    seen_keys: set[str] = set()
+    for item in ordered:
+        filename = str(item.get("filename", "attachment") or "attachment")
+        raw_text = str(item.get("structured_text_excerpt") or item.get("text_excerpt") or "")
+        if not raw_text.strip():
+            continue
+        lines = [line.strip() for line in raw_text.replace("\r", "\n").split("\n") if line.strip()]
+        index = 0
+        while index < len(lines):
+            current = lines[index]
+            if not _is_workstream_heading(current):
+                index += 1
+                continue
+            title = _workstream_heading_title(current)
+            lower_title = title.lower()
+            index += 1
+            section_lines: list[str] = []
+            while index < len(lines):
+                candidate = lines[index]
+                if _is_workstream_heading(candidate):
+                    break
+                if not WORKSTREAM_PAGE_RE.match(candidate):
+                    section_lines.append(candidate)
+                index += 1
+            if not section_lines or any(hint in lower_title for hint in WORKSTREAM_SECTION_SKIP_HINTS):
+                continue
+            summary = _workstream_summary(title, section_lines)
+            combined_lower = f"{lower_title} {summary.lower()}".strip()
+            if not summary:
+                continue
+            if not any(hint in combined_lower for hint in WORKSTREAM_SECTION_HINTS) and not any(
+                anchor in combined_lower for anchor in WORKSTREAM_SERVICE_LIST_ANCHORS
+            ):
+                continue
+            key = _normalize_signal_text(f"{title} {summary}")
+            if not key or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            workstreams.append(
+                {
+                    "title": title,
+                    "objective": summary,
+                    "evidence_snippets": [f"{filename}: {title}: {summary}"],
+                    "_priority": _workstream_priority(title, summary),
+                }
+            )
+    workstreams.sort(key=lambda item: int(item.get("_priority", 0)), reverse=True)
+    trimmed: list[dict[str, object]] = []
+    for item in workstreams[:max_items]:
+        item.pop("_priority", None)
+        trimmed.append(item)
+    return trimmed
 
 
 def _is_toc_like_objective_line(text: str) -> bool:
@@ -591,6 +943,15 @@ def _attachment_scope_snippets(attachment_bundle: dict[str, object], max_snippet
     attachments = attachment_bundle.get("attachments", []) if isinstance(attachment_bundle, dict) else []
     prioritized_categories = {"statement_of_work", "solicitation", "instructions_evaluation", "amendment"}
     snippets: list[str] = []
+    for block in _attachment_section_blocks(
+        attachment_bundle,
+        allowed_categories=prioritized_categories,
+        max_items=max_snippets * 2,
+        include_filename=True,
+    ):
+        text = str(block.get("text", "") or "").strip()
+        if text:
+            snippets.append(_clean_excerpt(text, max_chars=320))
     for item in attachments:
         if not isinstance(item, dict):
             continue
@@ -735,6 +1096,10 @@ def _ordered_attachment_items(
 def _attachment_text_pool(attachment_bundle: dict[str, object], max_items: int = 5) -> list[str]:
     ordered = _ordered_attachment_items(attachment_bundle, max_items=max_items)
     texts: list[str] = []
+    for block in _attachment_section_blocks(attachment_bundle, max_items=max_items * 2):
+        source_text = _clean_excerpt(block.get("source_text", "") or "", max_chars=900)
+        if source_text:
+            texts.append(source_text)
     for item in ordered:
         text_excerpt = _attachment_text_value(item, max_chars=5000)
         if text_excerpt:
@@ -744,6 +1109,1181 @@ def _attachment_text_pool(attachment_bundle: dict[str, object], max_items: int =
             if cleaned:
                 texts.append(cleaned)
     return _dedupe_strings(texts)
+
+
+def _dense_attachment_text(
+    attachment_bundle: dict[str, object],
+    *,
+    allowed_categories: set[str] | None = None,
+    max_items: int = 6,
+    max_chars_per_attachment: int = 24000,
+) -> str:
+    ordered = _ordered_attachment_items(
+        attachment_bundle,
+        allowed_categories=allowed_categories,
+        max_items=max_items,
+    )
+    values: list[str] = []
+    for item in ordered:
+        text = _attachment_text_value(item, max_chars=max_chars_per_attachment)
+        if text:
+            values.append(text)
+    dense = SPACE_RE.sub(" ", " ".join(values)).strip()
+    repairs = (
+        (r"Firm-\s*Fixe\s*d\s+Price", "Firm-Fixed Price"),
+        (r"Set\s*-\s*Aside", "Set-Aside"),
+        (r"Per\s*forman\s*ce", "Performance"),
+        (r"Ad\s*dendum", "Addendum"),
+        (r"Wo\s*rk", "Work"),
+        (r"Oasis\s*\+\s*SB", "OASIS+ SB"),
+    )
+    for pattern, replacement in repairs:
+        dense = re.sub(pattern, replacement, dense, flags=re.IGNORECASE)
+    return dense
+
+
+def _fact_window_from_lines(lines: list[str], label_patterns: tuple[str, ...], *, max_follow_lines: int = 2) -> str:
+    compiled = [re.compile(pattern, re.IGNORECASE) for pattern in label_patterns]
+    for index, line in enumerate(lines):
+        cleaned = _repair_pdf_spacing(_clean_excerpt(line, max_chars=260))
+        if not cleaned:
+            continue
+        for pattern in compiled:
+            match = pattern.search(cleaned)
+            if not match:
+                continue
+            values: list[str] = []
+            if match.lastindex:
+                values.extend(
+                    str(match.group(group_index) or "").strip(" .;:-")
+                    for group_index in range(1, match.lastindex + 1)
+                    if str(match.group(group_index) or "").strip(" .;:-")
+                )
+            if not values and ":" in cleaned:
+                tail = cleaned.split(":", 1)[1].strip(" .;:-")
+                if tail:
+                    values.append(tail)
+            if not values:
+                for next_line in lines[index + 1 : index + 1 + max_follow_lines]:
+                    candidate = _repair_pdf_spacing(_clean_excerpt(next_line, max_chars=220)).strip(" .;:-")
+                    if not candidate or SECTION_HEADING_RE.match(candidate):
+                        break
+                    values.append(candidate)
+                    if len(" ".join(values)) >= 180:
+                        break
+            return _clean_excerpt(" ".join(value for value in values if value), max_chars=220).strip(" .;:-")
+    return ""
+
+
+def _looks_like_fact_value(field: str, value: str) -> bool:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return False
+    lower = cleaned.lower()
+    if field == "due_date":
+        return bool(re.search(r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}/\d{1,2}/\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\b", cleaned, re.IGNORECASE))
+    if field == "period_of_performance":
+        return bool(re.search(r"\b(?:period of performance|base year|option year|month|months|day|days|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{1,2}/\d{1,2}/\d{2,4})\b", cleaned, re.IGNORECASE))
+    if field == "transition_window":
+        return bool(re.search(r"\b\d{1,3}\s*[- ]?day\b", cleaned, re.IGNORECASE))
+    if field == "set_aside":
+        return len(lower.split()) <= 12 and any(token in lower for token in ("small business", "sdvosb", "hubzone", "wosb", "8(a)", "full and open", "unrestricted", "set aside"))
+    if field == "contract_vehicle":
+        return len(lower.split()) <= 12 and any(token in lower for token in ("gwac", "schedule", "idiq", "stars", "sewp", "oasis", "alliant", "cio-sp", "polaris"))
+    return True
+
+
+SET_ASIDE_CLAUSE_NOISE = (
+    "notice of hubzone set-aside",
+    "notice of price evaluation preference for hubzone",
+    "notice of total small business set-aside",
+    "notice of partial small business set-aside",
+    "notice of service-disabled veteran-owned small business set-aside",
+    "notice of set-aside of orders",
+    "notice of set-aside for",
+    "post award small business program representation",
+    "utilization of small business concerns",
+    "limitations on subcontracting",
+    "small business subcontracting plan",
+)
+EXPLICIT_VEHICLE_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"\b8\(a\)\s+stars\s+iii\b|\b8a\s+stars\s+iii\b", "8(a) STARS III GWAC"),
+    (r"\b8\(a\)\s+stars\s+ii\b|\b8a\s+stars\s+ii\b", "8(a) STARS II GWAC"),
+    (r"\bnasa\s+sewp\b|\bsewp\b", "NASA SEWP"),
+    (r"\bcio-sp\b|\bcio sp\b", "CIO-SP"),
+    (r"\boasis\b", "OASIS"),
+    (r"\balliant\b", "Alliant"),
+    (r"\bpolaris\b", "Polaris"),
+)
+EXPLICIT_SET_ASIDE_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"\b100%\s+small\s+business\b", "100% Small Business"),
+    (r"\b8\(a\)\s+program\b|\bcompetitive/8\(a\)\b", "8(a)"),
+    (r"\bservice[- ]disabled veteran[- ]owned small business\b|\bsdvosb\b", "SDVOSB"),
+    (r"\bhubzone\b", "HUBZone"),
+    (r"\bwosb\b", "WOSB"),
+    (r"\bfull\s+and\s+open\b|\bunrestricted\b", "Full and Open"),
+)
+
+
+def _is_set_aside_clause_noise(line: str) -> bool:
+    lower = SPACE_RE.sub(" ", str(line or "").lower()).strip()
+    if not lower:
+        return False
+    if re.search(r"\b(?:far|hudar)?\s*52\.219-\d+\b", lower):
+        return True
+    return any(marker in lower for marker in SET_ASIDE_CLAUSE_NOISE)
+
+
+def _clean_set_aside_candidate(value: str) -> str:
+    cleaned = _repair_pdf_spacing(_clean_excerpt(value, max_chars=120)).strip(" .;:-")
+    lower = cleaned.lower()
+    if not cleaned or _is_set_aside_clause_noise(cleaned):
+        return ""
+    cleaned = re.sub(
+        r"\s+(?:other information|the government intends|this announcement constitutes|offerors?\s+must).*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip(" .;:-")
+    if "8(a) stars" in lower or "8a stars" in lower or "8(a) program" in lower or "competitive/8(a)" in lower:
+        return "8(a)"
+    return cleaned
+
+
+def _explicit_acquisition_posture(lines: list[str]) -> dict[str, str]:
+    posture: dict[str, str] = {}
+    for raw_line in lines:
+        line = _repair_pdf_spacing(_clean_excerpt(raw_line, max_chars=260)).strip()
+        if not line:
+            continue
+        lower = line.lower()
+        if not posture.get("contract_vehicle"):
+            for pattern, label in EXPLICIT_VEHICLE_PATTERNS:
+                if not re.search(pattern, lower, re.IGNORECASE):
+                    continue
+                if any(marker in lower for marker in ("acquisition strategy", "contract holder", "gwac", "schedule", "ebuy", "task order", "competitive/")):
+                    posture["contract_vehicle"] = label
+                    break
+        if not posture.get("set_aside"):
+            set_aside_match = re.search(r"type\s+of\s+set[- ]aside[:\s]+(.+)$", line, re.IGNORECASE)
+            if set_aside_match:
+                candidate = _clean_set_aside_candidate(set_aside_match.group(1))
+                if candidate:
+                    posture["set_aside"] = candidate
+                    continue
+            if _is_set_aside_clause_noise(line):
+                continue
+            if posture.get("contract_vehicle") == "8(a) STARS III GWAC" and any(marker in lower for marker in ("8(a)", "8a", "competitive/", "contract holder")):
+                posture["set_aside"] = "8(a)"
+                continue
+            for pattern, label in EXPLICIT_SET_ASIDE_PATTERNS:
+                if re.search(pattern, lower, re.IGNORECASE):
+                    posture["set_aside"] = label
+                    break
+        if posture.get("contract_vehicle") and posture.get("set_aside"):
+            break
+    return posture
+
+
+def _attachment_fact_candidates(raw_text: str) -> dict[str, str]:
+    text = _repair_pdf_spacing(str(raw_text or ""))
+    dense = SPACE_RE.sub(" ", text).strip()
+    lines = [line.strip() for line in text.replace("\r", "\n").split("\n") if line.strip()]
+    facts: dict[str, str] = {}
+    if not dense:
+        return facts
+    explicit_posture = _explicit_acquisition_posture(lines)
+    if explicit_posture.get("set_aside"):
+        facts["set_aside"] = explicit_posture["set_aside"]
+    if explicit_posture.get("contract_vehicle"):
+        facts["contract_vehicle"] = explicit_posture["contract_vehicle"]
+
+    facts["due_date"] = _fact_window_from_lines(
+        lines,
+        (
+            r"deadline\s+for\s+receipt\s+of\s+offers\s*:?\s*(.+)?",
+            r"(?:quotes?|offers?|proposals?|responses?)\s+(?:are\s+)?due\s*:?\s*(.+)?",
+            r"offer\s+due\s+date(?:/local\s*time)?\s*:?\s*(.+)?",
+            r"closing\s+date\s*:?\s*(.+)?",
+        ),
+        max_follow_lines=2,
+    )
+
+    if re.search(r"\blowest\s+price\s+technically\s+acceptable\b|\bLPTA\b", dense, re.IGNORECASE):
+        facts["evaluation_basis"] = "LPTA"
+    else:
+        evaluation_match = re.search(
+            r"best\s+value(?:\s+to\s+the\s+government)?(?:,\s*considering\s+factors\s+to\s+include\s+([^\n.]{8,160}))?",
+            dense,
+            re.IGNORECASE,
+        )
+        if evaluation_match:
+            factors = _clean_excerpt(evaluation_match.group(1) or "", max_chars=120).strip(" ,.;:")
+            facts["evaluation_basis"] = f"Best Value ({factors})" if factors else "Best Value"
+
+    contract_type_patterns = (
+        (r"\bfirm[- ]fixed\s+price\b|\bFFP\b", "Firm Fixed Price"),
+        (r"\btime\s+and\s+materials\b|\bT&M\b", "Time and Materials"),
+        (r"\blabor[- ]hour\b", "Labor Hour"),
+        (r"\bcost[- ]plus[- ]fixed[- ]fee\b|\bCPFF\b", "Cost Plus Fixed Fee"),
+        (r"\bcost[- ]reimbursement\b", "Cost Reimbursement"),
+    )
+    for pattern, label in contract_type_patterns:
+        if re.search(pattern, dense, re.IGNORECASE):
+            facts["contract_type"] = label
+            break
+
+    if not facts.get("set_aside"):
+        for line in lines:
+            candidate = _clean_set_aside_candidate(line)
+            if not candidate:
+                continue
+            for pattern, label in EXPLICIT_SET_ASIDE_PATTERNS:
+                if re.search(pattern, candidate, re.IGNORECASE):
+                    facts["set_aside"] = label
+                    break
+            if facts.get("set_aside"):
+                break
+
+    facts["period_of_performance"] = _fact_window_from_lines(
+        lines,
+        (
+            r"period\s+of\s+performance\s*:?\s*(.+)?",
+            r"base\s+period\s*:?\s*(.+)?",
+            r"base\s+year\s*:?\s*(.+)?",
+        ),
+        max_follow_lines=3,
+    )
+    if not facts["period_of_performance"]:
+        pop_patterns = (
+            r"Base\s+Year:\s*([^\n]{6,90})\s+Option\s+Year\s+One:\s*([^\n]{6,90})\s+Option\s+Year\s+Two:\s*([^\n]{6,90})",
+        )
+        for pattern in pop_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if not match:
+                continue
+            facts["period_of_performance"] = _clean_excerpt(
+                f"Base year {match.group(1)}; Option Year 1 {match.group(2)}; Option Year 2 {match.group(3)}",
+                max_chars=220,
+            )
+            break
+
+    transition_patterns = (
+        r"(\d{1,3})[- ]day\s+transition(?:-in)?",
+        r"transition(?:-in)?\s+period\s+of\s+(\d{1,3})\s+days",
+        r"phase[- ]in\s+period\s+of\s+(\d{1,3})\s+days",
+    )
+    for pattern in transition_patterns:
+        match = re.search(pattern, dense, re.IGNORECASE)
+        if match:
+            facts["transition_window"] = f"{match.group(1)}-day transition"
+            break
+
+    if re.search(r"Funds\s+are\s+not\s+presently\s+available", dense, re.IGNORECASE):
+        funds_match = re.search(
+            r"(Funds\s+are\s+not\s+presently\s+available[^.]{0,220}\.)",
+            dense,
+            re.IGNORECASE,
+        )
+        facts["funds_status"] = _clean_excerpt((funds_match.group(1) if funds_match else "Funds are not presently available"), max_chars=220)
+    for field in ("due_date", "period_of_performance", "transition_window", "set_aside", "contract_vehicle"):
+        value = str(facts.get(field, "") or "").strip()
+        if value and not _looks_like_fact_value(field, value):
+            facts.pop(field, None)
+    return facts
+
+
+def _preferred_attachment_fact(
+    rows: list[dict[str, object]],
+    field: str,
+) -> str:
+    field_priority = {
+        "due_date": {
+            "amendment": 0,
+            "solicitation": 1,
+            "instructions_evaluation": 2,
+            "statement_of_work": 3,
+            "questions_answers": 4,
+            "other": 5,
+        },
+        "set_aside": {
+            "solicitation": 0,
+            "amendment": 1,
+            "instructions_evaluation": 2,
+            "statement_of_work": 3,
+            "questions_answers": 4,
+            "other": 5,
+        },
+        "contract_vehicle": {
+            "solicitation": 0,
+            "amendment": 1,
+            "instructions_evaluation": 2,
+            "statement_of_work": 3,
+            "questions_answers": 4,
+            "other": 5,
+        },
+        "contract_type": ATTACHMENT_FACT_CATEGORY_PRIORITY,
+        "evaluation_basis": {
+            "instructions_evaluation": 0,
+            "solicitation": 1,
+            "amendment": 2,
+            "statement_of_work": 3,
+            "questions_answers": 4,
+            "other": 5,
+        },
+        "period_of_performance": ATTACHMENT_FACT_SCOPE_PRIORITY,
+        "transition_window": ATTACHMENT_FACT_SCOPE_PRIORITY,
+        "funds_status": {
+            "solicitation": 0,
+            "amendment": 1,
+            "statement_of_work": 2,
+            "instructions_evaluation": 3,
+            "questions_answers": 4,
+            "other": 5,
+        },
+    }
+    priority = field_priority.get(field, ATTACHMENT_FACT_CATEGORY_PRIORITY)
+    candidates = [
+        row
+        for row in rows
+        if isinstance(row, dict) and str(((row.get("facts") or {}).get(field) if isinstance(row.get("facts"), dict) else "") or "").strip()
+    ]
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda row: priority.get(str(row.get("category", "other") or "other"), 9))
+    return str(((candidates[0].get("facts") or {}).get(field) if isinstance(candidates[0].get("facts"), dict) else "") or "").strip()
+
+
+def _attachment_fact_matrix(attachment_bundle: dict[str, object]) -> dict[str, object]:
+    rows: list[dict[str, object]] = []
+    for item in _ordered_attachment_items(
+        attachment_bundle,
+        allowed_categories={"statement_of_work", "solicitation", "instructions_evaluation", "questions_answers", "amendment"},
+        max_items=10,
+    ):
+        raw_text = str(item.get("structured_text_excerpt") or item.get("text_excerpt") or "")
+        if not raw_text.strip():
+            continue
+        facts = _attachment_fact_candidates(raw_text)
+        if not facts:
+            continue
+        rows.append(
+            {
+                "filename": str(item.get("filename", "attachment") or "attachment"),
+                "category": str(item.get("category", "other") or "other"),
+                "facts": facts,
+            }
+        )
+
+    conflicts: list[dict[str, object]] = []
+    for field in ("due_date", "set_aside", "contract_vehicle", "contract_type", "evaluation_basis", "period_of_performance", "transition_window", "funds_status"):
+        values: dict[str, dict[str, object]] = {}
+        for row in rows:
+            facts = row.get("facts", {})
+            if not isinstance(facts, dict):
+                continue
+            value = str(facts.get(field, "") or "").strip()
+            normalized = _normalize_signal_text(value)
+            if not normalized:
+                continue
+            entry = values.setdefault(normalized, {"value": value, "sources": []})
+            entry["sources"].append(f"{row.get('filename', 'attachment')} [{row.get('category', 'other')}]")
+        if len(values) > 1:
+            conflicts.append(
+                {
+                    "field": field.replace("_", " "),
+                    "values": [str(entry.get("value", "") or "").strip() for entry in values.values()],
+                    "sources": [source for entry in values.values() for source in (entry.get("sources", []) or [])],
+                }
+            )
+    return {"rows": rows, "conflicts": conflicts}
+
+
+def _attachment_parse_guardrails(attachment_bundle: dict[str, object]) -> dict[str, object]:
+    attachments = attachment_bundle.get("attachments", []) if isinstance(attachment_bundle, dict) else []
+    poor_parse_files: list[str] = []
+    matrix_files: list[str] = []
+    acceptance_files: list[str] = []
+    pricing_files: list[str] = []
+    review_required_files: list[str] = []
+    pws_present = False
+    parsed_scope_documents = 0
+
+    for item in attachments:
+        if not isinstance(item, dict):
+            continue
+        filename = str(item.get("filename", "attachment") or "attachment")
+        category = str(item.get("category", "other") or "other")
+        parser_status = str(item.get("parser_status", "") or "")
+        flags = {str(flag) for flag in (item.get("analysis_flags", []) or []) if str(flag).strip()}
+        section_blocks = item.get("section_blocks", []) if isinstance(item.get("section_blocks"), list) else []
+        if category == "statement_of_work":
+            pws_present = True
+        if (
+            category in {"statement_of_work", "solicitation", "amendment"}
+            and parser_status.startswith("parsed")
+            and (int(item.get("text_char_count", 0) or 0) >= 1200 or bool(section_blocks))
+        ):
+            parsed_scope_documents += 1
+        if bool(item.get("review_required")):
+            review_required_files.append(filename)
+        if flags & {"parse_failed_or_unsupported", "ocr_or_image_heavy_pdf", "thin_text_extraction", "scope_document_underparsed"}:
+            poor_parse_files.append(filename)
+        if flags & {"table_or_matrix_heavy", "clin_or_task_matrix_visible"}:
+            matrix_files.append(filename)
+        if flags & {"acceptance_or_aql_visible", "incentive_or_remedy_visible"}:
+            acceptance_files.append(filename)
+        if "pricing_sheet_or_rate_table" in flags:
+            pricing_files.append(filename)
+
+    warnings: list[str] = []
+    if pws_present and parsed_scope_documents == 0:
+        warnings.append("A PWS exists in the package, but no scope attachment parsed with enough usable text to trust the downstream objective or win-theme output.")
+    if poor_parse_files:
+        warnings.append(f"Some attachments parsed thinly or not at all and need OCR/manual review: {', '.join(_dedupe_strings(poor_parse_files)[:4])}.")
+    if matrix_files:
+        warnings.append(f"CLIN, task-matrix, or table-heavy sections were detected and may require structured extraction: {', '.join(_dedupe_strings(matrix_files)[:4])}.")
+    if acceptance_files:
+        warnings.append(f"Acceptance / AQL / incentive-remedy content was detected and should be reviewed explicitly: {', '.join(_dedupe_strings(acceptance_files)[:4])}.")
+    if pricing_files:
+        warnings.append(f"Pricing sheet or spreadsheet content was detected and should be validated separately from narrative extraction: {', '.join(_dedupe_strings(pricing_files)[:4])}.")
+    return {
+        "pws_present": pws_present,
+        "parsed_scope_documents": parsed_scope_documents,
+        "poor_parse_files": _dedupe_strings(poor_parse_files),
+        "matrix_files": _dedupe_strings(matrix_files),
+        "acceptance_files": _dedupe_strings(acceptance_files),
+        "pricing_files": _dedupe_strings(pricing_files),
+        "review_required_files": _dedupe_strings(review_required_files),
+        "warnings": _dedupe_strings(warnings),
+    }
+
+
+def _repair_pdf_spacing(value: str) -> str:
+    text = str(value or "")
+    text = re.sub(r"(?<=\d)\s+(?=\d{3}\b)", "", text)
+    text = re.sub(r"\b(\d{3})\s+(\d)\b", r"\1\2", text)
+    text = re.sub(r"Per\s*forman\s*ce", "Performance", text, flags=re.IGNORECASE)
+    text = re.sub(r"Ad\s*dendum", "Addendum", text, flags=re.IGNORECASE)
+    text = re.sub(r"Wo\s*rk", "Work", text, flags=re.IGNORECASE)
+    text = re.sub(r"a\s+nd", "and", text, flags=re.IGNORECASE)
+    text = re.sub(r"Attachmen\s+t", "Attachment", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _attachment_context_matches(
+    attachment_bundle: dict[str, object],
+    patterns: list[str],
+    *,
+    allowed_categories: set[str] | None = None,
+    max_items: int = 4,
+    line_radius: int = 2,
+) -> list[str]:
+    ordered = _ordered_attachment_items(
+        attachment_bundle,
+        allowed_categories=allowed_categories,
+        max_items=6,
+    )
+    compiled = [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
+    snippets: list[str] = []
+    for item in ordered:
+        filename = str(item.get("filename", "attachment") or "attachment")
+        raw_text = str(item.get("structured_text_excerpt") or item.get("text_excerpt") or "")
+        if not raw_text.strip():
+            continue
+        lines = [_clean_excerpt(line, max_chars=260) for line in raw_text.replace("\r", "\n").split("\n") if line.strip()]
+        for index, line in enumerate(lines):
+            if _is_toc_like_objective_line(line):
+                continue
+            if not any(pattern.search(line) for pattern in compiled):
+                continue
+            chunk: list[str] = []
+            for candidate in lines[max(0, index - line_radius): min(len(lines), index + line_radius + 1)]:
+                if _is_toc_like_objective_line(candidate):
+                    continue
+                chunk.append(candidate)
+            snippet = SPACE_RE.sub(" ", " ".join(chunk)).strip()
+            if len(snippet) < 50:
+                continue
+            snippets.append(f"{filename}: {snippet[:420]}")
+            if len(snippets) >= max_items:
+                return _dedupe_strings(snippets)[:max_items]
+    return _dedupe_strings(snippets)[:max_items]
+
+
+def _extract_solicitation_facts(
+    attachment_bundle: dict[str, object],
+    resolved: dict[str, object],
+) -> dict[str, object]:
+    dense = _dense_attachment_text(attachment_bundle, max_items=6)
+    statement_dense = _dense_attachment_text(
+        attachment_bundle,
+        allowed_categories={"statement_of_work", "solicitation", "amendment", "instructions_evaluation"},
+        max_items=6,
+    )
+    facts: dict[str, object] = {
+        "notice_id": str(resolved.get("notice_id", "") or "").strip(),
+        "solicitation_number": str(resolved.get("solicitation_number", "") or "").strip(),
+        "issue_date": "",
+        "naics": "",
+        "naics_title": "",
+        "naics_size_standard": "",
+        "set_aside": "",
+        "contract_vehicle": "",
+        "contract_type": "",
+        "evaluation_basis": "",
+        "due_date": "",
+        "funds_status": "",
+        "period_of_performance": "",
+        "transition_window": "",
+        "base_period": "",
+        "option_periods": [],
+        "staffing_roles": [],
+        "attachment_fact_rows": [],
+        "attachment_conflicts": [],
+        "quoted_facts": [],
+    }
+    if not dense:
+        return facts
+    fact_matrix = _attachment_fact_matrix(attachment_bundle)
+    fact_rows = fact_matrix.get("rows", []) if isinstance(fact_matrix, dict) else []
+    attachment_conflicts = fact_matrix.get("conflicts", []) if isinstance(fact_matrix, dict) else []
+    if not isinstance(fact_rows, list):
+        fact_rows = []
+    if not isinstance(attachment_conflicts, list):
+        attachment_conflicts = []
+
+    naics_match = re.search(
+        r"NAICS:\s*(\d{6})\s*[–-]?\s*(.+?)\s+SB\s+Size\s+Standard:",
+        dense,
+        re.IGNORECASE,
+    )
+    if naics_match:
+        facts["naics"] = naics_match.group(1).strip()
+        facts["naics_title"] = _repair_pdf_spacing(_clean_excerpt(naics_match.group(2), max_chars=80))
+    size_match = re.search(r"(?:SB\s+)?Size\s+Standard:\s*\$?\s*([0-9,]+(?:\.\d+)?)", dense, re.IGNORECASE)
+    if size_match:
+        facts["naics_size_standard"] = f"${size_match.group(1).strip()}"
+    set_aside_match = re.search(
+        r"Type\s+of\s+Set[- ]Aside:\s*(.+?)\s+(?:OTHER INFORMATION|The Government intends|This announcement constitutes)",
+        dense,
+        re.IGNORECASE,
+    )
+    if set_aside_match:
+        facts["set_aside"] = _repair_pdf_spacing(_clean_excerpt(set_aside_match.group(1), max_chars=90))
+    vehicle_match = re.search(
+        r"(?:place|issue)\s+a\s+(Firm[- ]Fixed\s+Price\s*\(FFP\)|FFP)\s+order\s+under\s+the\s+(.+?)\s+program",
+        dense,
+        re.IGNORECASE,
+    )
+    if vehicle_match:
+        facts["contract_type"] = "Firm Fixed Price"
+        facts["contract_vehicle"] = _repair_pdf_spacing(_clean_excerpt(vehicle_match.group(2), max_chars=60))
+    else:
+        explicit_vehicle_match = re.search(
+            r"(?:utilizing|under)\s+the\s+(?:Federal Acquisition Regulation\s*\(FAR\)\s*\d+,\s*)?(.+?)(?:Governmentwide Acquisition Contract|\bGWAC\b|contract holder)",
+            dense,
+            re.IGNORECASE,
+        )
+        if explicit_vehicle_match:
+            vehicle_value = _repair_pdf_spacing(_clean_excerpt(explicit_vehicle_match.group(1), max_chars=80)).strip(" ,.;:")
+            if vehicle_value:
+                vehicle_lower = vehicle_value.lower()
+                if "stars iii" in vehicle_lower or "8(a) stars iii" in vehicle_lower:
+                    facts["contract_vehicle"] = "8(a) STARS III GWAC"
+                else:
+                    facts["contract_vehicle"] = vehicle_value
+    if not facts.get("contract_type") and re.search(r"\bFFP\b|Firm[- ]Fixed\s+Price", dense, re.IGNORECASE):
+        facts["contract_type"] = "Firm Fixed Price"
+    issue_date_match = re.search(r"\bDATE:\s*([0-9]{1,2}\s+[A-Za-z]{3,9}\s+[0-9]{4})", dense, re.IGNORECASE)
+    if issue_date_match:
+        facts["issue_date"] = _repair_pdf_spacing(_clean_excerpt(issue_date_match.group(1), max_chars=40))
+    due_date_match = re.search(
+        r"Deadline\s+for\s+receipt\s+of\s+offers:\s*(?:NLT\s*)?(.+?)\s+All\s+quotes\s+shall\s+be\s+emailed",
+        dense,
+        re.IGNORECASE,
+    )
+    if due_date_match:
+        facts["due_date"] = _repair_pdf_spacing(_clean_excerpt(due_date_match.group(1), max_chars=90))
+    evaluation_match = re.search(
+        r"based\s+solely\s+on\s+the\s+best\s+value\s+to\s+the\s+Government,\s+considering\s+factors\s+to\s+include\s+(.+?)(?:\.|Offerors must)",
+        dense,
+        re.IGNORECASE,
+    )
+    if evaluation_match:
+        factors = _repair_pdf_spacing(_clean_excerpt(evaluation_match.group(1), max_chars=90).rstrip(","))
+        facts["evaluation_basis"] = f"Best Value ({factors})"
+    elif re.search(r"\bprice,\s*technical,\s*and\s+past\s+performance\b", dense, re.IGNORECASE):
+        facts["evaluation_basis"] = "Best Value (price, technical, and past performance)"
+    elif re.search(r"\bbest\s+value\b", dense, re.IGNORECASE):
+        facts["evaluation_basis"] = "Best Value"
+    funds_match = re.search(
+        r"Funds\s+are\s+not\s+presently\s+available.+?(?:until\s+funds\s+are\s+available\.)",
+        dense,
+        re.IGNORECASE,
+    )
+    if funds_match:
+        facts["funds_status"] = _repair_pdf_spacing(_clean_excerpt(funds_match.group(0), max_chars=180))
+    pop_match = re.search(
+        r"Base\s+Year:\s*(.+?)\s+Option\s+Year\s+One:\s*(.+?)\s+Option\s+Year\s+Two:\s*(.+?)\s+This\s+performance\s+period",
+        dense,
+        re.IGNORECASE,
+    )
+    if pop_match:
+        base_period = _repair_pdf_spacing(_clean_excerpt(pop_match.group(1), max_chars=60))
+        option_one = _repair_pdf_spacing(_clean_excerpt(pop_match.group(2), max_chars=60))
+        option_two = _repair_pdf_spacing(_clean_excerpt(pop_match.group(3), max_chars=60))
+        facts["base_period"] = base_period
+        facts["option_periods"] = [option_one, option_two]
+        facts["period_of_performance"] = (
+            f"Base year {base_period}; Option Year 1 {option_one}; Option Year 2 {option_two}"
+        )
+    elif re.search(r"one\s+base\s+year\s+of\s+12\s+months\s+and\s+two\s*\(2\)\s+option\s+years", statement_dense, re.IGNORECASE):
+        facts["period_of_performance"] = "One 12-month base year plus two 12-month option years."
+
+    if str(facts.get("contract_vehicle") or "").strip() and not _looks_like_fact_value("contract_vehicle", str(facts.get("contract_vehicle") or "")):
+        facts["contract_vehicle"] = ""
+    if not facts["due_date"]:
+        facts["due_date"] = _preferred_attachment_fact(fact_rows, "due_date")
+    if not facts["set_aside"]:
+        facts["set_aside"] = _preferred_attachment_fact(fact_rows, "set_aside")
+    if not facts["contract_vehicle"]:
+        facts["contract_vehicle"] = _preferred_attachment_fact(fact_rows, "contract_vehicle")
+    if str(facts.get("contract_vehicle") or "").strip() and not _looks_like_fact_value("contract_vehicle", str(facts.get("contract_vehicle") or "")):
+        facts["contract_vehicle"] = ""
+    if not facts["contract_type"]:
+        facts["contract_type"] = _preferred_attachment_fact(fact_rows, "contract_type")
+    if not facts["evaluation_basis"]:
+        facts["evaluation_basis"] = _preferred_attachment_fact(fact_rows, "evaluation_basis")
+    if not facts["period_of_performance"]:
+        facts["period_of_performance"] = _preferred_attachment_fact(fact_rows, "period_of_performance")
+    facts["transition_window"] = _preferred_attachment_fact(fact_rows, "transition_window")
+    if not facts["funds_status"]:
+        facts["funds_status"] = _preferred_attachment_fact(fact_rows, "funds_status")
+
+    staffing_roles: list[str] = []
+    for label in (
+        "Engineering Technicians, Except Drafters",
+        "Engineers / Architects",
+        "Construction Manager",
+        "Furnishings Manager",
+    ):
+        if re.search(re.escape(label), dense, re.IGNORECASE):
+            staffing_roles.append(label)
+    facts["staffing_roles"] = staffing_roles
+    facts["attachment_fact_rows"] = fact_rows
+    facts["attachment_conflicts"] = attachment_conflicts
+    facts["quoted_facts"] = _dedupe_strings(
+        [
+            *([f"Issue date: {facts['issue_date']}"] if facts["issue_date"] else []),
+            *([f"NAICS {facts['naics']} - {facts['naics_title']}"] if facts["naics"] else []),
+            *([f"Size standard: {facts['naics_size_standard']}"] if facts["naics_size_standard"] else []),
+            *([f"Set-aside: {facts['set_aside']}"] if facts["set_aside"] else []),
+            *([f"Vehicle: {facts['contract_vehicle']}"] if facts["contract_vehicle"] else []),
+            *([f"Contract type: {facts['contract_type']}"] if facts["contract_type"] else []),
+            *([f"Due date: {facts['due_date']}"] if facts["due_date"] else []),
+            *([f"Evaluation basis: {facts['evaluation_basis']}"] if facts["evaluation_basis"] else []),
+            *([f"Funds status: {facts['funds_status']}"] if facts["funds_status"] else []),
+            *([f"Period of performance: {facts['period_of_performance']}"] if facts["period_of_performance"] else []),
+            *([f"Transition window: {facts['transition_window']}"] if facts["transition_window"] else []),
+        ]
+    )
+    return facts
+
+
+def _parse_named_date(value: str) -> datetime | None:
+    cleaned = SPACE_RE.sub(" ", str(value or "").replace("–", "-")).strip(" .,;")
+    if not cleaned:
+        return None
+    match = re.search(
+        r"(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})(?:,\s*([0-9]{1,2}:\d{2}\s*[ap]\.?m\.?))?",
+        cleaned,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    date_part = match.group(1).strip()
+    parsed: datetime | None = None
+    for fmt in ("%d %B %Y", "%d %b %Y"):
+        try:
+            parsed = datetime.strptime(date_part, fmt)
+            break
+        except ValueError:
+            continue
+    if parsed is None:
+        return None
+    time_part = (match.group(2) or "").strip()
+    if not time_part:
+        return parsed
+    normalized_time = time_part.lower().replace(".", "").upper()
+    try:
+        parsed_time = datetime.strptime(normalized_time, "%I:%M %p")
+    except ValueError:
+        return parsed
+    return parsed.replace(hour=parsed_time.hour, minute=parsed_time.minute)
+
+
+def _parse_period_window(value: str) -> tuple[datetime | None, datetime | None]:
+    cleaned = SPACE_RE.sub(" ", str(value or "").replace("–", "-")).strip(" .,;")
+    if not cleaned:
+        return None, None
+    match = re.search(
+        r"(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\s*-\s*(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})",
+        cleaned,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None, None
+    return _parse_named_date(match.group(1)), _parse_named_date(match.group(2))
+
+
+def _timeline_display(dt: datetime, *, include_time: bool = False) -> str:
+    date_text = dt.strftime("%d %b %Y")
+    if not include_time or (dt.hour == 0 and dt.minute == 0):
+        return date_text
+    hour = dt.strftime("%I").lstrip("0") or "0"
+    return f"{date_text}, {hour}{dt.strftime(':%M %p')}"
+
+
+def _build_procurement_timeline(
+    solicitation_facts: dict[str, object],
+    generated_at: str,
+) -> dict[str, object]:
+    milestones: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add_milestone(
+        label: str,
+        dt: datetime | None,
+        *,
+        kind: str,
+        detail: str = "",
+        display_date: str = "",
+    ) -> None:
+        if dt is None:
+            return
+        date_iso = dt.isoformat(timespec="minutes")
+        key = (label, date_iso)
+        if key in seen:
+            return
+        seen.add(key)
+        milestones.append(
+            {
+                "label": label,
+                "date_iso": date_iso,
+                "display_date": display_date or _timeline_display(dt, include_time=(dt.hour != 0 or dt.minute != 0)),
+                "kind": kind,
+                "detail": detail,
+            }
+        )
+
+    capture_run_dt: datetime | None = None
+    if generated_at:
+        try:
+            capture_run_dt = datetime.fromisoformat(str(generated_at).replace("Z", "+00:00")).replace(
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+                tzinfo=None,
+            )
+        except ValueError:
+            capture_run_dt = None
+    add_milestone("Capture run generated", capture_run_dt, kind="capture", detail="Current memo artifact created.")
+
+    issue_date_text = str(solicitation_facts.get("issue_date", "") or "").strip()
+    issue_date_dt = _parse_named_date(issue_date_text)
+    add_milestone("Solicitation issued", issue_date_dt, kind="issue", detail="Issue date extracted from parsed attachment text.", display_date=issue_date_text)
+
+    due_date_text = str(solicitation_facts.get("due_date", "") or "").strip()
+    due_date_dt = _parse_named_date(due_date_text)
+    add_milestone("Proposal due", due_date_dt, kind="due", detail="Current offer submission deadline.", display_date=due_date_text)
+
+    base_period = str(solicitation_facts.get("base_period", "") or "").strip()
+    base_start, base_end = _parse_period_window(base_period)
+    add_milestone("Base year starts", base_start, kind="base_start", detail="Start of the base performance period.", display_date=_timeline_display(base_start) if base_start else "")
+    add_milestone("Base year ends", base_end, kind="base_end", detail="End of the base performance period.", display_date=_timeline_display(base_end) if base_end else "")
+
+    option_periods = solicitation_facts.get("option_periods", [])
+    if not isinstance(option_periods, list):
+        option_periods = []
+    for index, option_period in enumerate(option_periods, start=1):
+        option_start, option_end = _parse_period_window(str(option_period or ""))
+        add_milestone(
+            f"Option Year {index} starts",
+            option_start,
+            kind="option_start",
+            detail=f"Start of Option Year {index}.",
+            display_date=_timeline_display(option_start) if option_start else "",
+        )
+        add_milestone(
+            f"Option Year {index} ends",
+            option_end,
+            kind="option_end",
+            detail=f"End of Option Year {index}.",
+            display_date=_timeline_display(option_end) if option_end else "",
+        )
+
+    milestones.sort(key=lambda item: str(item.get("date_iso", "")))
+    notes: list[str] = []
+    if solicitation_facts.get("funds_status"):
+        notes.append(str(solicitation_facts.get("funds_status")))
+    if not issue_date_dt:
+        notes.append("Solicitation issue date was not parsed from current artifacts.")
+    if due_date_text and not due_date_dt:
+        notes.append("A due-date string was detected, but it could not be normalized into a chartable date.")
+
+    return {
+        "milestones": milestones,
+        "notes": _dedupe_strings(notes),
+        "chart_ready": len(milestones) >= 2,
+    }
+
+
+def _extract_attachment_workstreams(attachment_bundle: dict[str, object]) -> list[dict[str, object]]:
+    scope_categories = {"statement_of_work", "solicitation", "amendment", "instructions_evaluation"}
+    section_workstreams = _section_backed_workstreams(attachment_bundle, max_items=10)
+    if section_workstreams:
+        return section_workstreams
+    workstreams: list[dict[str, object]] = []
+    candidates = [
+        {
+            "title": "On-site execution and delivery continuity",
+            "patterns": [
+                r"engineering design support",
+                r"project management",
+                r"on-site.+technical and administrative services",
+                r"\bon[- ]site\b",
+                r"day[- ]to[- ]day support",
+            ],
+            "objective": "Provide the on-site or field-facing execution support described in the package, including day-to-day coordination, delivery continuity, and direct support to the primary requirement workstream.",
+        },
+        {
+            "title": "Acquisition-package and planning deliverables",
+            "patterns": [
+                r"DD\s*1391",
+                r"Statement of Objectives",
+                r"Statements? of Work",
+                r"Performance Work Statements?",
+                r"acquisition packages",
+                r"cost estimates",
+                r"programming documents",
+            ],
+            "objective": "Develop and maintain the planning, scope, and package artifacts needed to move the requirement through customer review and execution without avoidable rework.",
+        },
+        {
+            "title": "Project controls, reporting, and quality management",
+            "patterns": [
+                r"Project Status Report",
+                r"\bPSR\b",
+                r"Presentation Materials",
+                r"QA/QC",
+                r"quality assurance",
+                r"quality control",
+            ],
+            "objective": "Maintain disciplined reporting, review, and QA/QC controls so customer status, issues, and corrective actions stay visible throughout execution.",
+        },
+        {
+            "title": "Visible staffing mix and coverage plan",
+            "patterns": [
+                r"labor categor(?:y|ies)",
+                r"staffing plan",
+                r"key personnel",
+                r"engineering technicians",
+                r"engineers?\s*/\s*architects?",
+                r"Construction Manager",
+                r"on-site personnel",
+            ],
+            "objective": "Staff the visible labor mix credibly across the surfaced roles, coverage periods, and on-site or customer-facing execution expectations.",
+        },
+        {
+            "title": "Access, security, and information-handling controls",
+            "patterns": [
+                r"site access",
+                r"visitor control",
+                r"CONFIDENTIAL clearance",
+                r"credential",
+                r"badg",
+                r"background (?:check|investigation)",
+                r"NDA",
+                r"FOUO",
+                r"escort visitors",
+            ],
+            "objective": "Meet the surfaced access, credentialing, clearance, and information-handling controls early enough that execution does not stall during mobilization.",
+        },
+    ]
+    for candidate in candidates:
+        evidence_snippets = _attachment_context_matches(
+            attachment_bundle,
+            candidate["patterns"],
+            allowed_categories=scope_categories,
+            max_items=3,
+            line_radius=2,
+        )
+        if not evidence_snippets:
+            continue
+        workstreams.append(
+            {
+                "title": candidate["title"],
+                "objective": candidate["objective"],
+                "evidence_snippets": evidence_snippets,
+            }
+        )
+    return workstreams
+
+
+def _extract_staffing_pricing_signals(
+    attachment_bundle: dict[str, object],
+    solicitation_facts: dict[str, object],
+    attachment_workstreams: list[dict[str, object]],
+) -> dict[str, list[str]]:
+    guardrails = _attachment_parse_guardrails(attachment_bundle)
+    staffing_notes = _dedupe_strings(
+        [
+            *(
+                [f"Visible staffing mix: {', '.join(solicitation_facts.get('staffing_roles', []))}."]
+                if solicitation_facts.get("staffing_roles")
+                else []
+            ),
+            *(
+                ["On-site execution appears mandatory for the visible labor mix, not a remote-support construct."]
+                if any("on-site" in " ".join(item.get("evidence_snippets", [])).lower() for item in attachment_workstreams)
+                else []
+            ),
+            *(
+                ["Access or onboarding appears non-trivial because the package includes multiple credentialing, clearance, or entry-control steps that could slow startup."]
+                if _attachment_context_matches(
+                    attachment_bundle,
+                    [r"site access", r"visitor control", r"credential", r"badg", r"background (?:check|investigation)", r"CONFIDENTIAL clearance", r"escort visitors"],
+                    max_items=1,
+                )
+                else []
+            ),
+            *(
+                ["Scope-boundary planning matters because the work includes acquisition-package support while the PWS also requires NDA and proprietary-information handling."]
+                if _attachment_context_matches(attachment_bundle, [r"DD\s*1391", r"proprietary", r"Non-Disclosure Agreement|NDA"], max_items=1)
+                else []
+            ),
+            *(
+                [f"Scope attachments need manual OCR or table review before staffing assumptions are treated as complete: {', '.join(guardrails.get('poor_parse_files', [])[:3])}."]
+                if guardrails.get("poor_parse_files")
+                else []
+            ),
+        ]
+    )
+    pricing_notes = _dedupe_strings(
+        [
+            *(
+                [f"Contract posture is {solicitation_facts.get('contract_type')} under {solicitation_facts.get('contract_vehicle')}."]
+                if solicitation_facts.get("contract_type") and solicitation_facts.get("contract_vehicle")
+                else []
+            ),
+            *(
+                ["Price has to carry the visible labor mix and execution posture across the surfaced performance periods; do not assume the staffing plan can be thinned without affecting delivery credibility."]
+                if solicitation_facts.get("staffing_roles") and solicitation_facts.get("period_of_performance")
+                else []
+            ),
+            *(
+                ["The instructions addendum references price realism and unbalanced pricing, so low-drama FFP pricing matters more than a thin rate card."]
+                if _attachment_context_matches(attachment_bundle, [r"price realism", r"unbalanced pricing"], allowed_categories={"instructions_evaluation"}, max_items=1)
+                else []
+            ),
+            *(
+                [f"Pricing sheet or spreadsheet content is present and should be validated directly for CLIN math, labor-rate posture, and total-evaluated-price logic: {', '.join(guardrails.get('pricing_files', [])[:3])}."]
+                if guardrails.get("pricing_files")
+                else []
+            ),
+        ]
+    )
+    evaluation_notes = _dedupe_strings(
+        [
+            *(
+                [f"Evaluation basis surfaced in the solicitation package: {solicitation_facts.get('evaluation_basis')}."]
+                if solicitation_facts.get("evaluation_basis")
+                else []
+            ),
+            *(
+                ["The package expects the technical narrative to map back to PWS sections and key roles."]
+                if _attachment_context_matches(attachment_bundle, [r"Proposal paragraphs shall correspond to the pertinent Performance Work Statement", r"key roles defined in the PWS"], allowed_categories={"instructions_evaluation"}, max_items=1)
+                else []
+            ),
+            *(
+                [f"Acceptance / AQL / incentive-remedy tables are visible and should be reflected explicitly in the solution and risk story: {', '.join(guardrails.get('acceptance_files', [])[:3])}."]
+                if guardrails.get("acceptance_files")
+                else []
+            ),
+        ]
+    )
+    return {
+        "staffing_notes": staffing_notes,
+        "pricing_notes": pricing_notes,
+        "evaluation_notes": evaluation_notes,
+    }
+
+
+def _extract_attachment_anomalies(
+    attachment_bundle: dict[str, object],
+    solicitation_facts: dict[str, object],
+) -> list[dict[str, str]]:
+    anomalies: list[dict[str, str]] = []
+    guardrails = _attachment_parse_guardrails(attachment_bundle)
+    dense = _dense_attachment_text(attachment_bundle, max_items=6)
+    declaration_lines: list[str] = []
+    for item in _ordered_attachment_items(attachment_bundle, allowed_categories={"amendment", "solicitation"}, max_items=4):
+        raw_text = str(item.get("structured_text_excerpt") or item.get("text_excerpt") or "")
+        if not raw_text.strip():
+            continue
+        declaration_lines.extend([line.strip() for line in raw_text.replace("\r", "\n").split("\n") if line.strip()])
+    declared_attachments: list[tuple[str, str]] = []
+    declared_count_match = None
+    for line in declaration_lines:
+        if declared_count_match is None:
+            declared_count_match = re.search(r"Attachments\s*\((\d+)\)", line, re.IGNORECASE)
+        match = re.match(r"Attachment\s+(\d+)\s*[-–]\s*(.+)$", _repair_pdf_spacing(line), re.IGNORECASE)
+        if not match:
+            continue
+        declared_attachments.append((match.group(1).strip(), _repair_pdf_spacing(match.group(2)).rstrip(".")))
+    provided_text = " ".join(
+        [
+            str(item.get("filename", "") or "")
+            for item in (attachment_bundle.get("attachments", []) or [])
+            if isinstance(item, dict)
+        ]
+    ).lower()
+    if declared_count_match and declared_attachments:
+        declared_total = int(declared_count_match.group(1))
+        actual_total = len({number for number, _ in declared_attachments})
+        if declared_total != actual_total:
+            anomalies.append(
+                {
+                    "signal": "Attachment-count mismatch in the solicitation package",
+                    "why_it_matters": f"The amendment says Attachments ({declared_total}) but the package enumerates {actual_total} attachment slots, which can hide missing required files.",
+                    "effect": "Hurts us until the final attachment set is reconciled.",
+                    "confidence": "High",
+                    "source": "Parsed amendment attachment list",
+                }
+            )
+    missing_declared = [
+        f"Attachment {number} - {title}"
+        for number, title in declared_attachments
+        if _normalize_signal_text(title)
+        and _normalize_signal_text(title) not in _normalize_signal_text(provided_text)
+        and not (
+            "performance work statement" in _normalize_signal_text(title)
+            and "performance_work_statement" in provided_text
+        )
+    ]
+    if missing_declared:
+        anomalies.append(
+            {
+                "signal": "Declared attachments are missing from the local capture package",
+                "why_it_matters": f"The current local run does not include all declared attachment artifacts: {', '.join(missing_declared[:4])}.",
+                "effect": "Hurts us because evaluation, wage, PPQ, or Q&A detail may be missing.",
+                "confidence": "High",
+                "source": "Declared attachment inventory versus provided local files",
+            }
+        )
+    if guardrails.get("poor_parse_files"):
+        anomalies.append(
+            {
+                "signal": "Attachment parsing is thin for one or more scope-critical files",
+                "why_it_matters": f"Some attachments parsed poorly enough that objective extraction and win-theme reasoning can drift: {', '.join(guardrails.get('poor_parse_files', [])[:4])}.",
+                "effect": "Hurts us until OCR or manual review closes the gap.",
+                "confidence": "High",
+                "source": "Attachment parse-health analysis",
+            }
+        )
+    if guardrails.get("matrix_files"):
+        anomalies.append(
+            {
+                "signal": "CLIN or matrix-heavy sections require structured review",
+                "why_it_matters": f"Table-heavy sections were detected in {', '.join(guardrails.get('matrix_files', [])[:4])}, so task structure, CLIN logic, or performance matrices may be under-extracted from plain text alone.",
+                "effect": "Neutral if handled early; hurts us if ignored.",
+                "confidence": "High",
+                "source": "Attachment parse-health analysis",
+            }
+        )
+    if guardrails.get("acceptance_files"):
+        anomalies.append(
+            {
+                "signal": "Acceptance, AQL, or incentive-remedy content detected",
+                "why_it_matters": f"The package contains acceptance or remedy logic in {', '.join(guardrails.get('acceptance_files', [])[:4])}; that can change staffing, quality, reporting, and downside-risk posture.",
+                "effect": "Hurts us if the response ignores performance thresholds or remedies.",
+                "confidence": "High",
+                "source": "Attachment parse-health analysis",
+            }
+        )
+    if guardrails.get("pricing_files"):
+        anomalies.append(
+            {
+                "signal": "Pricing sheet or spreadsheet requires direct validation",
+                "why_it_matters": f"Pricing-heavy attachments were detected in {', '.join(guardrails.get('pricing_files', [])[:4])}, so CLIN math, labor-rate posture, and evaluated-price assumptions should not rely on narrative extraction alone.",
+                "effect": "Neutral to helpful if validated; hurts us if ignored.",
+                "confidence": "High",
+                "source": "Attachment parse-health analysis",
+            }
+        )
+    for conflict in solicitation_facts.get("attachment_conflicts", []) if isinstance(solicitation_facts, dict) else []:
+        if not isinstance(conflict, dict):
+            continue
+        field = str(conflict.get("field", "solicitation fact") or "solicitation fact").strip()
+        values = [str(value or "").strip() for value in (conflict.get("values", []) or []) if str(value or "").strip()]
+        sources = [str(value or "").strip() for value in (conflict.get("sources", []) or []) if str(value or "").strip()]
+        if len(values) < 2:
+            continue
+        anomalies.append(
+            {
+                "signal": f"Cross-document conflict on {field}",
+                "why_it_matters": f"Different attachments disagree on {field}: {', '.join(values[:3])}.",
+                "effect": "Hurts us until the controlling document is confirmed.",
+                "confidence": "High",
+                "source": "; ".join(sources[:4]) or "Parsed attachment fact matrix",
+            }
+        )
+    if re.search(r"technical quote volume shall not exceed ten pages", dense, re.IGNORECASE) and re.search(
+        r"Factor 2\s*-\s*Technical.+?Limited to no more than 15 pages",
+        dense,
+        re.IGNORECASE,
+    ):
+        anomalies.append(
+            {
+                "signal": "Technical page-limit conflict",
+                "why_it_matters": "One instruction says the technical quote volume shall not exceed ten pages, while another technical section says it is limited to 15 pages.",
+                "effect": "Hurts us until the CO clarifies the controlling page limit.",
+                "confidence": "High",
+                "source": "Parsed instructions to offerors addendum",
+            }
+        )
+    for match in re.finditer(r"DATE:\s*([0-9]{1,2}\s+[A-Za-z]{3,9}\s+[0-9]{4})", dense, re.IGNORECASE):
+        candidate = match.group(1).strip()
+        try:
+            datetime.strptime(candidate, "%d %b %Y")
+        except ValueError:
+            try:
+                datetime.strptime(candidate, "%d %B %Y")
+            except ValueError:
+                anomalies.append(
+                    {
+                        "signal": f"Invalid solicitation date surfaced: {candidate}",
+                        "why_it_matters": "Impossible or mistyped dates create document-control uncertainty and should be resolved before the proposal team relies on revision ordering.",
+                        "effect": "Neutral operationally, but it is a capture integrity flag.",
+                        "confidence": "High",
+                        "source": "Parsed solicitation/PWS header text",
+                    }
+                )
+                break
+    if solicitation_facts.get("funds_status"):
+        anomalies.append(
+            {
+                "signal": "Funds not presently available notice",
+                "why_it_matters": "The package explicitly says funds are not presently available, which increases award-timing and option-exercise uncertainty even if the requirement remains valid.",
+                "effect": "Hurts us on timing confidence.",
+                "confidence": "High",
+                "source": "Parsed solicitation funding notice",
+            }
+        )
+    return anomalies
 
 
 def _objective_heading_title(text: str) -> str:
@@ -768,14 +2308,60 @@ def _preferred_objective_body_blocks(
     *,
     include_filename: bool = False,
 ) -> list[str]:
-    scope_categories = {"statement_of_work", "solicitation", "instructions_evaluation"}
+    blocks: list[str] = []
+    action_terms = set(OBJECTIVE_KEYWORDS) | set(OBJECTIVE_EXTRA_ACTION_VERBS)
+    for block in _attachment_section_blocks(
+        attachment_bundle,
+        allowed_categories={"statement_of_work", "solicitation", "amendment", "instructions_evaluation"},
+        max_items=max_items * 3,
+        include_filename=include_filename,
+    ):
+        heading = str(block.get("title", "") or "").strip()
+        source_text = str(block.get("source_text", "") or block.get("text", "") or "").strip()
+        if not source_text:
+            continue
+        heading_kind = _objective_heading_kind(heading or source_text)
+        if heading_kind == "demoted":
+            continue
+        if heading_kind != "preferred" and not any(
+            marker in _objective_heading_title(heading or source_text)
+            for marker in ("task", "service", "support", "performance", "requirement", "deliverable", "objective", "scope")
+        ):
+            continue
+        sentence_parts = [
+            part.strip(" -;:")
+            for part in re.split(r"(?<=[.!?;])\s+|(?<=\))\s+(?=[A-Z])", source_text)
+            if part.strip()
+        ]
+        if not sentence_parts:
+            sentence_parts = [source_text]
+        for part in sentence_parts:
+            lower = part.lower()
+            if len(part) < 90 or len(part) > 520:
+                continue
+            if _is_boilerplate_objective_sentence(part):
+                continue
+            if not any(term in lower for term in action_terms):
+                continue
+            snippet = f"{heading}; {part}" if heading and heading.lower() not in part.lower() else part
+            if include_filename:
+                snippet = f"{block.get('filename', 'attachment')}: {snippet}"
+            blocks.append(snippet[:640])
+            if len(blocks) >= max_items:
+                return _dedupe_strings(blocks)[:max_items]
+
+    scope_categories = {"statement_of_work", "solicitation", "amendment"}
     ordered = _ordered_attachment_items(
         attachment_bundle,
         allowed_categories=scope_categories,
         max_items=6,
     )
-    blocks: list[str] = []
-    action_terms = set(OBJECTIVE_KEYWORDS) | set(OBJECTIVE_EXTRA_ACTION_VERBS)
+    if not ordered:
+        ordered = _ordered_attachment_items(
+            attachment_bundle,
+            allowed_categories={"instructions_evaluation"},
+            max_items=4,
+        )
     for item in ordered:
         filename = str(item.get("filename", "attachment") or "attachment")
         text = _attachment_text_value(item, max_chars=24000)
@@ -824,6 +2410,8 @@ def _preferred_objective_body_blocks(
                     lower = part.lower()
                     if len(part) < 90 or len(part) > 520:
                         continue
+                    if _is_boilerplate_objective_sentence(part):
+                        continue
                     if not any(term in lower for term in action_terms):
                         continue
                     snippet = f"{heading}; {part}"[:520]
@@ -843,7 +2431,13 @@ def _objective_scope_texts(attachment_bundle: dict[str, object], max_items: int 
         allowed_categories=scope_categories,
         max_items=max_items,
     )
-    texts: list[str] = [*_preferred_objective_body_blocks(attachment_bundle, max_items=max_items)]
+    texts: list[str] = [
+        *[
+            str(item.get("source_text", "") or "").strip()
+            for item in _attachment_section_blocks(attachment_bundle, allowed_categories=scope_categories, max_items=max_items * 2)
+        ],
+        *_preferred_objective_body_blocks(attachment_bundle, max_items=max_items),
+    ]
     for item in ordered:
         for snippet in item.get("snippets", []) or []:
             cleaned = _clean_excerpt(snippet, max_chars=320)
@@ -856,13 +2450,17 @@ def _objective_scope_texts(attachment_bundle: dict[str, object], max_items: int 
 
 
 def _attachment_objective_candidates(attachment_bundle: dict[str, object], max_items: int = 18) -> list[str]:
-    candidate_categories = {"statement_of_work", "solicitation", "instructions_evaluation", "questions_answers", "amendment"}
+    candidate_categories = {"statement_of_work", "solicitation", "amendment", "questions_answers"}
     ordered = _ordered_attachment_items(
         attachment_bundle,
         allowed_categories=candidate_categories,
         max_items=6,
     )
     candidates: list[str] = [
+        *[
+            str(item.get("source_text", "") or "").strip()[:520]
+            for item in _attachment_section_blocks(attachment_bundle, allowed_categories=candidate_categories, max_items=max_items)
+        ],
         *_preferred_objective_body_blocks(attachment_bundle, max_items=max_items),
         *_attachment_structured_rows(attachment_bundle, max_items=max_items),
     ]
@@ -897,6 +2495,8 @@ def _attachment_objective_candidates(attachment_bundle: dict[str, object], max_i
                 lower = sentence.lower()
                 if len(sentence) < 60:
                     continue
+                if _is_boilerplate_objective_sentence(sentence):
+                    continue
                 if not any(marker in lower for marker in marker_keywords):
                     continue
                 candidates.append(sentence[:360])
@@ -926,6 +2526,8 @@ def _is_boilerplate_objective_sentence(sentence: str) -> bool:
     lower = sentence.lower().strip()
     if any(marker in lower for marker in OBJECTIVE_BOILERPLATE_MARKERS):
         return True
+    if any(marker in lower for marker in OBJECTIVE_FORMATTING_MARKERS):
+        return True
     if _is_toc_like_objective_line(sentence):
         return True
     heading_title = _objective_heading_title(sentence)
@@ -940,6 +2542,8 @@ def _is_boilerplate_objective_sentence(sentence: str) -> bool:
     if lower.startswith(("response:", "would you ", "if any, please", "please describe", "please provide")):
         return True
     if "row #" in lower:
+        return True
+    if any(token in lower for token in ("arial", "font", "page limit", "margins", "tracking", "kerning", "leading")):
         return True
     return False
 
@@ -1110,6 +2714,10 @@ def _attachment_objective_evidence_snippets(
         return []
     candidate_lines = _dedupe_strings(
         [
+            *[
+                str(item.get("text", "") or "").strip()
+                for item in _attachment_section_blocks(attachment_bundle, max_items=18, include_filename=True)
+            ],
             *_preferred_objective_body_blocks(attachment_bundle, max_items=18, include_filename=True),
             *_attachment_scope_snippets(attachment_bundle, max_snippets=12),
             *(
@@ -1492,6 +3100,11 @@ def _memo_honesty_assessment(
     real_funding_signal_count: int,
     attachments_expected: bool,
     parsed_attachment_count: int,
+    attachment_review_required_count: int,
+    pws_present: bool,
+    workstream_count: int,
+    incumbent_evidence_thin: bool,
+    generic_strategy_warning_count: int,
 ) -> dict[str, object]:
     score = 100
     concerns: list[str] = []
@@ -1519,6 +3132,18 @@ def _memo_honesty_assessment(
     if attachments_expected and parsed_attachment_count == 0:
         score -= 15
         concerns.append("Expected attachments were not parsed, which leaves scope interpretation under-supported.")
+    if attachment_review_required_count:
+        score -= 10 if attachment_review_required_count == 1 else 15
+        concerns.append("One or more attachments still need OCR, table recovery, or manual validation before the memo is decision-grade.")
+    if pws_present and workstream_count == 0:
+        score -= 20
+        concerns.append("A PWS exists, but no requirement workstreams survived extraction.")
+    if incumbent_evidence_thin:
+        score -= 10
+        concerns.append("Incumbent evidence remains thin across attachments, award history, and merged provider signals.")
+    if generic_strategy_warning_count:
+        score -= 15
+        concerns.append("The memo still contains generic strategy language despite a parsed PWS/workstream package.")
 
     score = max(0, score)
     confidence_band = "High" if score >= 80 else "Medium" if score >= 60 else "Low"
@@ -1534,6 +3159,72 @@ def _memo_honesty_assessment(
         "release_warning": release_warning,
         "drivers": concerns,
     }
+
+
+def _generic_strategy_language_warnings(
+    decision_sections: dict[str, object],
+    solicitation_facts: dict[str, object],
+    attachment_workstreams: list[dict[str, object]],
+    attachment_bundle: dict[str, object],
+) -> list[str]:
+    attachments = attachment_bundle.get("attachments", []) if isinstance(attachment_bundle, dict) else []
+    pws_present = any(
+        isinstance(item, dict) and str(item.get("category", "other") or "other") == "statement_of_work"
+        for item in attachments
+    )
+    if not pws_present or not attachment_workstreams:
+        return []
+    requirement_tokens = _signal_tokens(
+        " ".join(
+            _dedupe_strings(
+                [
+                    *(
+                        f"{str(item.get('title', '') or '').strip()} {str(item.get('objective', '') or '').strip()}"
+                        for item in attachment_workstreams
+                        if isinstance(item, dict)
+                    ),
+                    *[str(item) for item in (solicitation_facts.get("quoted_facts", []) or []) if str(item or "").strip()],
+                ]
+            )
+        )
+    )
+    strategy = decision_sections.get("win_strategy", {}) or decision_sections.get("recommended_win_strategy", {})
+    if not isinstance(strategy, dict):
+        return []
+    generic_hits: list[str] = []
+    for label, key in GENERIC_STRATEGY_FIELDS:
+        row_key = {
+            "hot_buttons": "hot_button_rows",
+            "win_themes": "win_theme_rows",
+            "discriminators": "discriminator_rows",
+        }.get(key, "")
+        row_values = strategy.get(row_key, []) if row_key else []
+        if isinstance(row_values, list) and row_values and isinstance(row_values[0], dict):
+            for row in row_values:
+                if not isinstance(row, dict):
+                    continue
+                line = str(row.get("text") or "").strip()
+                anchor = str(row.get("evidence_anchor") or "").strip()
+                if line and not anchor and not line.lower().startswith("insufficient"):
+                    generic_hits.append(f"{label}: {line}")
+            continue
+        values = strategy.get(key, [])
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            line = str(value or "").strip()
+            if not line:
+                continue
+            overlap = len(_signal_tokens(line) & requirement_tokens)
+            lower = line.lower()
+            if overlap < 2 and any(cue in lower for cue in GENERIC_STRATEGY_CUES):
+                generic_hits.append(f"{label}: {line}")
+    if not generic_hits:
+        return []
+    return [
+        "PWS-backed memo still contains generic strategy language with weak requirement overlap: "
+        + "; ".join(generic_hits[:3])
+    ]
 
 
 def _has_substantive_public_excerpt(public_context: dict[str, object]) -> bool:
@@ -1725,8 +3416,9 @@ def main() -> int:
         notice_context_text,
         stakeholder_contacts,
     )
+    usaspending_search_text = _preferred_usaspending_search_text(resolved, str(canonical_id or ""))
     usaspending_result = enrich_from_usaspending(
-        resolved.get("title") or canonical_id,
+        usaspending_search_text,
         title=resolved.get("title", ""),
         summary=notice_context_text,
         buyer=resolved.get("buyer", ""),
@@ -1741,10 +3433,20 @@ def main() -> int:
         attachment_bundle,
         award_signals.get("competitive_landscape", {}).get("likely_incumbents", []),
     )
+    solicitation_facts = _extract_solicitation_facts(attachment_bundle, resolved)
+    attachment_workstreams = _extract_attachment_workstreams(attachment_bundle)
+    staffing_pricing_signals = _extract_staffing_pricing_signals(
+        attachment_bundle,
+        solicitation_facts,
+        attachment_workstreams,
+    )
+    attachment_anomalies = _extract_attachment_anomalies(attachment_bundle, solicitation_facts)
+    attachment_parse_guardrails = _attachment_parse_guardrails(attachment_bundle)
     executive_summary = _clean_excerpt(
         explanation.get("summary") or opportunity.get("summary") or "Fresh structured capture brief generated from current request context."
     )
-    decomposed_objectives = _decompose_objectives(
+    workstream_objectives = [str(item.get("objective") or "").strip() for item in attachment_workstreams if str(item.get("objective") or "").strip()]
+    decomposed_objectives = workstream_objectives or _decompose_objectives(
         resolved.get("title", ""),
         opportunity.get("summary", ""),
         explanation.get("summary", ""),
@@ -1809,9 +3511,17 @@ def main() -> int:
         attachment_budget_signals.append(
             f"Attachment package includes {attachment_categories.get('amendment', 0)} amendment file(s), which can validate scope changes and final instructions."
         )
+    if solicitation_facts.get("set_aside") and not opportunity.get("set_aside"):
+        opportunity["set_aside"] = solicitation_facts.get("set_aside")
     attachment_scope_or_notice_snippets = attachment_scope_snippets or [notice_excerpt[:300] or "No substantive notice excerpt captured in this run."]
     attachment_text_blob = " ".join(attachment_text_pool).lower()
     vehicle_signals = []
+    if solicitation_facts.get("contract_vehicle"):
+        vehicle_signals.append(f"Attachment text names the vehicle path as {solicitation_facts.get('contract_vehicle')}.")
+    if solicitation_facts.get("set_aside"):
+        vehicle_signals.append(f"Attachment text states the set-aside as {solicitation_facts.get('set_aside')}.")
+    if solicitation_facts.get("contract_type"):
+        vehicle_signals.append(f"Attachment text indicates the contract type is {solicitation_facts.get('contract_type')}.")
     if "gsa mas" in attachment_text_blob or "multiple award schedule" in attachment_text_blob or "federal supply schedule" in attachment_text_blob:
         vehicle_signals.append("Attachment text references a GSA or schedule-style acquisition path that should be validated against the solicitation package.")
     if "indefinite-delivery-indefinite-quantity" in attachment_text_blob or "indefinite delivery indefinite quantity" in attachment_text_blob or "idiq" in attachment_text_blob:
@@ -1832,6 +3542,15 @@ def main() -> int:
     cross_source_evidence = merge_evidence_models(
         [official_capture_evidence, *(commercial_intel.get("evidence_models", []) or [])]
     )
+    merged_incumbent_name = str(
+        ((cross_source_evidence.get("incumbent") or {}).get("name") if isinstance(cross_source_evidence, dict) else "")
+        or ""
+    ).strip()
+    incumbent_evidence_thin = (
+        not merged_incumbent_name
+        and not attachment_validation.get("validated_incumbents")
+        and not award_signals.get("relevant_awards")
+    )
     vehicle_signals = _dedupe_strings(
         vehicle_signals
         + evidence_model_vehicle_signals(cross_source_evidence, max_items=6)
@@ -1849,6 +3568,7 @@ def main() -> int:
         public_research,
         attachment_budget_signals,
     )
+    public_research_assessment = _public_research_assessment(public_research)
     funding_gap_line = (
         f'No funding corroboration found for "{resolved.get("title") or "this requirement"}" in current run; '
         "validate with award history, budget docs, or priced attachments."
@@ -1888,9 +3608,26 @@ def main() -> int:
                 if award_signals.get("budget_usable_for_capture") or not award_signals.get("relevant_awards")
                 else ["USAspending returned acronym-only or weak-overlap award matches, so those rows were not used as funding evidence."]
             ),
+            *(
+                []
+                if public_research_assessment.get("requirement_bearing_core_anchor_present")
+                else ["Public-web research ran, but no requirement-bearing mission, budget, or forecast anchors survived quality filters in this run."]
+            ),
+            *(
+                []
+                if funding_assessment.get("useful_evidence_found")
+                else ["Funding evidence remains thin across USAspending, public budget sources, and attachment clues in this run."]
+            ),
+            *(
+                []
+                if not incumbent_evidence_thin
+                else ["Incumbent evidence remains thin across attachments, award history, and merged provider signals."]
+            ),
+            *attachment_parse_guardrails.get("warnings", []),
             *award_signals.get("evidence_gaps", []),
             *public_research.get("evidence_gaps", []),
             *(cross_source_evidence.get("evidence_gaps", []) if isinstance(cross_source_evidence, dict) else []),
+            *([item.get("signal", "") for item in attachment_anomalies if isinstance(item, dict)]),
         ]
     )
     executive_risks = _dedupe_strings(
@@ -1908,10 +3645,6 @@ def main() -> int:
             *(_matching_lines("success metrics", public_research.get("mission_context_signals", []), max_items=1) if public_research.get("mission_context_signals") else []),
         ]
     )
-    merged_incumbent_name = str(
-        ((cross_source_evidence.get("incumbent") or {}).get("name") if isinstance(cross_source_evidence, dict) else "")
-        or ""
-    ).strip()
     incumbent_list = (
         ([merged_incumbent_name] if merged_incumbent_name else [])
         or
@@ -1975,8 +3708,13 @@ def main() -> int:
     if not executive_proof_points:
         executive_proof_points = [NO_PROOF_POINTS]
     objective_rows: list[dict[str, object]] = []
+    workstream_evidence_map = {
+        str(item.get("objective") or "").strip(): list(item.get("evidence_snippets", []) or [])
+        for item in attachment_workstreams
+        if isinstance(item, dict)
+    }
     for objective_text in decomposed_objectives:
-        attachment_native_evidence = _attachment_objective_evidence_snippets(
+        attachment_native_evidence = workstream_evidence_map.get(objective_text) or _attachment_objective_evidence_snippets(
             objective_text,
             attachment_bundle,
             max_items=4,
@@ -2022,15 +3760,6 @@ def main() -> int:
     real_funding_signal_count = sum(
         1 for signal in budget_funding_signals if not str(signal or "").startswith("No funding corroboration found")
     )
-    public_research_assessment = _public_research_assessment(public_research)
-    memo_honesty = _memo_honesty_assessment(
-        public_research,
-        len(objective_rows),
-        fallback_objective_rows,
-        real_funding_signal_count,
-        bool(attachment_bundle.get("attachments_expected")),
-        len(attachment_bundle.get("attachments", []) or []),
-    )
     decision_sections = build_capture_decision_sections(
         vendor_profile=vendor_profile,
         resolved=resolved,
@@ -2048,6 +3777,46 @@ def main() -> int:
         vehicle_signals=vehicle_signals,
         learned_semantic_preferences=learned_semantic_preferences,
         normalized_evidence=cross_source_evidence,
+        solicitation_facts=solicitation_facts,
+        attachment_workstreams=attachment_workstreams,
+        staffing_pricing_signals=staffing_pricing_signals,
+        attachment_anomalies=attachment_anomalies,
+    )
+    generic_strategy_warnings = _generic_strategy_language_warnings(
+        decision_sections,
+        solicitation_facts,
+        attachment_workstreams,
+        attachment_bundle,
+    )
+    if generic_strategy_warnings:
+        decision_sections.setdefault("assumptions_unknowns_confidence", {}).update(
+            {
+                "unknowns": _dedupe_strings(
+                    list(decision_sections.get("assumptions_unknowns_confidence", {}).get("unknowns", []) or [])
+                    + generic_strategy_warnings
+                )
+            }
+        )
+        decision_sections.setdefault("capture_judgment", {}).update(
+            {
+                "next_best_actions": _dedupe_strings(
+                    list(decision_sections.get("capture_judgment", {}).get("next_best_actions", []) or [])
+                    + ["Tighten the win-theme section so PWS-backed hot buttons and discriminators are requirement-specific, not generic capture boilerplate."]
+                )
+            }
+        )
+    memo_honesty = _memo_honesty_assessment(
+        public_research,
+        len(objective_rows),
+        fallback_objective_rows,
+        real_funding_signal_count,
+        bool(attachment_bundle.get("attachments_expected")),
+        len(attachment_bundle.get("attachments", []) or []),
+        len(attachment_parse_guardrails.get("review_required_files", []) or []),
+        bool(attachment_parse_guardrails.get("pws_present")),
+        len(attachment_workstreams),
+        incumbent_evidence_thin,
+        len(generic_strategy_warnings),
     )
     decision_sections.setdefault("capture_judgment", {}).update(
         {
@@ -2064,9 +3833,11 @@ def main() -> int:
             "honesty_drivers": memo_honesty.get("drivers", []),
         }
     )
+    capture_generated_at = utc_now_iso()
+    procurement_timeline = _build_procurement_timeline(solicitation_facts, capture_generated_at)
     evidence = {
         "request_id": request_id,
-        "generated_at": utc_now_iso(),
+        "generated_at": capture_generated_at,
         "status": status,
         "vendor_name": decision_sections.get("vendor_name", "Vendor"),
         "entry": {
@@ -2109,6 +3880,7 @@ def main() -> int:
             "win_themes": executive_win_themes,
             "proof_points": executive_proof_points,
         },
+        "procurement_timeline": procurement_timeline,
         "objectives": objective_rows,
         "stakeholder_map": stakeholder_map,
         "stakeholder_contacts": stakeholder_contacts,
@@ -2121,6 +3893,10 @@ def main() -> int:
         "funding_assessment": funding_assessment,
         "related_procurements": related_procurements,
         "vehicle_signals": vehicle_signals,
+        "solicitation_facts": solicitation_facts,
+        "attachment_workstreams": attachment_workstreams,
+        "attachment_anomalies": attachment_anomalies,
+        "staffing_pricing_signals": staffing_pricing_signals,
         "cross_source_evidence": cross_source_evidence,
         "commercial_intel": {
             "source_statuses": commercial_intel.get("source_statuses", []),
@@ -2154,9 +3930,13 @@ def main() -> int:
             "seeded_resource_links": bool(attachment_bundle.get("seeded_resource_links")),
             "resource_link_count": attachment_bundle.get("resource_link_count", 0),
             "parsed_attachments": attachment_bundle.get("attachments", []),
+            "parse_guardrails": attachment_parse_guardrails,
             "errors": attachment_bundle.get("errors", []),
             "scope_snippets": attachment_scope_snippets,
             "incumbent_validation": attachment_validation,
+            "solicitation_facts": solicitation_facts,
+            "workstreams": attachment_workstreams,
+            "anomalies": attachment_anomalies,
         },
         "public_discourse_signals": public_research.get("public_discourse_signals", []),
         "public_research_assessment": public_research_assessment,
@@ -2229,8 +4009,14 @@ def main() -> int:
                 "fallback_objective_rows": fallback_objective_rows,
                 "attachment_native_corroborated_rows": attachment_native_corroborated_rows,
                 "real_funding_signal_count": real_funding_signal_count,
+                "attachment_workstream_count": len(attachment_workstreams),
+                "attachment_anomaly_count": len(attachment_anomalies),
+                "attachment_review_required_count": len(attachment_parse_guardrails.get("review_required_files", []) or []),
+                "attachment_conflict_count": len(solicitation_facts.get("attachment_conflicts", []) or []),
+                "generic_strategy_warning_count": len(generic_strategy_warnings),
             },
             "public_research_assessment": public_research_assessment,
+            "attachment_parse_guardrails": attachment_parse_guardrails,
             "memo_honesty": memo_honesty,
             "stub_stage_exited_before_response": True,
             "menu_only_fallback_used": False,
