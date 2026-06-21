@@ -5,6 +5,8 @@ import re
 from collections import Counter
 from typing import Any
 
+from common.evidence_model import evidence_model_competitor_candidates
+
 
 TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")
@@ -160,6 +162,11 @@ NO_WIN_THEME_EVIDENCE = "Insufficient corroborated requirement evidence to recom
 NO_DIFFERENTIATOR_EVIDENCE = "Insufficient corroborated requirement evidence to recommend differentiators yet."
 NO_REASONED_THEME_EVIDENCE = "Reasoning-based win themes remain unverified until extracted scope sections or promoted solicitation facts surface."
 NO_PROOF_REQUIREMENT_EVIDENCE = "Proof requirements remain provisional until extracted scope sections or promoted solicitation facts surface."
+THIN_PRIORITY_EVIDENCE = "Requirement-bearing customer priorities remain under-corroborated in this run; rely on explicit solicitation facts and validated workstreams only."
+THIN_PRIORITY_LIKELY = "No additional customer-priority inference should be treated as reliable until stronger mission, budget, forecast, or attachment anchors are recovered."
+THIN_PRIORITY_PAIN = "Customer pain points remain provisional because requirement-bearing mission or scope anchors are still thin."
+MODERATE_PRIORITY_WARNING = "Evidence is partial in this run, so customer-priority sections were shortened to anchored points only."
+THIN_PRIORITY_WARNING = "Evidence is thin in this run, so customer-priority sections were intentionally shortened and made explicit."
 GENERIC_STRATEGY_TEMPLATE_PREFIXES = (
     "show how the team will execute the primary requirement workstreams from day one",
     "tie past performance to the visible workstreams surfaced in the attachments",
@@ -487,6 +494,251 @@ def _profile_certifications(profile: dict[str, Any]) -> list[str]:
     return _string_list(commercial.get("certifications", []))
 
 
+def _profile_preferred_buyers(profile: dict[str, Any]) -> list[str]:
+    buyers = profile.get("buyers", {}) if isinstance(profile.get("buyers"), dict) else {}
+    values = _string_list(buyers.get("preferred", []))
+    narrative = _profile_fit_narrative(profile)
+    for match in re.finditer(r"buyers such as\s+(.+?)(?:[.;]|$)", narrative, flags=re.IGNORECASE):
+        fragment = re.split(r"(?:avoid|treat|lower-fit|lower fit)", match.group(1), maxsplit=1, flags=re.IGNORECASE)[0]
+        parts = re.split(r";|,(?=\s*[A-Z])", fragment)
+        expanded_parts: list[str] = []
+        for part in parts:
+            expanded_parts.extend(
+                re.split(
+                    r"\band (?=(?:Department of|U\.S\.|US |Veterans Affairs|General Services Administration|NASA|National ))",
+                    part,
+                    flags=re.IGNORECASE,
+                )
+            )
+        for part in expanded_parts:
+            cleaned = part.strip(" .")
+            if cleaned and len(cleaned) >= 4:
+                values.append(cleaned)
+    return _dedupe_strings(values)
+
+
+def _profile_preferred_award_band(profile: dict[str, Any]) -> tuple[float | None, float | None]:
+    commercial = profile.get("commercial_constraints", {}) if isinstance(profile.get("commercial_constraints"), dict) else {}
+    band = commercial.get("preferred_award_band", {}) if isinstance(commercial.get("preferred_award_band"), dict) else {}
+    return (_currency_to_float(band.get("min")), _currency_to_float(band.get("max")))
+
+
+def _profile_place_preferences(profile: dict[str, Any]) -> dict[str, Any]:
+    geography = profile.get("geography", {}) if isinstance(profile.get("geography"), dict) else {}
+    return {
+        "preferred_places": _dedupe_strings(
+            _string_list(geography.get("place_of_performance", []))
+            + _string_list(geography.get("preferred_states", []))
+        ),
+        "remote_ok": bool(geography.get("remote_ok")),
+    }
+
+
+def _currency_to_float(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    cleaned = re.sub(r"[^0-9.]+", "", str(value or ""))
+    if not cleaned:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _looks_like_buyer_phrase(value: str) -> bool:
+    lower = value.lower().strip()
+    return lower.startswith(
+        (
+            "department of ",
+            "u.s. ",
+            "us ",
+            "veterans affairs",
+            "general services administration",
+            "national ",
+            "office of ",
+        )
+    )
+
+
+def _buyer_preference_matches(buyer: str, preferred_buyers: list[str]) -> list[str]:
+    normalized_buyer = _normalize_text(buyer)
+    buyer_tokens = _signal_tokens(buyer)
+    matches: list[str] = []
+    for preferred in preferred_buyers:
+        normalized_preferred = _normalize_text(preferred)
+        preferred_tokens = _signal_tokens(preferred)
+        if not normalized_preferred or not preferred_tokens:
+            continue
+        overlap = buyer_tokens & preferred_tokens
+        if (
+            f" {normalized_preferred} " in f" {normalized_buyer} "
+            or f" {normalized_buyer} " in f" {normalized_preferred} "
+            or len(overlap) >= max(2, min(len(preferred_tokens), 3))
+        ):
+            matches.append(preferred)
+    return _dedupe_strings(matches)
+
+
+def _fuzzy_phrase_hits(text: str, phrases: list[str], max_items: int = 8) -> list[str]:
+    text_tokens = _signal_tokens(text)
+    hits: list[str] = []
+    for phrase in phrases:
+        raw = _clean_excerpt(phrase, max_chars=140)
+        phrase_tokens = {
+            token
+            for token in _signal_tokens(raw)
+            if token not in FIT_NARRATIVE_STOPWORDS and token not in FIT_NOISE_TERMS
+        }
+        if not phrase_tokens:
+            continue
+        required_overlap = 2 if len(phrase_tokens) >= 4 else 1
+        if len(text_tokens & phrase_tokens) < required_overlap:
+            continue
+        hits.append(raw)
+        if len(hits) >= max_items:
+            break
+    return _dedupe_strings(hits)
+
+
+def _vehicle_profile_matches(visible_paths: list[str], profile_vehicles: list[str]) -> list[str]:
+    matches: list[str] = []
+    for visible in visible_paths:
+        visible_tokens = _signal_tokens(visible)
+        for vehicle in profile_vehicles:
+            vehicle_tokens = _signal_tokens(vehicle)
+            if not vehicle_tokens:
+                continue
+            overlap = visible_tokens & vehicle_tokens
+            if (
+                _contains_normalized_phrase(visible, vehicle)
+                or _contains_normalized_phrase(vehicle, visible)
+                or len(overlap) >= max(2, min(len(vehicle_tokens), 3))
+            ):
+                matches.append(vehicle)
+    return _dedupe_strings(matches)
+
+
+def _profile_fit_weighting(
+    profile: dict[str, Any],
+    buyer: str,
+    opportunity: dict[str, Any],
+    notice_text: str,
+    solicitation_facts: dict[str, Any],
+    vehicle_access_paths: list[str],
+    set_aside_text: str,
+    capability_hits: list[str],
+    negative_hits: list[str],
+    past_performance_hits: list[str],
+) -> dict[str, Any]:
+    fit_guidance = _fit_narrative_guidance(profile)
+    preferred_buyers = _profile_preferred_buyers(profile)
+    buyer_matches = _buyer_preference_matches(buyer, preferred_buyers)
+    thematic_positive_terms = [
+        term
+        for term in _dedupe_strings(_profile_keywords(profile) + fit_guidance.get("positive_terms", []))
+        if "buyers such as" not in term.lower() and term not in preferred_buyers and not _looks_like_buyer_phrase(term)
+    ]
+    positive_theme_hits = _fuzzy_phrase_hits(
+        notice_text,
+        thematic_positive_terms,
+        max_items=6,
+    )
+    negative_theme_hits = _dedupe_strings(
+        negative_hits
+        + _fuzzy_phrase_hits(
+            notice_text,
+            _dedupe_strings(_profile_negative_keywords(profile) + fit_guidance.get("negative_terms", [])),
+            max_items=4,
+        )
+    )
+    vehicle_matches = _vehicle_profile_matches(vehicle_access_paths, _profile_contract_vehicles(profile))
+    preferred_min, preferred_max = _profile_preferred_award_band(profile)
+    estimated_value = _currency_to_float(
+        solicitation_facts.get("estimated_value")
+        or opportunity.get("estimated_value")
+        or opportunity.get("award_amount")
+        or opportunity.get("ceiling_value")
+    )
+    preferred_places = _profile_place_preferences(profile)
+    location_text = _location_text(opportunity)
+    location_matches = _fuzzy_phrase_hits(location_text, preferred_places.get("preferred_places", []), max_items=3)
+
+    customer_alignment_adjustment = 0
+    requirement_fit_adjustment = 0
+    past_performance_adjustment = 0
+    vehicle_access_adjustment = 0
+    signals: list[str] = []
+    cautions: list[str] = []
+
+    if buyer_matches:
+        customer_alignment_adjustment += 2
+        signals.append(f"Buyer aligns with stated vendor target accounts: {', '.join(buyer_matches[:2])}.")
+    elif preferred_buyers and buyer.strip():
+        customer_alignment_adjustment -= 1
+        cautions.append(f"Buyer does not align cleanly with the vendor's stated target accounts ({', '.join(preferred_buyers[:2])}).")
+
+    if positive_theme_hits or capability_hits:
+        requirement_fit_adjustment += 2 if len(_dedupe_strings(positive_theme_hits + capability_hits)) >= 3 else 1
+        signals.append(
+            f"Requirement language overlaps vendor-priority themes: {', '.join(_dedupe_strings(positive_theme_hits + capability_hits)[:3])}."
+        )
+    elif fit_guidance.get("positive_terms") or _profile_keywords(profile):
+        requirement_fit_adjustment -= 1
+        cautions.append("Current package does not show strong overlap with the vendor's stated priority themes.")
+
+    if negative_theme_hits:
+        requirement_fit_adjustment -= min(3, max(1, len(negative_theme_hits)))
+        cautions.append(f"Lower-fit or cautionary profile themes surfaced against this package: {', '.join(negative_theme_hits[:3])}.")
+
+    if past_performance_hits:
+        past_performance_adjustment += min(2, len(past_performance_hits))
+        signals.append(f"Visible scope aligns with past performance we can plausibly cite: {', '.join(past_performance_hits[:2])}.")
+    elif _profile_past_performance(profile):
+        past_performance_adjustment -= 1
+        cautions.append("User-provided past performance inventory exists, but direct scope overlap was not obvious in the current package.")
+
+    if vehicle_matches:
+        vehicle_access_adjustment += 1
+        signals.append(f"Visible vehicle path overlaps profile vehicles: {', '.join(vehicle_matches[:2])}.")
+    elif vehicle_access_paths and _profile_contract_vehicles(profile):
+        cautions.append("Visible vehicle path does not line up cleanly with the vehicles listed in the vendor profile.")
+
+    if set_aside_text and set_aside_text.strip().lower() not in {"not stated", "unknown"}:
+        set_aside_matches = _fuzzy_phrase_hits(set_aside_text, _profile_set_asides(profile), max_items=2)
+        if set_aside_matches:
+            signals.append(f"Set-aside posture aligns with profile eligibility cues: {', '.join(set_aside_matches[:2])}.")
+
+    if estimated_value is not None and (preferred_min is not None or preferred_max is not None):
+        if (preferred_min is None or estimated_value >= preferred_min) and (preferred_max is None or estimated_value <= preferred_max):
+            signals.append("Estimated value falls inside the vendor's preferred award band.")
+        else:
+            cautions.append("Estimated value falls outside the vendor's stated preferred award band.")
+
+    if location_matches:
+        signals.append(f"Place of performance aligns with profile geography cues: {', '.join(location_matches[:2])}.")
+    elif preferred_places.get("remote_ok") and "remote" in notice_text.lower():
+        signals.append("Profile allows remote delivery and the package signals remote execution flexibility.")
+
+    return {
+        "customer_alignment_adjustment": customer_alignment_adjustment,
+        "requirement_fit_adjustment": requirement_fit_adjustment,
+        "past_performance_adjustment": past_performance_adjustment,
+        "vehicle_access_adjustment": vehicle_access_adjustment,
+        "signals": _dedupe_strings(signals),
+        "cautions": _dedupe_strings(cautions),
+        "buyer_matches": buyer_matches,
+        "preferred_buyers": preferred_buyers,
+        "positive_theme_hits": positive_theme_hits,
+        "negative_theme_hits": negative_theme_hits,
+        "vehicle_matches": vehicle_matches,
+        "location_matches": location_matches,
+        "award_band_fit": estimated_value is not None
+        and (preferred_min is None or estimated_value >= preferred_min)
+        and (preferred_max is None or estimated_value <= preferred_max),
+    }
+
+
 def _contains_normalized_phrase(text: str, phrase: str) -> bool:
     normalized_text = f" {_normalize_text(text)} "
     normalized_phrase = _normalize_text(phrase)
@@ -665,82 +917,123 @@ def _competitive_gate(opportunity: dict[str, Any], notice_text: str) -> tuple[bo
 
 def _requirement_specific_insights(text: str) -> dict[str, list[str] | str]:
     lower = text.lower()
+    normalized_text = f" {_normalize_text(text)} "
     priorities: list[str] = []
     pain_points: list[str] = []
     win_themes: list[str] = []
     differentiators: list[str] = []
     mission_problem = ""
 
-    records_scale_signals = (
+    def _has_signal(phrase: str) -> bool:
+        normalized_phrase = _normalize_text(phrase)
+        return bool(normalized_phrase and f" {normalized_phrase} " in normalized_text)
+
+    def _matched_signals(phrases: tuple[str, ...]) -> list[str]:
+        return [phrase for phrase in phrases if _has_signal(phrase)]
+
+    records_lifecycle_signals = (
         "records management",
-        "record",
-        "records",
+        "records lifecycle",
+        "records retention",
+        "retention schedule",
+        "file plan",
+        "disposition",
+        "nara",
+        "erm 2.04",
+        "federal records act",
+        "records management and retention",
+        "fermi",
+    )
+    records_transfer_signals = (
+        "chain of custody",
+        "records transfer",
+        "records retrieval",
+        "archive coordination",
+        "archive retrieval",
+        "record retirement",
+        "retire records",
         "case file",
         "case files",
         "file room",
+    )
+    records_ingestion_signals = (
+        "digitization",
+        "scanning",
+        "barcoding",
+        "indexing",
+        "metadata capture",
+        "metadata",
         "paper record",
         "paper records",
-        "metadata",
-        "retrieval",
-        "archive",
-        "disposition",
     )
-    records_scale_count = sum(1 for token in records_scale_signals if token in lower)
-    if records_scale_count >= 3:
+    lifecycle_hits = _matched_signals(records_lifecycle_signals)
+    transfer_hits = _matched_signals(records_transfer_signals)
+    ingestion_hits = _matched_signals(records_ingestion_signals)
+    records_signal_total = len(set(lifecycle_hits + transfer_hits + ingestion_hits))
+    records_category_hits = sum(bool(group) for group in (lifecycle_hits, transfer_hits, ingestion_hits))
+    if records_category_hits >= 2 and records_signal_total >= 3:
         mission_problem = "The customer appears to need a records-heavy operating environment that can control ingestion, retention, retrieval, and multi-office workflows without breaking continuity."
         priorities.append("The requirement is about operational records control at scale, not generic document storage: the package repeatedly points to records lifecycle, retrieval, metadata, or high-volume file handling.")
         pain_points.append("If records classification, retrieval, or migration logic fails at operational scale, the customer risks disruption across multiple offices, users, or case workflows.")
         win_themes.append("Lead with records-operations credibility: show how the solution preserves retrieval fidelity, workflow continuity, and user access across large volumes and mixed record types.")
         differentiators.append("Proof that the team has supported records-heavy federal operations with measurable retrieval, metadata, and lifecycle-control discipline.")
 
-    if any(token in lower for token in ("nara", "erm 2.04", "federal records act", "records management and retention", "retention schedule", "fermi")):
+    if lifecycle_hits:
         priorities.append("NARA and records-lifecycle compliance are core functional requirements, not background policy language: the PWS ties the solution to NARA ERM requirements, retention schedules, and disposition logic.")
         pain_points.append("A platform that cannot automate retention, disposition, and records-lifecycle controls will fail the mission even if the user interface is acceptable.")
         win_themes.append("Frame the bid around records-lifecycle control: retention calculation, disposition, metadata, and NARA-aligned governance have to be working features, not compliance promises.")
         differentiators.append("Demonstrated records-governance implementation aligned to NARA requirements and approved federal retention schedules.")
 
-    if any(token in lower for token in ("fedramp", "fisma", "privacy act", "nist", "security controls", "ato", "authority to operate")):
+    if any(
+        _has_signal(token)
+        for token in ("fedramp", "fisma", "privacy act", "nist", "security controls", "ato", "authority to operate")
+    ):
         priorities.append("Named security, privacy, or compliance controls appear to be part of the requirement baseline, not just general background language.")
         pain_points.append("The customer is buying an environment that has to survive security, privacy, and audit scrutiny, not just pass a technical demo.")
         win_themes.append("Show that the solution is governable in a federal environment: control inheritance, compliance evidence, and operating discipline should be first-class proof points.")
         differentiators.append("Audit-ready operating evidence for a federal environment, including control inheritance and measurable compliance routines.")
 
-    if any(token in lower for token in ("chain of custody", "transfer", "retirement", "retrieval", "archive coordination", "records retrieval")):
+    if _has_signal("chain of custody") or len(transfer_hits) >= 2:
         priorities.append("Retrieval and chain-of-custody continuity matter because the package ties the work to records transfer, retirement, retrieval, or archive coordination.")
         pain_points.append("If the platform cannot preserve transfer and retrieval fidelity across archive or records-handoff workflows, the customer loses legal, investigative, or business-use confidence.")
         win_themes.append("Make retrieval continuity a headline theme: prove the solution can transfer, track, and retrieve records without losing control history or user confidence.")
         differentiators.append("Operating evidence for chain-of-custody, transfer, and retrieval workflows rather than generic repository administration.")
 
-    if any(token in lower for token in ("current contractor", "transition-in", "transition out", "90-day transition", "successor contractor", "phase-in")):
-        priorities.append("Transition risk is concrete in this package: the successor has to stand up the new environment quickly while preserving continuity from the current records-management approach.")
-        pain_points.append("The buyer is exposed to continuity loss during transition-in and transition-out, especially if migration, platform cutover, or incumbent handoff is weak.")
-        win_themes.append("Tell a cutover story, not just a capability story: show how the team will stand up the replacement environment, inherit the operating context, and preserve continuity through both transition-in and transition-out.")
-        differentiators.append("A transition plan that addresses successor take-over, incumbent knowledge transfer, migration timing, and continuity checkpoints during the 90-day transition window.")
+    if any(
+        _has_signal(token)
+        for token in ("current contractor", "transition-in", "transition out", "90-day transition", "successor contractor", "phase-in")
+    ):
+        priorities.append("Transition risk is concrete in this package: the successor has to stand up the new operating rhythm quickly while preserving continuity from the current execution approach.")
+        pain_points.append("The buyer is exposed to continuity loss during phase-in or successor handoff, especially if knowledge transfer, access setup, or mobilization steps are weak.")
+        win_themes.append("Tell a continuity story, not just a capability story: show how the team will stand up the replacement effort, inherit the operating context, and preserve continuity through transition.")
+        differentiators.append("A transition plan that addresses successor take-over, knowledge transfer, access dependencies, and continuity checkpoints during phase-in.")
 
-    ingestion_signal_count = sum(
-        1
-        for token in ("digitization", "scanning", "barcoding", "indexing", "metadata capture", "paper record")
-        if token in lower
-    )
-    if ingestion_signal_count >= 2:
+    if len(ingestion_hits) >= 2:
         priorities.append("This includes real ingestion and conversion work, not just light workflow support: the package points to scanning, indexing, or metadata discipline that affects downstream usability.")
         pain_points.append("Ingestion and conversion can break the program if validation, metadata capture, or handoff discipline are treated like commodity back-office tasks.")
         win_themes.append("Show industrialized ingestion: explain how conversion, validation, indexing, and metadata discipline will preserve usability from day one.")
         differentiators.append("Operational proof of high-volume ingestion, validation, and metadata-control discipline in a federal workflow.")
 
-    if any(token in lower for token in ("dashboard", "help desk", "training", "user administration", "program management")):
+    support_admin_hits = _matched_signals(("help desk", "service desk", "user administration", "account provisioning"))
+    reporting_hits = _matched_signals(("dashboard", "dashboards", "metrics dashboard", "status dashboard"))
+    adoption_hits = _matched_signals(("end-user training", "user training", "train users"))
+    governance_hits = _matched_signals(("program management office", "pmo", "service governance"))
+    if support_admin_hits and (reporting_hits or adoption_hits or governance_hits):
         priorities.append("The customer is buying an operating service, not just software delivery: dashboards, help desk, training, user administration, and program management are explicit parts of scope.")
         pain_points.append("Adoption and day-two operations will matter because the platform has to be supportable by distributed users, not just deployed once.")
         win_themes.append("Position as an operating partner: combine platform delivery with dashboards, user support, training, and governance routines that make the system usable after go-live.")
         differentiators.append("A day-two operating model covering dashboards, help desk, training, administration, and user-adoption support.")
 
-    if any(token in lower for token in ("independent audit", "soc 1", "ssae 16", "fiscam", "corrective action plan")):
+    if any(_has_signal(token) for token in ("independent audit", "soc 1", "ssae 16", "fiscam", "corrective action plan")):
         priorities.append("Independent auditability is a named requirement: the customer wants a solution that can withstand SOC/FISCAM-style review and produce corrective-action discipline.")
         pain_points.append("If operations are not evidenced cleanly enough for independent audit, the contractor will lose credibility even if the platform features look strong.")
         win_themes.append("Emphasize audit-ready operations: show how the team will support annual independent review, furnish evidence, and close findings without drama.")
         differentiators.append("Documented experience supporting independent audits, corrective-action plans, and evidence production for government-facing systems.")
 
-    if any(token in lower for token in ("geographic information", "api", "foia", "searching in response to information requests")):
+    if any(
+        _has_signal(token)
+        for token in ("geographic information", "api", "foia", "searching in response to information requests")
+    ):
         priorities.append("The requirement includes integration, search, or reporting use cases beyond a narrow transactional workflow.")
         pain_points.append("If the solution cannot expose data cleanly for downstream users, reporting, or information-response workflows, the customer will lose mission value after deployment.")
         win_themes.append("Show that the solution is usable as an operational data asset: integration, search, and reporting should be part of the story, not an afterthought.")
@@ -770,6 +1063,19 @@ def _priority_analysis(
     unknowns: list[str] = []
     pain_points: list[str] = []
     repeated_language: list[str] = []
+    external_pressure_signals = public_research.get("external_pressure_signals", [])
+    if not isinstance(external_pressure_signals, list):
+        external_pressure_signals = []
+    pressure_lines = [
+        f"{str(item.get('signal') or '').strip()}: {str(item.get('evidence') or '').strip()}"
+        for item in external_pressure_signals
+        if isinstance(item, dict) and str(item.get("signal") or "").strip() and str(item.get("evidence") or "").strip()
+    ]
+    pressure_categories = {
+        str(item.get("category") or "").strip()
+        for item in external_pressure_signals
+        if isinstance(item, dict)
+    }
 
     if _contains_any(lower, list(CONTINUITY_MARKERS)) and not has_specific:
         evidence_backed.append("Continuity of operations and low transition risk appear to matter, based on direct continuity language in the notice or attachments.")
@@ -789,8 +1095,16 @@ def _priority_analysis(
         likely.append("Price discipline and scope control likely matter because the procurement language points to fixed-price execution.")
     if award_basis != "Evaluation basis not explicit in current evidence":
         evidence_backed.append(f"The solicitation language surfaced an award basis signal: {award_basis}.")
+    if "oversight" in pressure_categories:
+        evidence_backed.append("Public oversight pressure suggests the buyer will care about remediation speed, reporting discipline, and fewer execution surprises.")
+        pain_points.append("The customer may be trying to reduce findings, rework, or management churn around this requirement area.")
+    if "leadership" in pressure_categories or "public_discourse" in pressure_categories:
+        evidence_backed.append("Leadership or testimony signals suggest this requirement area carries visible executive or public attention.")
+    if "acquisition_forecast" in pressure_categories:
+        likely.append("A forecast or buying-plan signal exists, which suggests the customer may already be shaping timing and acquisition path.")
     if public_research.get("mission_context_signals"):
         repeated_language.extend(_string_list(public_research.get("mission_context_signals", []), max_items=3))
+    repeated_language.extend(pressure_lines[:3])
     evidence_backed = _dedupe_strings(_string_list(requirement_specific.get("priorities", []), max_items=8) + evidence_backed)
     pain_points = _dedupe_strings(_string_list(requirement_specific.get("pain_points", []), max_items=8) + pain_points)
     if not public_research.get("mission_context_signals"):
@@ -813,7 +1127,69 @@ def _priority_analysis(
         "unknowns": _dedupe_strings(unknowns),
         "pain_points": _dedupe_strings(pain_points),
         "repeated_language": _dedupe_strings(repeated_language)[:5],
+        "external_pressure_signals": _dedupe_strings(pressure_lines)[:6],
     }
+
+
+def _priority_evidence_mode(
+    customer_priorities: dict[str, Any],
+    public_research: dict[str, Any],
+    workstream_lines: list[str],
+) -> str:
+    core_context_anchor_count = int(public_research.get("core_context_anchor_count", 0) or 0)
+    funding_or_buying_anchor_count = int(public_research.get("funding_or_buying_anchor_count", 0) or 0)
+    workstream_count = len([item for item in workstream_lines if str(item or "").strip()])
+    evidence_priority_count = len(_string_list(customer_priorities.get("evidence_backed_priorities", []), max_items=8))
+    if workstream_count == 0 and core_context_anchor_count == 0 and funding_or_buying_anchor_count == 0:
+        return "thin"
+    if workstream_count >= 4 or (core_context_anchor_count >= 2 and workstream_count >= 2):
+        return "strong"
+    if workstream_count >= 2 or core_context_anchor_count >= 1 or funding_or_buying_anchor_count >= 1 or evidence_priority_count >= 2:
+        return "moderate"
+    return "thin"
+
+
+def _apply_priority_evidence_gate(
+    customer_priorities: dict[str, Any],
+    public_research: dict[str, Any],
+    workstream_lines: list[str],
+) -> dict[str, Any]:
+    updated = dict(customer_priorities or {})
+    mode = _priority_evidence_mode(updated, public_research, workstream_lines)
+    evidence_backed = _dedupe_strings(_string_list(updated.get("evidence_backed_priorities", []), max_items=8))
+    likely = _dedupe_strings(_string_list(updated.get("likely_priorities", []), max_items=6))
+    pain_points = _dedupe_strings(_string_list(updated.get("pain_points", []), max_items=8))
+    strategic_pain_points = _dedupe_strings(_string_list(updated.get("strategic_pain_points", []), max_items=6))
+    repeated_language = _dedupe_strings(_string_list(updated.get("repeated_language", []), max_items=5))
+    external_pressure = _dedupe_strings(_string_list(updated.get("external_pressure_signals", []), max_items=6))
+
+    if mode == "strong":
+        updated["priority_rendering_mode"] = "strong"
+        updated["priority_rendering_warning"] = ""
+        return updated
+
+    if mode == "moderate":
+        updated["evidence_backed_priorities"] = evidence_backed[:4]
+        updated["likely_priorities"] = likely[:2]
+        updated["pain_points"] = pain_points[:3]
+        updated["strategic_pain_points"] = strategic_pain_points[:2]
+        updated["repeated_language"] = repeated_language[:3]
+        updated["external_pressure_signals"] = external_pressure[:3]
+        updated["priority_rendering_mode"] = "moderate"
+        updated["priority_rendering_warning"] = MODERATE_PRIORITY_WARNING
+        return updated
+
+    updated["evidence_backed_priorities"] = [THIN_PRIORITY_EVIDENCE]
+    updated["likely_priorities"] = [THIN_PRIORITY_LIKELY]
+    updated["pain_points"] = [THIN_PRIORITY_PAIN]
+    updated["strategic_pain_points"] = []
+    updated["repeated_language"] = repeated_language[:1]
+    updated["external_pressure_signals"] = external_pressure[:2]
+    updated["priority_rendering_mode"] = "thin"
+    updated["priority_rendering_warning"] = THIN_PRIORITY_WARNING
+    if len([item for item in workstream_lines if str(item or "").strip()]) < 2:
+        updated["strategic_reasoning_summary"] = ""
+    return updated
 
 
 def _solicitation_fact_lines(solicitation_facts: dict[str, Any]) -> list[str]:
@@ -869,6 +1245,127 @@ def _current_package_strategy_anchors(
         "fact_anchors": _dedupe_strings(fact_anchors),
         "all_anchors": _dedupe_strings(section_anchors + fact_anchors),
     }
+
+
+def _workstream_capture_implication_rows(
+    attachment_workstreams: list[dict[str, Any]],
+    solicitation_facts: dict[str, Any],
+    staffing_pricing_signals: dict[str, Any],
+    attachment_anomalies: list[dict[str, Any]],
+    max_items: int = 5,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in attachment_workstreams or []:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        objective = _clean_excerpt(item.get("objective") or "", max_chars=260).strip()
+        evidence_anchor = _string_list(item.get("evidence_snippets"), max_items=1)
+        if not objective or not evidence_anchor:
+            continue
+        if title and objective.lower().startswith(title.lower()):
+            text = objective
+        elif title:
+            text = f"{title}: {objective}"
+        else:
+            text = objective
+        key = _normalize_text(text)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        rows.append({"text": text, "evidence_anchor": evidence_anchor[0]})
+        if len(rows) >= max_items:
+            break
+    if len(rows) < max_items:
+        for fact in _solicitation_fact_lines(solicitation_facts):
+            if any(marker in fact.lower() for marker in ("set-aside", "vehicle", "contract type", "evaluation basis", "period of performance", "funds status")):
+                key = _normalize_text(fact)
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                rows.append({"text": fact, "evidence_anchor": fact})
+                if len(rows) >= max_items:
+                    break
+    if len(rows) < max_items:
+        for note in _string_list(staffing_pricing_signals.get("evaluation_notes"), max_items=3):
+            key = _normalize_text(note)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            rows.append({"text": note, "evidence_anchor": note})
+            if len(rows) >= max_items:
+                break
+    if len(rows) < max_items:
+        for anomaly in attachment_anomalies or []:
+            if not isinstance(anomaly, dict):
+                continue
+            signal = str(anomaly.get("signal") or "").strip()
+            source = str(anomaly.get("source") or "").strip()
+            if not signal or not source:
+                continue
+            key = _normalize_text(signal)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            rows.append({"text": signal, "evidence_anchor": source})
+            if len(rows) >= max_items:
+                break
+    return rows
+
+
+def _proof_artifact_recommendations(
+    solicitation_facts: dict[str, Any],
+    attachment_workstreams: list[dict[str, Any]],
+    staffing_pricing_signals: dict[str, Any],
+    attachment_anomalies: list[dict[str, Any]],
+    strategic_reasoning: dict[str, Any],
+) -> list[str]:
+    workstream_text = " ".join(_workstream_lines(attachment_workstreams)).lower()
+    anomaly_text = " ".join(str(item.get("signal") or "") for item in attachment_anomalies if isinstance(item, dict)).lower()
+    staffing_roles = _string_list(solicitation_facts.get("staffing_roles", []), max_items=8)
+    artifacts = _dedupe_strings(
+        [
+            *(
+                [f"Staffing matrix mapped to the visible roles, coverage periods, and workstreams: {', '.join(staffing_roles)}."]
+                if staffing_roles
+                else []
+            ),
+            *(
+                ["Transition and day-one-readiness annex covering access steps, onboarding dependencies, and first-30-day operating rhythm."]
+                if "transition" in workstream_text or "continuity" in workstream_text or str(solicitation_facts.get("transition_window") or "").strip()
+                else []
+            ),
+            *(
+                ["Sample reporting package with PSR cadence, issue log, QA/QC loop, and corrective-action format."]
+                if any(marker in workstream_text for marker in ("psr", "report", "dashboard", "qa/qc", "quality"))
+                else []
+            ),
+            *(
+                ["CLIN or pricing trace showing labor mix, option periods, and evaluated-price logic."]
+                if "pricing sheet" in anomaly_text or "spreadsheet" in anomaly_text or "firm fixed price" in str(solicitation_facts.get("contract_type") or "").lower()
+                else []
+            ),
+            *(
+                ["Acceptance-threshold or AQL crosswalk tied to QC actions, reporting triggers, and remedy avoidance."]
+                if "acceptance" in anomaly_text or "aql" in anomaly_text or "remedy" in anomaly_text
+                else []
+            ),
+            *(
+                ["Controlling-document matrix reconciling RFQ, PWS, amendments, and Q&A conflicts before proposal lock."]
+                if "cross-document conflict" in anomaly_text or "attachment-count mismatch" in anomaly_text or "page-limit conflict" in anomaly_text
+                else []
+            ),
+            *(
+                ["Eligibility proof pack covering set-aside status, vehicle access, and contract-type execution posture."]
+                if str(solicitation_facts.get("set_aside") or "").strip() or str(solicitation_facts.get("contract_vehicle") or "").strip()
+                else []
+            ),
+            *_string_list(strategic_reasoning.get("proof_requirements", []), max_items=4),
+            *_string_list(staffing_pricing_signals.get("pricing_notes", []), max_items=2),
+        ]
+    )
+    return artifacts[:8]
 
 
 def _best_strategy_anchor(text: str, anchors: list[str], min_overlap: int = 2) -> str:
@@ -1216,6 +1713,7 @@ def _funding_analysis(
     evidence = _dedupe_strings(
         _string_list(award_signals.get("budget_signals", []), max_items=3)
         + _string_list(public_research.get("budget_document_signals", []), max_items=2)
+        + _string_list(public_research.get("acquisition_forecast_signals", []), max_items=1)
         + (
             ["Attachment package includes pricing, schedule, or amendment artifacts that can be used for direct funding validation."]
             if useful_attachment_budget
@@ -1337,27 +1835,50 @@ def _stakeholder_analysis(
     buyer: str,
     stakeholder_contacts: list[dict[str, str]],
     opportunity: dict[str, Any],
+    public_research: dict[str, Any],
 ) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     active_procurement = str(opportunity.get("due_date", "") or "").strip() != ""
+    contact_history_rows = public_research.get("stakeholder_contact_history", []) if isinstance(public_research.get("stakeholder_contact_history"), list) else []
+    contact_history_by_key: dict[str, dict[str, Any]] = {}
+    for item in contact_history_rows:
+        if not isinstance(item, dict):
+            continue
+        name_key = _normalize_text(item.get("name", ""))
+        email_key = str(item.get("email", "") or "").strip().lower()
+        if name_key:
+            contact_history_by_key[name_key] = item
+        if email_key:
+            contact_history_by_key[email_key] = item
     for contact in stakeholder_contacts:
         role = str(contact.get("role", "") or "Contact").strip()
         influence = "Contracting process / communication"
         question = "Confirm the final communication path, amendment cadence, and proposal instructions."
+        history_row = contact_history_by_key.get(str(contact.get("email", "") or "").strip().lower()) or contact_history_by_key.get(
+            _normalize_text(contact.get("name", ""))
+        )
+        history = str(history_row.get("summary") or "").strip() if isinstance(history_row, dict) else ""
         if "program" in role.lower() or "technical" in role.lower() or "project" in role.lower():
             influence = "Program scope / technical expectations"
             question = "Clarify the operational pain point, transition expectations, and performance metrics."
         elif "small business" in role.lower():
             influence = "Socioeconomic posture / outreach"
             question = "Clarify set-aside posture, small-business participation goals, and approved outreach channels."
+        elif "contract" in role.lower() and history:
+            influence = "Contracting process / communication and prior buying pattern"
+            question = "Validate amendment cadence, submission path, and whether prior buying patterns imply a vehicle, set-aside, or continuity bias."
+        contact_value = str(contact.get("email", "") or "Public contact not parsed").strip()
+        if str(contact.get("phone", "") or "").strip():
+            contact_value = f"{contact_value} | {str(contact.get('phone', '')).strip()}"
         rows.append(
             {
                 "name": str(contact.get("name", "") or "Unnamed contact").strip(),
                 "role": role,
-                "contact": str(contact.get("email", "") or "Public contact not parsed").strip(),
+                "contact": contact_value,
                 "influence": influence,
                 "capture_question": question,
                 "communication": "Formal Q&A only during active solicitation." if active_procurement else "Use official industry outreach channels only.",
+                "history": history or "No public contact-history signal surfaced in this run.",
             }
         )
     if rows:
@@ -1372,6 +1893,7 @@ def _stakeholder_analysis(
                 "influence": "Likely stakeholder chain inferred from buyer metadata",
                 "capture_question": "Identify the real program owner, contracting lead, and evaluation chain.",
                 "communication": "Use official procurement channels only.",
+                "history": "No named public contact-history signal surfaced in this run.",
             }
         )
     return rows
@@ -1379,19 +1901,67 @@ def _stakeholder_analysis(
 
 def _competitive_analysis(
     award_signals: dict[str, Any],
+    normalized_evidence: dict[str, Any],
     incumbent_name: str,
+    solicitation_facts: dict[str, Any],
+    attachment_workstreams: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     seen: set[str] = set()
+    workstream_tokens = _signal_tokens(" ".join(_workstream_lines(attachment_workstreams)))
+    vehicle_text = str(solicitation_facts.get("contract_vehicle") or "").strip()
+    set_aside_text = str(solicitation_facts.get("set_aside") or "").strip()
+
+    for candidate in evidence_model_competitor_candidates(normalized_evidence, max_items=8):
+        if not isinstance(candidate, dict):
+            continue
+        name = str(candidate.get("name") or "").strip()
+        if not name or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        role = str(candidate.get("role") or "likely_bidder").replace("_", " ").strip()
+        strengths = _string_list(candidate.get("strengths"), max_items=4)
+        weaknesses = _string_list(candidate.get("weaknesses"), max_items=4)
+        evidence = _string_list(candidate.get("evidence"), max_items=4)
+        rows.append(
+            {
+                "name": name,
+                "role": role,
+                "why_likely": str(candidate.get("rationale") or "Cross-source evidence surfaced this company as a likely competitor.").strip(),
+                "strengths": " ".join(strengths) or "Cross-source evidence suggests relevant position or predecessor knowledge.",
+                "weaknesses": " ".join(weaknesses) or "Still needs direct validation against the current solicitation package.",
+                "likely_strategy": (
+                    "Likely to lean on continuity, predecessor context, and advantaged access."
+                    if "incumbent" in role
+                    else "Likely to emphasize adjacent past performance, vehicle access, or customer familiarity."
+                ),
+                "partner_relevance": (
+                    "Potential partner only if its vehicle or customer position fills a real gap."
+                    if "partner" in role
+                    else "Low as a likely prime competitor."
+                ),
+                "evidence": " | ".join(evidence) or "Cross-source normalized competitive signal.",
+            }
+        )
+
     relevant_awards = award_signals.get("relevant_awards", []) or []
+    adjacent_awards = award_signals.get("adjacent_awards", []) or []
     agency_matched = [award for award in relevant_awards if award.get("_agency_match")]
-    candidate_awards = agency_matched or relevant_awards
+    candidate_awards = (agency_matched or relevant_awards) + [award for award in adjacent_awards if isinstance(award, dict)]
     for award in candidate_awards:
         name = str(award.get("Recipient Name", "") or "").strip()
         if not name or name.lower() in seen:
             continue
         seen.add(name.lower())
         agency_match = bool(award.get("_agency_match"))
+        overlap = len(workstream_tokens & _signal_tokens(award.get("Description", "")))
+        role = (
+            "incumbent advantaged"
+            if incumbent_name and _normalize_text(name) == _normalize_text(incumbent_name)
+            else "likely bidder"
+            if agency_match
+            else "adjacent bidder"
+        )
         strengths: list[str] = []
         weaknesses: list[str] = []
         if agency_match:
@@ -1402,19 +1972,26 @@ def _competitive_analysis(
             strengths.append("Appears to hold the strongest public incumbency signal.")
         else:
             weaknesses.append("No direct incumbency proof surfaced in the current run.")
+        if overlap >= 2:
+            strengths.append("Award description overlaps with current requirement workstreams.")
+        if vehicle_text:
+            strengths.append(f"Validate whether this firm already holds or accesses {vehicle_text}.")
+        if set_aside_text and "small business" in set_aside_text.lower():
+            strengths.append(f"Socioeconomic posture may matter because the package signals {set_aside_text}.")
         description = _clean_excerpt(award.get("Description", ""), max_chars=180)
         rows.append(
             {
                 "name": name,
+                "role": role,
                 "why_likely": f"Matched award {award.get('Award ID', 'N/A')} for {_currency(award.get('Award Amount'))}; scope overlap appears in public award description.",
                 "strengths": " ".join(_dedupe_strings(strengths)) or "Relevant performer in adjacent public award history.",
                 "weaknesses": " ".join(_dedupe_strings(weaknesses)) or "No clear weakness surfaced in public data; validation still needed.",
-                "likely_strategy": f"Likely to emphasize {'continuity and agency familiarity' if agency_match else 'adjacent domain credibility and relevant scale'}." ,
+                "likely_strategy": f"Likely to emphasize {'continuity and agency familiarity' if agency_match else 'adjacent domain credibility and relevant scale'}.",
                 "partner_relevance": "Low as a likely prime competitor unless the firm is clearly positioned as a subcontractor on this procurement.",
                 "evidence": description or "Public award description not returned.",
             }
         )
-        if len(rows) >= 5:
+        if len(rows) >= 8:
             break
     return rows
 
@@ -1488,6 +2065,26 @@ def _subtle_signals(
                 "effect": "Helps us if we can prove compliance and operational discipline.",
                 "confidence": "Medium",
                 "source": "Public oversight and agency context sources",
+            }
+        )
+    for item in public_research.get("external_pressure_signals", []) or []:
+        if not isinstance(item, dict):
+            continue
+        category = str(item.get("category") or "").strip()
+        signal = str(item.get("signal") or "").strip()
+        evidence = str(item.get("evidence") or "").strip()
+        why = str(item.get("why_it_matters") or "").strip()
+        if not category or not signal or not evidence:
+            continue
+        if category not in {"leadership", "public_discourse", "acquisition_forecast"}:
+            continue
+        signals.append(
+            {
+                "signal": signal,
+                "why_it_matters": why or "Requirement-bearing external pressure signal surfaced in this run.",
+                "effect": "Helpful when the capture story aligns directly to this pressure.",
+                "confidence": "Medium",
+                "source": evidence,
             }
         )
     return signals
@@ -1600,9 +2197,13 @@ def _document_inventory(
 
 def _capability_fit(
     profile: dict[str, Any],
+    buyer: str,
     opportunity: dict[str, Any],
     notice_text: str,
     customer_priorities: dict[str, Any],
+    solicitation_facts: dict[str, Any],
+    vehicle_access_paths: list[str],
+    set_aside_text: str,
     vehicle_access_ok: bool,
     vehicle_access_required: bool,
     set_aside_access_ok: bool,
@@ -1611,12 +2212,17 @@ def _capability_fit(
     keywords = _profile_keywords(profile)
     negative_keywords = _profile_negative_keywords(profile)
     fit_guidance = _fit_narrative_guidance(profile)
+    positive_terms = [
+        term
+        for term in fit_guidance.get("positive_terms", [])
+        if "buyers such as" not in term.lower() and not _looks_like_buyer_phrase(term)
+    ]
     past_performance = _profile_past_performance(profile)
     profile_naics = _profile_naics(profile)
     opportunity_naics = [str(item).strip() for item in (opportunity.get("naics", []) or []) if str(item).strip()]
     capability_hits = _dedupe_strings(
         _phrase_hits(notice_text, keywords, max_items=8)
-        + _phrase_hits(notice_text, fit_guidance.get("positive_terms", []), max_items=4)
+        + _phrase_hits(notice_text, positive_terms, max_items=4)
     )[:8]
     negative_hits = _dedupe_strings(
         _phrase_hits(notice_text, negative_keywords, max_items=5)
@@ -1624,8 +2230,25 @@ def _capability_fit(
     )[:6]
     past_performance_hits = _phrase_hits(notice_text, past_performance, max_items=4)
     naics_match = bool(set(profile_naics) & set(opportunity_naics))
+    fit_weighting = _profile_fit_weighting(
+        profile,
+        buyer,
+        opportunity,
+        notice_text,
+        solicitation_facts,
+        vehicle_access_paths,
+        set_aside_text,
+        capability_hits,
+        negative_hits,
+        past_performance_hits,
+    )
 
-    proof_points = _dedupe_strings(capability_hits + past_performance_hits)
+    proof_points = _dedupe_strings(
+        capability_hits
+        + past_performance_hits
+        + fit_weighting.get("positive_theme_hits", [])
+        + fit_weighting.get("signals", [])[:2]
+    )
 
     missing_proof: list[str] = []
     if not past_performance:
@@ -1637,6 +2260,7 @@ def _capability_fit(
     if not set_aside_access_ok:
         missing_proof.append("Socioeconomic eligibility is not yet proven for the visible set-aside posture.")
     missing_proof.extend(qualification_gaps.get("missing", []))
+    missing_proof.extend(fit_weighting.get("cautions", [])[:2])
     eligibility_gaps: list[str] = []
     if vehicle_access_required and not vehicle_access_ok:
         eligibility_gaps.append("Vehicle access is not yet proven from the vendor profile.")
@@ -1685,6 +2309,18 @@ def _capability_fit(
         credibility_requirements.append(
             f"Anchor the solution story in the overlap already visible in the record: {', '.join(capability_hits[:3])}."
         )
+    if fit_weighting.get("positive_theme_hits"):
+        credibility_requirements.append(
+            f"Carry the vendor-fit narrative through the bid by proving the priority themes already visible here: {', '.join(fit_weighting.get('positive_theme_hits', [])[:3])}."
+        )
+    elif fit_guidance.get("positive_terms") or keywords:
+        credibility_requirements.append(
+            "No clear positive alignment surfaced from the vendor fit narrative; prove why this requirement is adjacent to core priorities or adjust teaming posture."
+        )
+    if fit_weighting.get("preferred_buyers") and not fit_weighting.get("buyer_matches"):
+        credibility_requirements.append(
+            f"Explain buyer adjacency because the current customer does not match the profile's named target accounts ({', '.join(fit_weighting.get('preferred_buyers', [])[:2])})."
+        )
     if not past_performance:
         if any(marker in lower for marker in ("high performance computing", "supercomputer", "dsrc", "dren", "sdren")):
             credibility_requirements.append(
@@ -1700,7 +2336,7 @@ def _capability_fit(
     return {
         "capability_hits": capability_hits,
         "negative_hits": negative_hits,
-        "fit_narrative_positive_hits": _phrase_hits(notice_text, fit_guidance.get("positive_terms", []), max_items=4),
+        "fit_narrative_positive_hits": _phrase_hits(notice_text, positive_terms, max_items=4),
         "fit_narrative_negative_hits": _phrase_hits(notice_text, fit_guidance.get("negative_terms", []), max_items=4),
         "past_performance_hits": past_performance_hits,
         "naics_match": naics_match,
@@ -1711,6 +2347,15 @@ def _capability_fit(
         "past_performance_inventory": past_performance,
         "qualification_gates": qualification_gaps.get("surfaced", []),
         "missing_qualification_gates": qualification_gaps.get("missing_labels", []),
+        "fit_weighting_signals": fit_weighting.get("signals", []),
+        "fit_weighting_cautions": fit_weighting.get("cautions", []),
+        "fit_weighting_summary": _join_sentence_parts(
+            fit_weighting.get("signals", [])[:2] + fit_weighting.get("cautions", [])[:2]
+        ),
+        "customer_alignment_adjustment": int(fit_weighting.get("customer_alignment_adjustment", 0) or 0),
+        "requirement_fit_adjustment": int(fit_weighting.get("requirement_fit_adjustment", 0) or 0),
+        "past_performance_adjustment": int(fit_weighting.get("past_performance_adjustment", 0) or 0),
+        "vehicle_access_adjustment": int(fit_weighting.get("vehicle_access_adjustment", 0) or 0),
     }
 
 
@@ -1799,6 +2444,11 @@ def _score_and_recommendation(
         0,
         15,
     )
+    customer_alignment = _clamp(
+        customer_alignment + int(capability_fit.get("customer_alignment_adjustment", 0) or 0),
+        0,
+        15,
+    )
     requirement_fit = _clamp(
         4
         + min(6, len(capability_fit.get("capability_hits", [])))
@@ -1808,6 +2458,11 @@ def _score_and_recommendation(
         15,
     )
     requirement_fit = _clamp(requirement_fit - min(3, qualification_gap_count), 0, 15)
+    requirement_fit = _clamp(
+        requirement_fit + int(capability_fit.get("requirement_fit_adjustment", 0) or 0),
+        0,
+        15,
+    )
     past_perf_fit = _clamp(
         2
         + (6 if len(capability_fit.get("past_performance_inventory", [])) >= 3 else 4 if capability_fit.get("past_performance_inventory") else 0)
@@ -1815,8 +2470,18 @@ def _score_and_recommendation(
         0,
         15,
     )
+    past_perf_fit = _clamp(
+        past_perf_fit + int(capability_fit.get("past_performance_adjustment", 0) or 0),
+        0,
+        15,
+    )
     funding_confidence = {"High": 9, "Medium": 6, "Low": 3}.get(str(funding_analysis.get("funding_confidence", "Low")), 3)
     vehicle_access = 8 if vehicle_access_ok and set_aside_access_ok else 5 if vehicle_access_ok or set_aside_access_ok else 2
+    vehicle_access = _clamp(
+        vehicle_access + int(capability_fit.get("vehicle_access_adjustment", 0) or 0),
+        0,
+        10,
+    )
     incumbent_vulnerability = 5
     if any("continuity" in item.lower() or "low transition" in item.lower() for item in incumbent_analysis.get("strength_signals", [])):
         incumbent_vulnerability = 3
@@ -1944,6 +2609,10 @@ def _score_and_recommendation(
         rationale.append(f"Capability overlap surfaced in the public package: {', '.join(capability_fit.get('capability_hits', [])[:4])}.")
     if capability_fit.get("negative_hits"):
         rationale.append(f"The fit narrative or negative-keyword profile surfaced caution areas: {', '.join(capability_fit.get('negative_hits', [])[:3])}.")
+    if capability_fit.get("fit_weighting_signals"):
+        rationale.append(f"Vendor-fit weighting signals: {'; '.join(capability_fit.get('fit_weighting_signals', [])[:3])}.")
+    if capability_fit.get("fit_weighting_cautions"):
+        rationale.append(f"Vendor-fit cautions: {'; '.join(capability_fit.get('fit_weighting_cautions', [])[:3])}.")
     if capability_fit.get("missing_proof"):
         rationale.append(f"Credibility gaps remain: {'; '.join(capability_fit.get('missing_proof', [])[:3])}.")
     if funding_analysis.get("funding_confidence"):
@@ -2001,6 +2670,20 @@ def _win_strategy(
     section_anchors = strategy_anchors.get("section_anchors", [])
     fact_anchors = strategy_anchors.get("fact_anchors", [])
     current_package_anchors = strategy_anchors.get("all_anchors", [])
+    workstream_capture_implication_rows = _workstream_capture_implication_rows(
+        attachment_workstreams,
+        solicitation_facts,
+        staffing_pricing_signals,
+        attachment_anomalies,
+        max_items=5,
+    )
+    proof_artifact_recommendations = _proof_artifact_recommendations(
+        solicitation_facts,
+        attachment_workstreams,
+        staffing_pricing_signals,
+        attachment_anomalies,
+        strategic_reasoning,
+    )
     attachment_native_ready = bool(section_anchors) and len(section_anchors) >= 2 and len(workstream_lines) >= 3
     strong_requirement_evidence = (
         len(section_anchors) >= 2
@@ -2017,7 +2700,8 @@ def _win_strategy(
     enough_specific_win_themes = len(specific_win_themes) >= 5 or (strong_requirement_detail and len(specific_win_themes) >= 2)
     enough_specific_differentiators = len(specific_differentiators) >= 5 or (strong_requirement_detail and len(specific_differentiators) >= 2)
     main_win_theme_candidates = _dedupe_strings(
-        specific_win_themes
+        _strategy_row_texts(workstream_capture_implication_rows)
+        + specific_win_themes
         + _string_list(strategic_reasoning.get("reasoned_win_themes", []), max_items=6)
         + ([] if enough_specific_win_themes else customer_priorities.get("evidence_backed_priorities", [])[:2])
     )
@@ -2031,7 +2715,8 @@ def _win_strategy(
         if isinstance(item, dict) and str(item.get("signal") or "").strip()
     ]
     hot_buttons = _dedupe_strings(
-        specific_hot_buttons
+        _strategy_row_texts(workstream_capture_implication_rows[:2])
+        + specific_hot_buttons
         + ([] if enough_specific_hot_buttons else customer_priorities.get("evidence_backed_priorities", [])[:3])
         + ([] if enough_specific_hot_buttons else customer_priorities.get("likely_priorities", [])[:2])
         + ([] if enough_specific_hot_buttons else _string_list(strategic_reasoning.get("reasoned_pain_points", []), max_items=4))
@@ -2273,6 +2958,9 @@ def _win_strategy(
         "strategy_evidence_strength": "strong" if strong_requirement_evidence else "thin",
         "section_anchor_count": len(section_anchors),
         "fact_anchor_count": len(fact_anchors),
+        "workstream_capture_implication_rows": workstream_capture_implication_rows,
+        "workstream_capture_implications": _strategy_row_texts(workstream_capture_implication_rows),
+        "proof_artifact_recommendations": proof_artifact_recommendations,
         "hot_button_rows": hot_button_rows,
         "win_theme_rows": win_theme_rows,
         "discriminator_rows": discriminator_rows,
@@ -2576,6 +3264,7 @@ def build_capture_decision_sections(
     )
     customer_priorities["strategic_pain_points"] = _string_list(strategic_reasoning.get("reasoned_pain_points", []), max_items=6)
     customer_priorities["strategic_reasoning_summary"] = str(strategic_reasoning.get("reasoning_summary") or "").strip()
+    customer_priorities = _apply_priority_evidence_gate(customer_priorities, public_research, workstream_lines)
     funding_analysis = _funding_analysis(funding_assessment, award_signals, public_research, attachment_bundle, evidence_gaps)
     if str(solicitation_facts.get("funds_status") or "").strip():
         funding_analysis["risk_to_timing_or_award"] = _dedupe_strings(
@@ -2595,13 +3284,17 @@ def build_capture_decision_sections(
         incumbent.get("vulnerability_signals", [])
         + [f'Source conflict to validate: {item.get("field")}.' for item in normalized_conflicts[:1] if isinstance(item, dict)]
     )
-    stakeholder_analysis = _stakeholder_analysis(resolved.get("buyer", ""), stakeholder_contacts, opportunity)
+    stakeholder_analysis = _stakeholder_analysis(resolved.get("buyer", ""), stakeholder_contacts, opportunity, public_research)
     vehicle_access_ok = (not vehicle_access_required) or bool(vehicle_profile_hits)
     capability_fit = _capability_fit(
         vendor_profile,
+        resolved.get("buyer", ""),
         opportunity,
         notice_text,
         customer_priorities,
+        solicitation_facts,
+        vehicle_access_paths,
+        set_aside_text,
         vehicle_access_ok,
         vehicle_access_required,
         set_aside_access_ok,
@@ -2677,7 +3370,13 @@ def build_capture_decision_sections(
             recommendation.get("rationale", []) + semantic_context.get("cautions", [])[:2]
         )
     document_inventory = _document_inventory(attachment_bundle, source_log, evidence_gaps)
-    competitive_analysis = _competitive_analysis(award_signals, incumbent.get("incumbent_name", ""))
+    competitive_analysis = _competitive_analysis(
+        award_signals,
+        normalized_evidence,
+        incumbent.get("incumbent_name", ""),
+        solicitation_facts,
+        attachment_workstreams,
+    )
     competitive_analysis.extend(_reasoned_competitor_hypotheses(solicitation_facts, attachment_workstreams))
     deduped_competitive_analysis: list[dict[str, str]] = []
     seen_competitors: set[str] = set()
@@ -2983,6 +3682,7 @@ def build_capture_decision_sections(
         "price_to_win_implications": win_strategy.get("price_to_win_considerations", []),
     }
 
+    customer_priority_mode = str(customer_priorities.get("priority_rendering_mode") or "strong").strip().lower()
     assumptions = {
         "facts": _dedupe_strings(
             [
@@ -2997,7 +3697,7 @@ def build_capture_decision_sections(
         ),
         "evidence_backed_inferences": _dedupe_strings(
             recommendation.get("rationale", [])[:4]
-            + customer_priorities.get("evidence_backed_priorities", [])[:3]
+            + ([] if customer_priority_mode == "thin" else customer_priorities.get("evidence_backed_priorities", [])[:3])
         ),
         "hypotheses": _dedupe_strings(
             incumbent.get("prior_selection_hypotheses", [])[:3]
@@ -3008,6 +3708,7 @@ def build_capture_decision_sections(
             customer_priorities.get("unknowns", [])[:3]
             + funding_analysis.get("open_questions", [])[:2]
             + document_inventory.get("missing", [])[:2]
+            + ([str(customer_priorities.get("priority_rendering_warning") or "").strip()] if customer_priority_mode == "thin" and str(customer_priorities.get("priority_rendering_warning") or "").strip() else [])
         ),
         "historical_learning_context": _dedupe_strings(
             semantic_context.get("support", [])[:2]
@@ -3055,7 +3756,7 @@ def build_capture_decision_sections(
             ),
             "customer_cares_about": _dedupe_strings(
                 customer_priorities.get("evidence_backed_priorities", [])[:3]
-                + customer_priorities.get("likely_priorities", [])[:2]
+                + ([] if customer_priority_mode == "thin" else customer_priorities.get("likely_priorities", [])[:2])
             ),
             "next_best_actions": _dedupe_strings(
                 [item.get("action", "") for item in action_plan.get("immediate", [])[:3]]
@@ -3084,11 +3785,15 @@ def build_capture_decision_sections(
             "past_performance_inventory": capability_fit.get("past_performance_inventory", []),
             "past_performance_hits": capability_fit.get("past_performance_hits", []),
             "missing_proof": capability_fit.get("missing_proof", []),
+            "qualification_gates": capability_fit.get("qualification_gates", []),
             "credibility_requirements": capability_fit.get("credibility_requirements", []),
             "recommended_prime_team_posture": partner_analysis.get("recommended_posture", "Undetermined"),
             "semantic_fit_summary": semantic_context.get("summary", ""),
             "historical_preference_support": semantic_context.get("support", []),
             "historical_preference_cautions": semantic_context.get("cautions", []),
+            "fit_weighting_signals": capability_fit.get("fit_weighting_signals", []),
+            "fit_weighting_cautions": capability_fit.get("fit_weighting_cautions", []),
+            "fit_weighting_summary": capability_fit.get("fit_weighting_summary", ""),
         },
         "subtle_signals": subtle_signals,
         "win_strategy": win_strategy,

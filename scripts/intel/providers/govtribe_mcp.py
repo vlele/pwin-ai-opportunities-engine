@@ -1266,6 +1266,43 @@ def _records_to_result(
             }
         )
 
+    competitor_candidates: list[dict[str, Any]] = []
+    seen_competitors: set[str] = set()
+    for family, record in records_by_family[:8]:
+        candidate_name = _first_text(
+            record,
+            "incumbent",
+            "incumbent_name",
+            "awardee",
+            "recipient",
+            "recipient_name",
+            "vendor",
+            "vendor_name",
+            "contractor",
+        )
+        normalized_candidate = _normalize_key(candidate_name)
+        if not normalized_candidate or normalized_candidate in seen_competitors:
+            continue
+        seen_competitors.add(normalized_candidate)
+        competitor_candidates.append(
+            {
+                "name": candidate_name,
+                "role": "incumbent_advantaged" if _normalize_key(candidate_name) == _normalize_key(incumbent_name) else "likely_bidder",
+                "rationale": f"GovTribe {family.replace('_', ' ')} record ties this company to similar scope, vehicle, or predecessor history.",
+                "confidence": "medium",
+                "strengths": [
+                    f"GovTribe surfaced a related {family.replace('_', ' ')} record.",
+                ],
+                "weaknesses": [
+                    "Still needs validation against the official solicitation package."
+                ],
+                "evidence": [
+                    _record_title(record),
+                    _record_identifier(record),
+                ],
+            }
+        )
+
     evidence_gaps = []
     if not incumbent_name:
         evidence_gaps.append("GovTribe did not return a clear incumbent name in the normalized fields.")
@@ -1315,6 +1352,7 @@ def _records_to_result(
             "partner_signals": [],
             "risks": [],
         },
+        "competitor_candidates": competitor_candidates,
         "next_questions": coerce_string_list(
             [
                 "Confirm incumbent and recompete timing against official solicitation attachments.",

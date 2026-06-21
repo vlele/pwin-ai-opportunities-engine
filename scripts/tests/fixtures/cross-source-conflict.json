@@ -48,6 +48,23 @@
         "partner_signals": [],
         "risks": []
       },
+      "competitor_candidates": [
+        {
+          "name": "Alpha Systems",
+          "role": "likely_bidder",
+          "rationale": "SAM-related award history points to Alpha Systems.",
+          "confidence": "medium",
+          "strengths": [
+            "Same-agency related award history."
+          ],
+          "weaknesses": [
+            "Still needs direct validation."
+          ],
+          "evidence": [
+            "GS00Q17GWD1234"
+          ]
+        }
+      ],
       "next_questions": [
         "Validate whether the procurement remains set aside at final release."
       ],
@@ -120,6 +137,38 @@
           "Vehicle access is still unproven."
         ]
       },
+      "competitor_candidates": [
+        {
+          "name": "Alpha Systems",
+          "role": "incumbent_advantaged",
+          "rationale": "GovTribe ties Alpha Systems to the predecessor task order.",
+          "confidence": "high",
+          "strengths": [
+            "Predecessor task-order signal."
+          ],
+          "weaknesses": [
+            "Needs official validation."
+          ],
+          "evidence": [
+            "GovTribe predecessor signal."
+          ]
+        },
+        {
+          "name": "Bravo Federal",
+          "role": "adjacent_bidder",
+          "rationale": "GovTribe surfaced adjacent scope overlap.",
+          "confidence": "low",
+          "strengths": [
+            "Adjacent scope visibility."
+          ],
+          "weaknesses": [
+            "No same-agency proof."
+          ],
+          "evidence": [
+            "Adjacent GovTribe match."
+          ]
+        }
+      ],
       "next_questions": [
         "Confirm whether CIO-SP3 still governs the current procurement."
       ],

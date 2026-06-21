@@ -18,6 +18,7 @@ try:
     from PyPDF2 import PdfReader
 except ImportError:  # pragma: no cover - optional dependency
     PdfReader = None
+from capture.agency_source_catalog import AGENCY_DIRECT_URLS, AGENCY_DOMAIN_HINTS, AGENCY_OVERSIGHT_HINTS
 from common.paths import today_local_str
 
 
@@ -34,6 +35,7 @@ JSON_DATE_RE = re.compile(r'"(?:datePublished|dateModified|datePosted|dateCreate
 SPACE_RE = re.compile(r"\s+")
 WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9/-]{2,}")
 URL_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9-]{2,}")
+LINK_HREF_RE = re.compile(r"""href=(['"])(.*?)\1""", re.IGNORECASE)
 SEARCH_URL = "https://www.bing.com/search?format=rss&q={query}"
 SEARCH_RESULT_LIMIT = 6
 DEFAULT_TIMEOUT = 25
@@ -70,48 +72,6 @@ OFFICIAL_HOSTS = {
     "dodcio.defense.gov",
     "acq.osd.mil",
 }
-AGENCY_DOMAIN_HINTS = {
-    "internal revenue service": ["irs.gov", "home.treasury.gov"],
-    "treasury, department of the": ["home.treasury.gov"],
-    "department of the treasury": ["home.treasury.gov"],
-    "department of defense": ["defense.gov"],
-    "dept of defense": ["defense.gov"],
-    "department of the army": ["army.mil"],
-    "dept of the army": ["army.mil"],
-    "department of the air force": ["af.mil", "airforce.com"],
-    "dept of the air force": ["af.mil", "airforce.com"],
-    "department of the navy": ["navy.mil", "marines.mil"],
-    "us coast guard": ["uscg.mil", "dhs.gov"],
-    "department of homeland security": ["dhs.gov"],
-    "department of commerce": ["commerce.gov"],
-    "national oceanic and atmospheric administration": ["noaa.gov", "commerce.gov"],
-    "health and human services": ["hhs.gov"],
-    "department of veterans affairs": ["va.gov"],
-    "veterans affairs": ["va.gov"],
-    "department of state": ["state.gov"],
-    "bureau of international narcotics and law enforcement affairs": ["fam.state.gov", "state.gov"],
-    "acquisitions - inl": ["fam.state.gov", "state.gov"],
-    "department of energy": ["energy.gov"],
-    "department of the interior": ["doi.gov"],
-    "general services administration": ["gsa.gov"],
-    "federal deposit insurance corporation": ["fdic.gov"],
-    "house of representatives": ["house.gov"],
-    "selective service system": ["sss.gov"],
-    "small business administration": ["sba.gov"],
-    "indian health service": ["ihs.gov"],
-    "us army corps of engineers": ["erdc.usace.army.mil", "usace.army.mil"],
-    "engineer research and development center": ["erdc.usace.army.mil", "usace.army.mil"],
-}
-AGENCY_OVERSIGHT_HINTS = {
-    "internal revenue service": ["tigta.gov", "oversight.gov"],
-    "treasury, department of the": ["tigta.gov", "oversight.gov"],
-    "department of the treasury": ["tigta.gov", "oversight.gov"],
-    "department of defense": ["dodig.mil", "oversight.gov"],
-    "dept of defense": ["dodig.mil", "oversight.gov"],
-    "department of the army": ["dodig.mil", "oversight.gov"],
-    "us army corps of engineers": ["dodig.mil", "oversight.gov"],
-    "engineer research and development center": ["dodig.mil", "oversight.gov"],
-}
 SIGNAL_STOPWORDS = {
     "the",
     "and",
@@ -144,6 +104,28 @@ SIGNAL_STOPWORDS = {
     "national",
     "project",
     "contract",
+    "contractor",
+    "contractors",
+    "shall",
+    "work",
+    "copy",
+    "statement",
+    "performance",
+    "revised",
+    "instructions",
+    "offeror",
+    "offerors",
+    "section",
+    "attachment",
+    "attachments",
+    "document",
+    "documents",
+    "submission",
+    "submissions",
+    "provide",
+    "provided",
+    "required",
+    "requirements",
 }
 LANGUAGE_PATH_PREFIXES = {"es", "zh-hans", "zh-hant", "ko", "ru", "vi", "ht"}
 BOILERPLATE_MARKERS = (
@@ -195,9 +177,22 @@ CATEGORY_URL_HINTS = {
         "roadmap",
         "digital",
         "data",
+        "fact-sheets",
+        "fact-sheet",
+        "facility-engineering",
+        "mission-support",
     ),
     "budget_funding": ("budget", "justification", "appropriation", "performance", "capital-investments", "operating-plan"),
-    "acquisition_forecast": ("acquisition", "procurement", "forecast", "industry-day", "procurement-forecast", "forecasted-business-opportunities"),
+    "acquisition_forecast": (
+        "acquisition",
+        "procurement",
+        "forecast",
+        "industry-day",
+        "procurement-forecast",
+        "forecasted-business-opportunities",
+        "business-opportunities",
+        "expiring-contracts",
+    ),
     "oversight": ("oversight", "audit", "report", "management", "inspection", "watchdog", "tax-administration"),
     "leadership": ("commissioner", "leadership", "official", "organization", "remarks", "testimony", "about-irs"),
     "policy_compliance": ("publication", "privacy", "security", "safeguards", "accessibility", "zero-trust", "508", "nist"),
@@ -213,13 +208,42 @@ CATEGORY_TEXT_HINTS = {
         "zero trust",
         "modernization",
         "technology",
+        "fact sheet",
+        "facility engineering",
+        "mission support",
+        "installation support",
+        "civil engineer",
     ),
     "budget_funding": ("budget", "appropriation", "performance", "funding", "investment", "justification"),
-    "acquisition_forecast": ("forecast", "forecasted business opportunities", "industry day", "procurement", "acquisition"),
+    "acquisition_forecast": (
+        "forecast",
+        "forecasted business opportunities",
+        "industry day",
+        "procurement",
+        "acquisition",
+        "business opportunities",
+        "expiring contracts",
+    ),
     "oversight": ("audit", "recommendation", "finding", "oversight", "inspector general", "watchdog"),
     "leadership": ("commissioner", "chief", "official", "testimony", "remarks", "leadership"),
     "policy_compliance": ("publication", "nist", "privacy", "security", "fedramp", "zero trust", "accessibility"),
     "public_discourse": ("news", "announcement", "remarks", "testimony", "press release", "speech"),
+}
+PRESSURE_SIGNAL_LABELS = {
+    "mission_context": "Requirement-bearing mission context",
+    "budget_funding": "Budget or spending signal",
+    "acquisition_forecast": "Buying or forecast signal",
+    "oversight": "Oversight or audit pressure",
+    "leadership": "Leadership priority signal",
+    "public_discourse": "Public discourse or testimony signal",
+}
+PRESSURE_SIGNAL_RATIONALES = {
+    "mission_context": "This helps explain the mission problem the requirement appears intended to solve.",
+    "budget_funding": "This helps distinguish actual funding or spending context from procurement boilerplate.",
+    "acquisition_forecast": "This helps explain whether the requirement is part of a visible buying plan or near-term demand signal.",
+    "oversight": "This helps identify external pressure that can shape evaluator concerns around controls, reporting, remediation, or execution risk.",
+    "leadership": "This helps surface what named leaders are emphasizing publicly about the requirement area.",
+    "public_discourse": "This helps identify public urgency, hearings, or narrative pressure tied to the requirement area.",
 }
 MISSION_CONTEXT_MARKERS = (
     "strategic plan",
@@ -232,6 +256,11 @@ MISSION_CONTEXT_MARKERS = (
     "roadmap",
     "operating plan",
     "research and development",
+    "fact sheet",
+    "facility engineering",
+    "civil engineer",
+    "installation support",
+    "mission support",
 )
 BUDGET_FUNDING_MARKERS = (
     "budget",
@@ -248,50 +277,14 @@ FORECAST_MARKERS = (
     "procurement forecast",
     "industry day",
     "forecasted",
+    "business opportunities",
+    "expiring contracts",
 )
 POLICY_DIRECT_URLS = {
     "NIST SP 800-53": ["https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"],
     "NIST SP 800-61": ["https://csrc.nist.gov/pubs/sp/800/61/r2/final"],
     "Section 508": ["https://www.section508.gov/"],
     "FedRAMP": ["https://www.fedramp.gov/"],
-}
-AGENCY_DIRECT_URLS = {
-    "state.gov": {
-        "mission_context": [
-            "https://fam.state.gov/fam/01fam/01fam0530.html",
-            "https://2017-2021.state.gov/bureaus-offices/under-secretary-for-civilian-security-democracy-and-human-rights/bureau-of-international-narcotics-and-law-enforcement-affairs",
-            "https://2021-2025.state.gov/justice-programs-in-action/",
-        ],
-        "budget_funding": [
-            "https://2017-2021.state.gov/plans-performance-budget",
-        ],
-    },
-    "fam.state.gov": {
-        "mission_context": [
-            "https://fam.state.gov/fam/01fam/01fam0530.html",
-        ],
-        "budget_funding": [
-            "https://2017-2021.state.gov/plans-performance-budget",
-        ],
-    },
-    "erdc.usace.army.mil": {
-        "mission_context": [
-            "https://www.erdc.usace.army.mil/About/",
-        ],
-        "acquisition_forecast": [
-            "https://www.erdc.usace.army.mil/Business-With-Us/Small-Business/",
-            "https://www.erdc.usace.army.mil/Media/Images/igphoto/2003821542/",
-        ],
-    },
-    "usace.army.mil": {
-        "mission_context": [
-            "https://www.erdc.usace.army.mil/About/",
-        ],
-        "acquisition_forecast": [
-            "https://www.erdc.usace.army.mil/Business-With-Us/Small-Business/",
-            "https://www.erdc.usace.army.mil/Media/Images/igphoto/2003821542/",
-        ],
-    },
 }
 NON_REQUIREMENT_KEYWORDS = {
     "support",
@@ -334,7 +327,36 @@ NON_REQUIREMENT_KEYWORDS = {
     "competition",
     "current",
     "future",
+    "shall",
+    "work",
+    "contractor",
+    "copy",
+    "statement",
+    "performance",
+    "revised",
+    "instructions",
+    "offerors",
+    "section",
+    "attachment",
+    "attachments",
+    "document",
+    "documents",
+    "submission",
+    "submissions",
+    "required",
+    "requirements",
 }
+NON_EVIDENCE_PATH_MARKERS = (
+    "/careers/",
+    "/career/",
+    "/jobs/",
+    "/join/",
+    "/enlist/",
+    "/apply/",
+    "/benefits/",
+    "career-path",
+    "how-to-join",
+)
 POLICY_FALLBACK_DOMAINS = [
     "nist.gov",
     "whitehouse.gov",
@@ -404,6 +426,7 @@ LEADERSHIP_ROLE_QUERIES = (
     "Commissioner",
     "Director",
 )
+DEPARTMENT_PREFIX_RE = re.compile(r"^(?:department|dept)\s+of(?:\s+the)?\s+", re.IGNORECASE)
 
 def _normalize_text(value: object) -> str:
     return SPACE_RE.sub(" ", TAG_RE.sub(" ", html.unescape(str(value or "")))).strip()
@@ -467,7 +490,7 @@ def _top_keywords(title: str, notice_text: str, limit: int = 8) -> list[str]:
 
 
 def _priority_title_keywords(title: str, limit: int = 5) -> list[str]:
-    return [token for token in _signal_tokens(title) if token not in NON_REQUIREMENT_KEYWORDS][:limit]
+    return _top_keywords(title, "", limit=limit)
 
 
 def _keyword_query_clause(keywords: list[str], limit: int = 3) -> str:
@@ -484,12 +507,36 @@ def _keyword_query_clause(keywords: list[str], limit: int = 3) -> str:
     return "(" + " OR ".join(f'"{keyword}"' for keyword in selected) + ")"
 
 
+def _candidate_fetch_max_chars(category: str, url: str) -> int:
+    lowered_url = str(url or "").lower()
+    is_document = any(lowered_url.endswith(ext) or f"{ext}?" in lowered_url for ext in (".pdf", ".xls", ".xlsx"))
+    if not is_document:
+        return 4000
+    if category in {"budget_funding", "acquisition_forecast"}:
+        return 12000
+    return 8000
+
+
 def _clean_notice_seed(notice_text: str, max_chars: int = 2400) -> str:
     return _normalize_text(notice_text)[:max_chars]
 
 
+def _canonical_source_url(url: str) -> str:
+    normalized = str(url or "").strip()
+    if not normalized:
+        return ""
+    return urllib.parse.urldefrag(normalized)[0]
+
+
 def _agency_labels(buyer: str) -> list[str]:
-    chain = [segment.strip() for segment in str(buyer or "").split(".") if segment.strip()]
+    raw_buyer = str(buyer or "").strip()
+    chain = [
+        segment.strip()
+        for segment in re.split(r"\s*(?:[.;|]|\s*,\s*)\s*", raw_buyer)
+        if segment.strip()
+    ]
+    if raw_buyer:
+        chain.append(raw_buyer)
     if not chain:
         return []
     def specificity(segment: str) -> tuple[int, int]:
@@ -543,6 +590,20 @@ def _label_acronyms(labels: list[str], domains: list[str]) -> list[str]:
     return _dedupe_strings(acronyms)
 
 
+def _query_label_variants(labels: list[str], domains: list[str]) -> list[str]:
+    variants: list[str] = []
+    for label in labels:
+        cleaned = _normalize_text(label)
+        if not cleaned:
+            continue
+        variants.append(cleaned)
+        simplified = DEPARTMENT_PREFIX_RE.sub("", cleaned).strip()
+        if simplified and simplified.lower() != cleaned.lower():
+            variants.append(simplified)
+    variants.extend(_label_acronyms(labels, domains))
+    return _dedupe_strings(variants)
+
+
 def infer_official_domains(buyer: str, url: str = "") -> list[str]:
     buyer_text = str(buyer or "").lower()
     domains: list[str] = []
@@ -572,6 +633,17 @@ def infer_official_domains(buyer: str, url: str = "") -> list[str]:
         ),
     )
     return prioritized
+
+
+def _official_agency_domains(domains: list[str]) -> list[str]:
+    official = []
+    for domain in domains:
+        host = str(domain or "").strip().lower().lstrip("www.")
+        if not host:
+            continue
+        if host.endswith(".gov") or host.endswith(".mil") or host in OFFICIAL_HOSTS:
+            official.append(host)
+    return _dedupe_strings(official or domains)
 
 
 def extract_policy_references(*texts: object) -> list[dict[str, Any]]:
@@ -734,13 +806,16 @@ def _category_allowed_domains(
     buyer: str,
     policy_refs: list[dict[str, Any]],
 ) -> list[str]:
+    official_agency_domains = _official_agency_domains(agency_domains)
     if category == "oversight":
-        return _dedupe_strings(infer_oversight_domains(buyer) + agency_domains)
+        return _dedupe_strings(infer_oversight_domains(buyer) + official_agency_domains)
     if category == "policy_compliance":
         policy_domains = [domain for ref in policy_refs for domain in ref.get("domains", [])]
         fallback_domains = POLICY_FALLBACK_DOMAINS if policy_refs else [domain for domain in POLICY_FALLBACK_DOMAINS if domain != "whitehouse.gov"]
-        return _dedupe_strings(agency_domains + policy_domains + fallback_domains)
-    return agency_domains
+        return _dedupe_strings(official_agency_domains + policy_domains + fallback_domains)
+    if category in {"mission_context", "budget_funding", "acquisition_forecast", "leadership", "public_discourse"}:
+        return official_agency_domains
+    return official_agency_domains
 
 
 def _category_hints(
@@ -778,6 +853,8 @@ def _candidate_url_rank(url: str, allowed_domains: list[str], url_hints: list[st
     host = _host(url)
     score = 4 if any(_matches_domain(host, domain) for domain in allowed_domains) else 0
     path_text = f"{urlparse(url).path.lower()} {urlparse(url).query.lower()}"
+    if any(marker in path_text for marker in NON_EVIDENCE_PATH_MARKERS):
+        score -= 10
     hint_hits = 0
     for hint in url_hints:
         for variant in _hint_variants(hint):
@@ -863,6 +940,23 @@ def _source_quality_score(
         "leadership",
         "public_discourse",
     }
+    lowered_url = url.lower()
+    if category in {"oversight", "public_discourse"} and _is_homepage_url(url):
+        return {
+            "quality_score": -10,
+            "entity_overlap": entity_overlap,
+            "objective_overlap": objective_overlap,
+            "marker_hit": marker_hit,
+            "requirement_relevant": False,
+        }
+    if category in requirement_sensitive_categories and any(marker in lowered_url for marker in NON_EVIDENCE_PATH_MARKERS):
+        return {
+            "quality_score": -10,
+            "entity_overlap": entity_overlap,
+            "objective_overlap": objective_overlap,
+            "marker_hit": marker_hit,
+            "requirement_relevant": False,
+        }
     requirement_keywords_present = bool(keyword_tokens)
     requirement_relevant = entity_overlap > 0 and (
         objective_overlap > 0
@@ -923,6 +1017,15 @@ def _source_quality_score(
                 "requirement_relevant": False,
             }
     if category == "mission_context":
+        if not marker_hit:
+            return {
+                "quality_score": -10,
+                "entity_overlap": entity_overlap,
+                "objective_overlap": objective_overlap,
+                "marker_hit": marker_hit,
+                "requirement_relevant": False,
+            }
+    if category == "public_discourse":
         if not marker_hit:
             return {
                 "quality_score": -10,
@@ -1106,6 +1209,26 @@ def _query_list(*values: str) -> list[str]:
     return [value for value in values if value]
 
 
+def _domain_label_queries(
+    domains: list[str],
+    labels: list[str],
+    requirement_clause: str,
+    suffixes: list[str],
+    *,
+    max_labels: int = 3,
+    max_domains: int = 2,
+) -> list[str]:
+    queries: list[str] = []
+    label_candidates = [label for label in labels[:max_labels] if str(label or "").strip()]
+    domain_candidates = [domain for domain in domains[:max_domains] if str(domain or "").strip()]
+    requirement_suffix = f" {requirement_clause}" if requirement_clause else ""
+    for domain in domain_candidates:
+        for label in label_candidates:
+            for suffix in suffixes:
+                queries.append(f'site:{domain} "{label}"{requirement_suffix} {suffix}')
+    return _dedupe_strings(queries)
+
+
 def _search_web(query: str, timeout: int = DEFAULT_TIMEOUT, limit: int = SEARCH_RESULT_LIMIT) -> dict[str, Any]:
     request = urllib.request.Request(
         SEARCH_URL.format(query=urllib.parse.quote_plus(query)),
@@ -1232,11 +1355,74 @@ def fetch_url_excerpt(url: str, timeout: int = DEFAULT_TIMEOUT, max_chars: int =
     return last_http_error or last_error or {"status": "error", "url": url, "detail": "Unknown fetch failure"}
 
 
+def _linked_official_urls(seed_url: str, allowed_domains: list[str], url_hints: list[str], limit: int = 12) -> list[str]:
+    if not seed_url:
+        return []
+    request = urllib.request.Request(seed_url, headers=DEFAULT_REQUEST_HEADERS)
+    try:
+        with urllib.request.urlopen(request, timeout=DEFAULT_TIMEOUT) as response:
+            content_type = str(response.headers.get("Content-Type", "") or "").lower()
+            if "html" not in content_type:
+                return []
+            html_text = response.read(DEFAULT_MAX_BYTES).decode("utf-8", errors="replace")
+    except Exception:
+        return []
+
+    candidates: list[str] = []
+    for _, href in LINK_HREF_RE.findall(html_text):
+        absolute = _canonical_source_url(urllib.parse.urljoin(seed_url, href.strip()))
+        host = _host(absolute)
+        if not host or not any(_matches_domain(host, domain) for domain in allowed_domains):
+            continue
+        lowered = absolute.lower()
+        if any(marker in lowered for marker in NON_EVIDENCE_PATH_MARKERS):
+            continue
+        if any(lowered.endswith(ext) or f"{ext}?" in lowered for ext in (".pdf", ".xls", ".xlsx")):
+            candidates.append(absolute)
+            continue
+        if any(hint in lowered for hint in url_hints):
+            candidates.append(absolute)
+    return _dedupe_strings(candidates)[:limit]
+
+
 def _snippet_line(source: dict[str, Any], max_chars: int = 240) -> str:
     excerpt = _normalize_text(source.get("excerpt") or source.get("snippet") or "")
     excerpt = excerpt[:max_chars] if excerpt else "No excerpt captured."
     published = source.get("published_date", "N/A")
     return f"{source.get('title', 'Source')} ({published}): {excerpt}"
+
+
+def _pressure_signal_rows(category_sources: dict[str, list[dict[str, Any]]], max_items: int = 8) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for category in (
+        "budget_funding",
+        "acquisition_forecast",
+        "mission_context",
+        "oversight",
+        "leadership",
+        "public_discourse",
+    ):
+        for source in category_sources.get(category, []):
+            if not isinstance(source, dict) or not bool(source.get("requirement_relevant")):
+                continue
+            signal_text = _snippet_line(source, max_chars=220)
+            key = _normalize_text(f"{category} {signal_text}")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            rows.append(
+                {
+                    "category": category,
+                    "signal": PRESSURE_SIGNAL_LABELS.get(category, category.replace("_", " ").title()),
+                    "why_it_matters": PRESSURE_SIGNAL_RATIONALES.get(category, "Requirement-bearing public signal surfaced in this run."),
+                    "evidence": signal_text,
+                    "source": str(source.get("url") or source.get("title") or "").strip(),
+                }
+            )
+            if len(rows) >= max_items:
+                return rows
+    return rows
 
 
 def _build_source_record(
@@ -1288,7 +1474,7 @@ def _source_from_result(
     keyword_tokens: list[str],
     policy_refs: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    url = result.get("url", "")
+    url = _canonical_source_url(str(result.get("url", "") or ""))
     host = _host(url)
     if not any(_matches_domain(host, domain) for domain in allowed_domains):
         return None
@@ -1349,9 +1535,10 @@ def _source_from_candidate_url(
     keyword_tokens: list[str],
     policy_refs: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
+    url = _canonical_source_url(url)
     if not any(_matches_domain(_host(url), domain) for domain in allowed_domains):
         return None
-    fetched = fetch_url_excerpt(url)
+    fetched = fetch_url_excerpt(url, max_chars=_candidate_fetch_max_chars(category, url))
     if fetched.get("status") != "ok":
         return None
     title = fetched.get("title", "") or url
@@ -1403,6 +1590,12 @@ def _discover_sources_from_sitemaps(
 ) -> list[dict[str, Any]]:
     candidates: list[tuple[int, str]] = []
     direct_urls = _agency_category_direct_urls(category, allowed_domains)
+    if direct_urls:
+        expanded_direct_urls: list[str] = []
+        for seed_url in direct_urls:
+            expanded_direct_urls.append(_canonical_source_url(seed_url))
+            expanded_direct_urls.extend(_linked_official_urls(seed_url, allowed_domains, url_hints))
+        direct_urls = _dedupe_strings(expanded_direct_urls)
     if category == "policy_compliance":
         direct_urls.extend(_sitemap_candidates_for_policy_refs(policy_refs, allowed_domains))
     for domain in allowed_domains:
@@ -1550,6 +1743,97 @@ def _role_queries(
     return _dedupe_strings(queries)
 
 
+def _contact_history_queries(labels: list[str], domains: list[str], contact: dict[str, str]) -> list[str]:
+    name = str(contact.get("name", "") or "").strip()
+    role = str(contact.get("role", "") or "").strip()
+    if not name:
+        return []
+    primary_label = labels[0] if labels else ""
+    search_domain = domains[0] if domains else ""
+    queries = _query_list(
+        f'site:sam.gov "{name}" "{primary_label}"' if primary_label else f'site:sam.gov "{name}"',
+        f'site:sam.gov "{name}" "{role}" "{primary_label}"' if role and primary_label else "",
+        f'site:{search_domain} "{name}" "{primary_label}"' if search_domain and primary_label else "",
+    )
+    return _dedupe_strings(queries)
+
+
+def _contact_history_rows(
+    labels: list[str],
+    domains: list[str],
+    contacts: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    allowed_domains = _dedupe_strings(domains + ["sam.gov", "acquisition.gov"])
+    rows: list[dict[str, Any]] = []
+    for contact in contacts[:3]:
+        name = str(contact.get("name", "") or "").strip()
+        role = str(contact.get("role", "") or "Contact").strip()
+        email = str(contact.get("email", "") or "").strip().lower()
+        if not name:
+            continue
+        name_tokens = _signal_tokens(name)
+        if not name_tokens:
+            continue
+        seen_urls: set[str] = set()
+        hits: list[dict[str, str]] = []
+        for query in _contact_history_queries(labels, domains, contact):
+            search = _search_web(query, limit=4)
+            if search.get("status") != "ok":
+                continue
+            for result in search.get("results", []):
+                if not isinstance(result, dict):
+                    continue
+                url = str(result.get("url", "") or "").strip()
+                if not url or url in seen_urls:
+                    continue
+                host = _host(url)
+                if not any(host == domain or host.endswith(f".{domain}") for domain in allowed_domains):
+                    continue
+                snippet_text = f"{result.get('title', '')} {result.get('snippet', '')}"
+                if not (name_tokens & _signal_tokens(snippet_text)):
+                    continue
+                seen_urls.add(url)
+                hits.append(
+                    {
+                        "title": _clean_excerpt(result.get("title", "") or host, max_chars=140),
+                        "url": url,
+                        "host": host,
+                    }
+                )
+                if len(hits) >= 3:
+                    break
+            if len(hits) >= 3:
+                break
+        if not hits:
+            continue
+        sam_hits = [item for item in hits if item.get("host") == "sam.gov"]
+        agency_hits = [item for item in hits if item.get("host") != "sam.gov"]
+        if sam_hits and agency_hits:
+            summary = (
+                "Public contact history surfaced prior official mentions in SAM notices and agency pages: "
+                + "; ".join(item.get("title", "") for item in hits[:2])
+                + "."
+            )
+        elif sam_hits:
+            summary = "Public contact history surfaced prior SAM notice visibility: " + "; ".join(
+                item.get("title", "") for item in sam_hits[:2]
+            ) + "."
+        else:
+            summary = "Public contact history surfaced agency-page visibility: " + "; ".join(
+                item.get("title", "") for item in agency_hits[:2]
+            ) + "."
+        rows.append(
+            {
+                "name": name,
+                "role": role,
+                "email": email,
+                "summary": summary,
+                "sources": [f"{item.get('title', '')} ({item.get('url', '')})" for item in hits[:3]],
+            }
+        )
+    return rows
+
+
 def fetch_public_research(
     entry: dict[str, Any],
     notice_text: str = "",
@@ -1559,48 +1843,56 @@ def fetch_public_research(
     title = str(entry.get("title", "") or "")
     labels = _agency_labels(buyer)
     domains = infer_official_domains(buyer, str(entry.get("url", "") or ""))
-    priority_keywords = _priority_title_keywords(title)
-    keywords = _top_keywords(title, _clean_notice_seed(notice_text))
+    cleaned_notice_text = _clean_notice_seed(notice_text)
+    priority_keywords = _priority_title_keywords(title, limit=5)
+    if len(priority_keywords) < 5:
+        priority_keywords = _top_keywords(title, cleaned_notice_text, limit=5)
+    keywords = _top_keywords(title, cleaned_notice_text)
     requirement_clause = _keyword_query_clause(priority_keywords or keywords)
     contacts = stakeholder_contacts or []
-    query_labels = _dedupe_strings(_label_acronyms(labels, domains) + labels)
+    query_label_inputs = [label for label in labels if "," not in label] + labels
+    query_labels = _query_label_variants(query_label_inputs, domains)
     primary_label = query_labels[0] if query_labels else buyer or title
-    secondary_label = query_labels[1] if len(query_labels) > 1 else primary_label
-    search_domain = domains[0] if domains else ""
-    secondary_domain = domains[1] if len(domains) > 1 else search_domain
     policy_refs = extract_policy_references(title, notice_text)
+    mission_allowed_domains = _category_allowed_domains("mission_context", domains, buyer, policy_refs)
+    budget_allowed_domains = _category_allowed_domains("budget_funding", domains, buyer, policy_refs)
+    forecast_allowed_domains = _category_allowed_domains("acquisition_forecast", domains, buyer, policy_refs)
+    oversight_allowed_domains = _category_allowed_domains("oversight", domains, buyer, policy_refs)
+    leadership_allowed_domains = _category_allowed_domains("leadership", domains, buyer, policy_refs)
+    public_discourse_allowed_domains = _category_allowed_domains("public_discourse", domains, buyer, policy_refs)
+    policy_allowed_domains = _category_allowed_domains("policy_compliance", domains, buyer, policy_refs)
 
     mission_queries = _query_list(
-        f'site:{search_domain} "{primary_label}" {requirement_clause} ("strategic plan" OR "digital strategy" OR "IT strategic plan" OR "IT modernization" OR "AI strategy" OR "data strategy" OR "zero trust") filetype:pdf'
-        if search_domain
-        else "",
-        f'site:{search_domain} "{primary_label}" {requirement_clause} ("strategic plan" OR modernization OR "digital strategy" OR "technology roadmap")'
-        if search_domain
-        else "",
-        f'site:{secondary_domain} "{secondary_label}" {requirement_clause} ("strategic plan" OR roadmap OR "IT modernization" OR "digital strategy") filetype:pdf'
-        if secondary_domain and secondary_domain != search_domain
-        else "",
+        *_domain_label_queries(
+            mission_allowed_domains,
+            query_labels,
+            requirement_clause,
+            [
+                '("strategic plan" OR "digital strategy" OR "IT strategic plan" OR "IT modernization" OR "AI strategy" OR "data strategy" OR "zero trust") filetype:pdf',
+                '("strategic plan" OR modernization OR "digital strategy" OR "technology roadmap")',
+            ],
+        ),
         f'site:.gov "{primary_label}" {requirement_clause} ("strategic plan" OR "IT modernization" OR "digital strategy") filetype:pdf',
     )
     budget_queries = _query_list(
-        f'site:{search_domain} "{primary_label}" {requirement_clause} ("budget in brief" OR "congressional budget justification" OR "budget justification") filetype:pdf'
-        if search_domain
-        else "",
-        f'site:{secondary_domain} "{secondary_label}" {requirement_clause} ("budget in brief" OR "congressional budget justification") filetype:pdf'
-        if secondary_domain and secondary_domain != search_domain
-        else "",
-        f'site:{search_domain} "{primary_label}" {requirement_clause} ("performance budget" OR "budget request" OR "plans performance budget")'
-        if search_domain
-        else "",
+        *_domain_label_queries(
+            budget_allowed_domains,
+            query_labels,
+            requirement_clause,
+            [
+                '("budget in brief" OR "congressional budget justification" OR "budget justification") filetype:pdf',
+                '("performance budget" OR "budget request" OR "plans performance budget")',
+            ],
+        ),
         f'site:.gov "{primary_label}" {requirement_clause} ("budget in brief" OR "congressional budget justification") filetype:pdf',
     )
     forecast_queries = _query_list(
-        f'site:{search_domain} "{primary_label}" {requirement_clause} ("acquisition forecast" OR "procurement forecast" OR "forecasted business opportunities" OR "industry day")'
-        if search_domain
-        else "",
-        f'site:{secondary_domain} "{secondary_label}" {requirement_clause} ("acquisition forecast" OR "procurement forecast" OR "forecasted business opportunities" OR "industry day")'
-        if secondary_domain and secondary_domain != search_domain
-        else "",
+        *_domain_label_queries(
+            forecast_allowed_domains,
+            query_labels,
+            requirement_clause,
+            ['("acquisition forecast" OR "procurement forecast" OR "forecasted business opportunities" OR "industry day")'],
+        ),
         f'site:.gov "{primary_label}" {requirement_clause} ("acquisition forecast" OR "procurement forecast" OR "forecasted business opportunities" OR "industry day")',
     )
     oversight_requirement_clause = requirement_clause or '"information technology"'
@@ -1609,13 +1901,17 @@ def fetch_public_research(
         f'site:oversight.gov "{primary_label}" {requirement_clause}',
         f'site:gao.gov "{primary_label}" {oversight_requirement_clause}',
     )
-    leadership_queries = _role_queries(labels, domains, contacts, requirement_clause=requirement_clause)
+    leadership_queries = _role_queries(query_labels, leadership_allowed_domains, contacts, requirement_clause=requirement_clause)
     public_discourse_queries = _query_list(
-        f'site:{search_domain} "{primary_label}" {requirement_clause} ("press release" OR news OR blog OR testimony)'
-        if search_domain
-        else "",
+        *_domain_label_queries(
+            public_discourse_allowed_domains,
+            query_labels,
+            requirement_clause,
+            ['("press release" OR news OR testimony OR speech OR remarks)'],
+        ),
         f'site:.gov "{primary_label}" {requirement_clause} ("press release" OR testimony OR hearing)',
     )
+    stakeholder_contact_history = _contact_history_rows(labels, domains, contacts)
 
     policy_queries: list[str] = []
     for ref in policy_refs[:4]:
@@ -1626,7 +1922,7 @@ def fetch_public_research(
     mission_sources, mission_gaps = _discover_sources(
         "mission_context",
         mission_queries,
-        _category_allowed_domains("mission_context", domains, buyer, policy_refs),
+        mission_allowed_domains,
         labels,
         priority_keywords or keywords,
         keywords,
@@ -1636,7 +1932,7 @@ def fetch_public_research(
     budget_sources, budget_gaps = _discover_sources(
         "budget_funding",
         budget_queries,
-        _category_allowed_domains("budget_funding", domains, buyer, policy_refs),
+        budget_allowed_domains,
         labels,
         priority_keywords or keywords,
         keywords,
@@ -1646,7 +1942,7 @@ def fetch_public_research(
     forecast_sources, forecast_gaps = _discover_sources(
         "acquisition_forecast",
         forecast_queries,
-        _category_allowed_domains("acquisition_forecast", domains, buyer, policy_refs),
+        forecast_allowed_domains,
         labels,
         priority_keywords or keywords,
         keywords,
@@ -1656,7 +1952,7 @@ def fetch_public_research(
     oversight_sources, oversight_gaps = _discover_sources(
         "oversight",
         oversight_queries,
-        _category_allowed_domains("oversight", domains, buyer, policy_refs),
+        oversight_allowed_domains,
         labels,
         priority_keywords or keywords,
         keywords,
@@ -1666,7 +1962,7 @@ def fetch_public_research(
     leadership_sources, leadership_gaps = _discover_sources(
         "leadership",
         leadership_queries,
-        _category_allowed_domains("leadership", domains, buyer, policy_refs),
+        leadership_allowed_domains,
         labels,
         priority_keywords or keywords,
         keywords,
@@ -1677,7 +1973,7 @@ def fetch_public_research(
         policy_sources, policy_gaps = _discover_sources(
             "policy_compliance",
             policy_queries,
-            _category_allowed_domains("policy_compliance", domains, buyer, policy_refs),
+            policy_allowed_domains,
             labels,
             priority_keywords or keywords,
             keywords,
@@ -1689,7 +1985,7 @@ def fetch_public_research(
     public_discourse_sources, discourse_gaps = _discover_sources(
         "public_discourse",
         public_discourse_queries,
-        _category_allowed_domains("public_discourse", domains, buyer, policy_refs),
+        public_discourse_allowed_domains,
         labels,
         priority_keywords or keywords,
         keywords,
@@ -1723,14 +2019,32 @@ def fetch_public_research(
         "mission_context": sum(1 for source in mission_sources if _is_anchor_source("mission_context", source)),
         "budget_funding": sum(1 for source in budget_sources if _is_anchor_source("budget_funding", source)),
         "acquisition_forecast": sum(1 for source in forecast_sources if _is_anchor_source("acquisition_forecast", source)),
+        "oversight": sum(1 for source in oversight_sources if _is_anchor_source("oversight", source)),
+        "leadership": sum(1 for source in leadership_sources if _is_anchor_source("leadership", source)),
+        "public_discourse": sum(1 for source in public_discourse_sources if _is_anchor_source("public_discourse", source)),
+        "policy_compliance": sum(1 for source in policy_sources if _is_anchor_source("policy_compliance", source)),
     }
-    core_context_anchor_count = sum(1 for value in category_anchor_counts.values() if value > 0)
+    core_context_anchor_count = sum(
+        1
+        for key, value in category_anchor_counts.items()
+        if key in {"mission_context", "budget_funding", "acquisition_forecast"} and value > 0
+    )
     funding_or_buying_anchor_count = sum(
         1 for key, value in category_anchor_counts.items() if key in {"budget_funding", "acquisition_forecast"} and value > 0
     )
     quality_score = sum(int(item.get("quality_score", 0) or 0) for item in source_log)
     requirement_relevant_count = sum(1 for item in source_log if bool(item.get("requirement_relevant")))
     requirement_relevant_ratio = round(requirement_relevant_count / len(source_log), 2) if source_log else 0.0
+    pressure_signal_rows = _pressure_signal_rows(
+        {
+            "mission_context": mission_sources,
+            "budget_funding": budget_sources,
+            "acquisition_forecast": forecast_sources,
+            "oversight": oversight_sources,
+            "leadership": leadership_sources,
+            "public_discourse": public_discourse_sources,
+        }
+    )
 
     return {
         "status": "ok" if source_log else "no_results",
@@ -1750,6 +2064,8 @@ def fetch_public_research(
         "policy_compliance_signals": [_snippet_line(source) for source in policy_sources if bool(source.get("requirement_relevant"))],
         "leadership_priority_signals": [_snippet_line(source) for source in leadership_sources],
         "public_discourse_signals": [_snippet_line(source) for source in public_discourse_sources],
+        "external_pressure_signals": pressure_signal_rows,
+        "stakeholder_contact_history": stakeholder_contact_history,
         "source_log": source_log,
         "evidence_gaps": _dedupe_strings(
             mission_gaps

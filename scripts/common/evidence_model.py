@@ -143,6 +143,7 @@ def empty_evidence_model(*, source_id: str = "", source_name: str = "") -> dict[
             "partner_signals": [],
             "risks": [],
         },
+        "competitor_candidates": [],
         "next_questions": [],
         "evidence_gaps": [],
         "conflicts": [],
@@ -208,6 +209,49 @@ def _related_procurement_entry(raw: Any, *, source_id: str, source_name: str, de
         "source_name": source_name,
         "url": default_url,
         "notes": [],
+    }
+
+
+def _competitor_candidate_entry(raw: Any, *, source_id: str, source_name: str) -> dict[str, Any] | None:
+    if isinstance(raw, dict):
+        name = str(raw.get("name") or raw.get("vendor") or raw.get("competitor") or "").strip()
+        role = str(raw.get("role") or raw.get("position") or "likely_bidder").strip() or "likely_bidder"
+        rationale = str(
+            raw.get("rationale")
+            or raw.get("why_likely")
+            or raw.get("basis")
+            or raw.get("relationship")
+            or ""
+        ).strip()
+        strengths = _coerce_string_list(raw.get("strengths"), max_items=4)
+        weaknesses = _coerce_string_list(raw.get("weaknesses"), max_items=4)
+        evidence = _coerce_string_list(raw.get("evidence") or raw.get("notes"), max_items=6)
+        if not name and not rationale and not evidence:
+            return None
+        return {
+            "name": name or "Unnamed competitor",
+            "role": role,
+            "rationale": rationale,
+            "confidence": _normalize_confidence(raw.get("confidence")),
+            "source_id": str(raw.get("source_id") or source_id).strip() or source_id,
+            "source_name": str(raw.get("source_name") or raw.get("source") or source_name).strip() or source_name,
+            "strengths": strengths,
+            "weaknesses": weaknesses,
+            "evidence": evidence,
+        }
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    return {
+        "name": text,
+        "role": "likely_bidder",
+        "rationale": "",
+        "confidence": "unknown",
+        "source_id": source_id,
+        "source_name": source_name,
+        "strengths": [],
+        "weaknesses": [],
+        "evidence": [],
     }
 
 
@@ -289,6 +333,14 @@ def normalize_provider_evidence_model(
         )
         if item
     ]
+    model["competitor_candidates"] = [
+        item
+        for item in (
+            _competitor_candidate_entry(raw_item, source_id=source_id, source_name=source_name)
+            for raw_item in (data.get("competitor_candidates") or data.get("likely_competitors") or [])
+        )
+        if item
+    ]
     model["next_questions"] = _coerce_string_list(data.get("next_questions"), max_items=8)
     model["evidence_gaps"] = _coerce_string_list(data.get("evidence_gaps"), max_items=8)
 
@@ -309,6 +361,15 @@ def normalize_provider_evidence_model(
         ]
     if not model["teaming_posture"]["rationale"]:
         model["teaming_posture"]["rationale"] = _coerce_string_list(data.get("competitive_landscape"), max_items=4)
+    if not model["competitor_candidates"]:
+        model["competitor_candidates"] = [
+            item
+            for item in (
+                _competitor_candidate_entry(raw_item, source_id=source_id, source_name=source_name)
+                for raw_item in _coerce_string_list(data.get("competitive_landscape"), max_items=6)
+            )
+            if item
+        ]
     if not model["next_questions"]:
         model["next_questions"] = _coerce_string_list(data.get("questions"), max_items=8)
     return model
@@ -515,6 +576,108 @@ def build_capture_official_evidence_model(
             }
         )
 
+    competitor_candidates: list[dict[str, Any]] = []
+    seen_competitors: set[str] = set()
+    likely_incumbent_keys = {_normalize_key(value) for value in likely_incumbents if str(value or "").strip()}
+    for row in (award_signals.get("relevant_awards") or [])[:6]:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("Recipient Name") or "").strip()
+        key = _normalize_key(name)
+        if not key or key in seen_competitors:
+            continue
+        seen_competitors.add(key)
+        competitor_candidates.append(
+            {
+                "name": name,
+                "role": "incumbent_advantaged" if key in likely_incumbent_keys else "likely_bidder",
+                "rationale": f"Same-agency award {row.get('Award ID', 'N/A')} shows visible scope overlap.",
+                "confidence": "medium",
+                "source_id": "usaspending_award_history",
+                "source_name": "USAspending.gov Award History",
+                "strengths": _coerce_string_list(
+                    [
+                        "Same-agency public award history is visible.",
+                        "Related scope appears in the award description.",
+                    ],
+                    max_items=4,
+                ),
+                "weaknesses": _coerce_string_list(
+                    [
+                        "Still needs direct solicitation-package validation."
+                        if key not in likely_incumbent_keys
+                        else "",
+                    ],
+                    max_items=4,
+                ),
+                "evidence": _coerce_string_list(
+                    [
+                        str(row.get("Award ID") or "").strip(),
+                        str(row.get("Description") or "").strip(),
+                    ],
+                    max_items=4,
+                ),
+            }
+        )
+    for row in (award_signals.get("adjacent_awards") or [])[:6]:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("Recipient Name") or "").strip()
+        key = _normalize_key(name)
+        if not key or key in seen_competitors:
+            continue
+        seen_competitors.add(key)
+        competitor_candidates.append(
+            {
+                "name": name,
+                "role": "adjacent_bidder",
+                "rationale": f"Cross-agency award {row.get('Award ID', 'N/A')} shows requirement overlap and should be pressure-tested as an adjacent competitor.",
+                "confidence": "low",
+                "source_id": "usaspending_award_history",
+                "source_name": "USAspending.gov Award History",
+                "strengths": _coerce_string_list(
+                    [
+                        "Public award history shows adjacent scope overlap.",
+                        "The award description shares requirement-bearing language with the current package.",
+                    ],
+                    max_items=4,
+                ),
+                "weaknesses": _coerce_string_list(
+                    [
+                        "Same-agency customer intimacy is not proven in current evidence.",
+                        "This is not direct proof of incumbency on the current requirement.",
+                    ],
+                    max_items=4,
+                ),
+                "evidence": _coerce_string_list(
+                    [
+                        str(row.get("Award ID") or "").strip(),
+                        str(row.get("Description") or "").strip(),
+                    ],
+                    max_items=4,
+                ),
+            }
+        )
+    for name in _coerce_string_list((award_signals.get("competitive_landscape") or {}).get("emerging_challengers"), max_items=4):
+        key = _normalize_key(name)
+        if not key or key in seen_competitors:
+            continue
+        seen_competitors.add(key)
+        competitor_candidates.append(
+            {
+                "name": name,
+                "role": "adjacent_bidder",
+                "rationale": "Adjacent award history suggests likely market interest even without same-agency proof.",
+                "confidence": "low",
+                "source_id": "usaspending_award_history",
+                "source_name": "USAspending.gov Award History",
+                "strengths": ["Adjacent scope overlap is visible in public award history."],
+                "weaknesses": ["Direct customer intimacy is not proven in current evidence."],
+                "evidence": [],
+            }
+        )
+    model["competitor_candidates"] = competitor_candidates
+
     model["recompete_clues"] = _recompete_clues_from_text(
         text,
         source_id="sam_contract_opportunities",
@@ -630,6 +793,68 @@ def _merge_related_procurements(models: list[dict[str, Any]]) -> list[dict[str, 
             if len(sources) > 1:
                 current["source_name"] = ", ".join(sources[:3])
     return list(merged.values())
+
+
+def _competitor_role_rank(value: Any) -> int:
+    return {
+        "incumbent_advantaged": 4,
+        "likely_bidder": 3,
+        "adjacent_bidder": 2,
+        "partner_candidate": 1,
+    }.get(str(value or "").strip().lower(), 0)
+
+
+def _merge_competitor_candidates(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for model in models:
+        for item in model.get("competitor_candidates", []) or []:
+            if not isinstance(item, dict):
+                continue
+            key = _normalize_key(item.get("name"))
+            if not key:
+                continue
+            current = merged.get(key)
+            if current is None:
+                merged[key] = {
+                    "name": str(item.get("name") or "").strip(),
+                    "role": str(item.get("role") or "likely_bidder").strip() or "likely_bidder",
+                    "rationale": str(item.get("rationale") or "").strip(),
+                    "confidence": _normalize_confidence(item.get("confidence")),
+                    "source_id": str(item.get("source_id") or model.get("source_id") or "").strip(),
+                    "source_name": str(item.get("source_name") or model.get("source_name") or "").strip(),
+                    "strengths": _coerce_string_list(item.get("strengths"), max_items=6),
+                    "weaknesses": _coerce_string_list(item.get("weaknesses"), max_items=6),
+                    "evidence": _coerce_string_list(item.get("evidence"), max_items=8),
+                }
+                continue
+            if _competitor_role_rank(item.get("role")) > _competitor_role_rank(current.get("role")):
+                current["role"] = str(item.get("role") or current.get("role") or "").strip()
+            if _confidence_rank(item.get("confidence")) > _confidence_rank(current.get("confidence")):
+                current["confidence"] = _normalize_confidence(item.get("confidence"))
+            if str(item.get("rationale") or "").strip() and not str(current.get("rationale") or "").strip():
+                current["rationale"] = str(item.get("rationale") or "").strip()
+            current["strengths"] = _dedupe_strings(
+                _coerce_string_list(current.get("strengths"), max_items=6)
+                + _coerce_string_list(item.get("strengths"), max_items=6)
+            )
+            current["weaknesses"] = _dedupe_strings(
+                _coerce_string_list(current.get("weaknesses"), max_items=6)
+                + _coerce_string_list(item.get("weaknesses"), max_items=6)
+            )
+            current["evidence"] = _dedupe_strings(
+                _coerce_string_list(current.get("evidence"), max_items=8)
+                + _coerce_string_list(item.get("evidence"), max_items=8)
+            )
+            source_names = _dedupe_strings(
+                _coerce_string_list(current.get("source_name"), max_items=3)
+                + _coerce_string_list(item.get("source_name"), max_items=3)
+            )
+            if len(source_names) > 1:
+                current["source_name"] = ", ".join(source_names[:3])
+    return sorted(
+        merged.values(),
+        key=lambda item: (-_competitor_role_rank(item.get("role")), -_confidence_rank(item.get("confidence")), str(item.get("name") or "").lower()),
+    )
 
 
 def _field_candidates(models: list[dict[str, Any]], section: str, field: str) -> list[dict[str, Any]]:
@@ -768,6 +993,7 @@ def merge_evidence_models(models: list[dict[str, Any]]) -> dict[str, Any]:
         ]
     )
 
+    merged["competitor_candidates"] = _merge_competitor_candidates(usable_models)
     merged["recompete_clues"] = _merge_signal_lists(usable_models, "recompete_clues")
     merged["related_procurements"] = _merge_related_procurements(usable_models)
     merged["next_questions"] = _dedupe_strings(
@@ -830,6 +1056,16 @@ def evidence_model_competitive_notes(model: dict[str, Any], *, max_items: int = 
             notes.append(f"{text}: {why}")
         elif text:
             notes.append(text)
+    for item in model.get("competitor_candidates", []) or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        role = str(item.get("role") or "").replace("_", " ").strip()
+        rationale = str(item.get("rationale") or "").strip()
+        if name and rationale:
+            notes.append(f"{name} ({role}): {rationale}")
+        elif name:
+            notes.append(f"{name} ({role})")
     notes.extend(_coerce_string_list((_as_dict(model.get("teaming_posture"))).get("rationale"), max_items=3))
     return _dedupe_strings(notes)[:max_items]
 
@@ -862,6 +1098,30 @@ def evidence_model_related_procurement_lines(model: dict[str, Any], *, max_items
         line = f"{title}{': ' + detail if detail else ''}"
         lines.append(line)
     return _dedupe_strings(lines)[:max_items]
+
+
+def evidence_model_competitor_candidates(model: dict[str, Any], *, max_items: int = 8) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for item in model.get("competitor_candidates", []) or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        candidates.append(
+            {
+                "name": name,
+                "role": str(item.get("role") or "likely_bidder").strip() or "likely_bidder",
+                "rationale": str(item.get("rationale") or "").strip(),
+                "confidence": _normalize_confidence(item.get("confidence")),
+                "strengths": _coerce_string_list(item.get("strengths"), max_items=4),
+                "weaknesses": _coerce_string_list(item.get("weaknesses"), max_items=4),
+                "evidence": _coerce_string_list(item.get("evidence"), max_items=4),
+            }
+        )
+        if len(candidates) >= max_items:
+            break
+    return candidates
 
 
 def evidence_model_next_questions(model: dict[str, Any], *, max_items: int = 8) -> list[str]:

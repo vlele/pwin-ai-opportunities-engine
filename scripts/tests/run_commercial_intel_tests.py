@@ -93,6 +93,10 @@ def main() -> int:
         failures.append("normalized_contract_value")
     if normalized_model.get("teaming_posture", {}).get("recommended_posture") != "Team, do not prime":
         failures.append("normalized_teaming_posture")
+    if len(normalized_model.get("competitor_candidates", [])) != 2:
+        failures.append("normalized_competitor_candidates")
+    elif normalized_model.get("competitor_candidates", [])[0].get("role") != "incumbent_advantaged":
+        failures.append("normalized_competitor_role")
 
     conflict_fixture = _load_fixture("cross-source-conflict.json")
     merged_model = merge_evidence_models(conflict_fixture.get("models", []))
@@ -102,6 +106,10 @@ def main() -> int:
         failures.append("merge_preserves_incumbent_signal")
     if len(merged_model.get("related_procurements", [])) != 1:
         failures.append("merge_dedupes_related_procurements")
+    if len(merged_model.get("competitor_candidates", [])) != 2:
+        failures.append("merge_competitor_candidates")
+    elif merged_model.get("competitor_candidates", [])[0].get("role") != "incumbent_advantaged":
+        failures.append("merge_prefers_stronger_competitor_role")
     if not any(item.get("field") == "vehicle.set_aside" for item in merged_model.get("conflicts", [])):
         failures.append("merge_emits_set_aside_conflict")
     scan_notes = evidence_model_scan_notes(merged_model, max_items=4)

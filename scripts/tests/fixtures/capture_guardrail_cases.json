@@ -2,15 +2,25 @@
   "lexical_contamination_terms": [
     "homeownership centers",
     "washington dockets",
-    "transaccess",
+    "legacyrecordsprime",
     "arcis",
     "office of housing",
     "18 million",
-    "330,000"
+    "330,000",
+    "dyess afb",
+    "fa466126q0050",
+    "7 ces",
+    "pond-cdm smith",
+    "avantus federal"
   ],
   "core_reasoning_files": [
     "capture/capture_decision.py",
-    "capture/run_capture_research.py"
+    "capture/run_capture_research.py",
+    "capture/fetch_public_context.py",
+    "capture/usaspending_enrich.py",
+    "capture/render_capture_brief.py",
+    "capture/agency_source_catalog.py",
+    "common/evidence_model.py"
   ],
   "cases": [
     {
@@ -110,6 +120,7 @@
         "outage response",
         "daily status reporting"
       ],
+      "expected_artifact_phrase": "field-communications plan",
       "expected_absent_phrases": [
         "credible staffing plan",
         "build a light compliance matrix"
@@ -205,6 +216,7 @@
         "lot traceability",
         "discrepancy"
       ],
+      "expected_artifact_phrase": "discrepancy reports",
       "expected_absent_phrases": [
         "ghost generic it firms",
         "light compliance matrix"
@@ -461,6 +473,363 @@
           }
         ]
       }
+    }
+  ],
+  "usefulness_controls": [
+    {
+      "id": "missing-core-anchors-not-useful",
+      "public_research_assessment": {
+        "requirement_bearing_core_anchor_present": false
+      },
+      "objective_validation_summary": {
+        "corroborated_objective_rows": 2,
+        "fallback_objective_rows": 0,
+        "real_funding_signal_count": 1,
+        "attachment_workstream_count": 2
+      },
+      "attachment_parse_guardrails": {
+        "pws_present": true,
+        "review_required_files": []
+      },
+      "expected_useful": false
+    },
+    {
+      "id": "anchored-corroborated-useful",
+      "public_research_assessment": {
+        "requirement_bearing_core_anchor_present": true
+      },
+      "objective_validation_summary": {
+        "corroborated_objective_rows": 3,
+        "fallback_objective_rows": 0,
+        "real_funding_signal_count": 2,
+        "attachment_workstream_count": 3
+      },
+      "attachment_parse_guardrails": {
+        "pws_present": true,
+        "review_required_files": []
+      },
+      "expected_useful": true
+    }
+  ],
+  "vendor_fit_controls": [
+    {
+      "id": "aligned-vendor-fit-weighting",
+      "profile": {
+        "fit_narrative": "Prioritize cloud modernization, data platform modernization, and operations support for buyers such as Department of Veterans Affairs. Favor GSA MAS task orders in the $1M to $25M range.",
+        "core_competencies": [
+          "cloud modernization",
+          "data platform modernization",
+          "operations support"
+        ],
+        "contract_vehicles": [
+          "GSA MAS"
+        ],
+        "commercial_constraints": {
+          "preferred_award_band": {
+            "min": 1000000,
+            "max": 25000000
+          }
+        }
+      },
+      "buyer": "Department of Veterans Affairs. Office of Information and Technology",
+      "opportunity": {
+        "naics": [
+          "541512"
+        ],
+        "estimated_value": 5000000,
+        "place_of_performance": "Remote"
+      },
+      "notice_text": "The contractor shall provide cloud modernization, data platform migration, and operations support under a GSA MAS task order for the Department of Veterans Affairs.",
+      "customer_priorities": {
+        "evidence_backed_priorities": [
+          "Cloud modernization and operational continuity matter."
+        ]
+      },
+      "solicitation_facts": {
+        "contract_vehicle": "GSA MAS"
+      },
+      "vehicle_access_paths": [
+        "GSA MAS"
+      ],
+      "set_aside_text": "Not stated",
+      "vehicle_access_ok": true,
+      "vehicle_access_required": true,
+      "set_aside_access_ok": true,
+      "qualification_gaps": {
+        "missing": [],
+        "missing_labels": [],
+        "surfaced": []
+      },
+      "expected_adjustment_direction": "positive",
+      "expected_signal_phrases": [
+        "buyer aligns",
+        "visible vehicle path overlaps",
+        "estimated value falls inside"
+      ],
+      "expected_caution_phrases": []
+    },
+    {
+      "id": "misaligned-vendor-fit-weighting",
+      "profile": {
+        "fit_narrative": "Prioritize cloud modernization and AI support for buyers such as Department of Veterans Affairs and Department of Health and Human Services. Avoid records processing or file-review operations.",
+        "core_competencies": [
+          "cloud modernization",
+          "artificial intelligence"
+        ],
+        "commercial_constraints": {
+          "preferred_award_band": {
+            "min": 1000000,
+            "max": 10000000
+          }
+        }
+      },
+      "buyer": "Department of Housing and Urban Development. Office of Operations",
+      "opportunity": {
+        "naics": [
+          "518210"
+        ],
+        "estimated_value": 25000000,
+        "place_of_performance": "Washington, DC"
+      },
+      "notice_text": "The contractor shall provide records processing, case file review, and appeals documentation support for housing operations.",
+      "customer_priorities": {
+        "evidence_backed_priorities": [
+          "Case-file throughput and review quality appear central."
+        ]
+      },
+      "solicitation_facts": {
+        "contract_vehicle": ""
+      },
+      "vehicle_access_paths": [],
+      "set_aside_text": "Not stated",
+      "vehicle_access_ok": false,
+      "vehicle_access_required": false,
+      "set_aside_access_ok": true,
+      "qualification_gaps": {
+        "missing": [],
+        "missing_labels": [],
+        "surfaced": []
+      },
+      "expected_adjustment_direction": "negative",
+      "expected_signal_phrases": [],
+      "expected_caution_phrases": [
+        "buyer does not align",
+        "does not show strong overlap",
+        "outside the vendor's stated preferred award band"
+      ]
+    }
+  ],
+  "public_research_controls": [
+    {
+      "id": "official-domain-and-career-page-rejection",
+      "buyer": "Department of the Air Force, Dyess AFB",
+      "title": "Base Civil Engineering Support",
+      "notice_text": "Facilities sustainment, restoration, and modernization work requiring engineering planning, reporting, and project execution support.",
+      "domains": [
+        "af.mil",
+        "airforce.com",
+        "comptroller.defense.gov"
+      ],
+    "expected_labels": [
+      "Department of the Air Force",
+      "Dyess AFB"
+    ],
+    "expected_priority_keywords": [
+      "base",
+      "civil",
+      "engineering"
+    ],
+    "excluded_priority_keywords": [
+      "shall",
+      "contractor",
+      "work"
+    ],
+    "excluded_domains": [
+      "airforce.com"
+    ],
+      "career_url": "https://www.airforce.com/careers/logistics-and-administration/engineering",
+      "career_title": "Engineering (3E531) - U.S. Air Force",
+      "career_excerpt": "Explore engineering career benefits, training, and accession pathways in the U.S. Air Force."
+    }
+  ],
+  "agency_catalog_controls": [
+    {
+      "id": "agency-heuristics-separated-from-runtime",
+      "runtime_file": "capture/fetch_public_context.py",
+      "catalog_file": "capture/agency_source_catalog.py",
+      "forbidden_runtime_literals": [
+        "https://www.afimsc.af.mil/About-Us/Strategic-Plan/",
+        "https://www.airforcesmallbiz.af.mil/Resources/Expiring-Contracts/",
+        "https://comptroller.defense.gov/Budget-Materials/"
+      ],
+      "required_catalog_literals": [
+        "https://www.afimsc.af.mil/About-Us/Strategic-Plan/",
+        "https://www.airforcesmallbiz.af.mil/Resources/Expiring-Contracts/",
+        "https://comptroller.defense.gov/Budget-Materials/"
+      ]
+    }
+  ],
+  "priority_rendering_controls": [
+    {
+      "id": "thin-priority-rendering-stays-explicit",
+      "customer_priorities": {
+        "evidence_backed_priorities": [
+          "The customer appears to value measurable reporting and management visibility.",
+          "Leadership or testimony signals suggest this requirement area carries visible executive or public attention."
+        ],
+        "likely_priorities": [
+          "Price discipline and scope control likely matter because the procurement language points to fixed-price execution."
+        ],
+        "pain_points": [
+          "The customer appears sensitive to service disruption, transition delay, or mission lapse risk."
+        ],
+        "strategic_pain_points": [
+          "Package or deliverable throughput and documentation discipline likely matter because the contractor is helping move scoped artifacts through the customer's approval pipeline."
+        ],
+        "strategic_reasoning_summary": "This should disappear when evidence is too thin."
+      },
+      "public_research": {
+        "core_context_anchor_count": 0,
+        "funding_or_buying_anchor_count": 0
+      },
+      "workstream_lines": [],
+      "expected_mode": "thin",
+      "warning_contains": "intentionally shortened",
+      "expected_present_phrases": [
+        "under-corroborated",
+        "no additional customer-priority inference should be treated as reliable",
+        "pain points remain provisional"
+      ],
+      "expected_absent_phrases": [
+        "measurable reporting and management visibility",
+        "visible executive or public attention"
+      ],
+      "max_evidence_backed_count": 1
+    }
+  ],
+  "requirement_specific_controls": [
+    {
+      "id": "civil-engineering-package-does-not-trigger-records-platform-language",
+      "text": "The contractor shall perform engineering technician services required to develop, plan, and execute facilities sustainment and modernization work. The Government will provide existing plans, reports, drawings, documents, and records necessary to accomplish the work. Contractor personnel shall complete training, registration, and security requirements. Upon transfer or termination of contractor personnel, system accounts shall be closed.",
+      "expected_present_phrases": [],
+      "expected_absent_phrases": [
+        "records-heavy operating environment",
+        "retrieval and chain-of-custody continuity matter",
+        "dashboards, help desk, training, user administration"
+      ]
+    },
+    {
+      "id": "records-platform-package-still-triggers-records-workflow-language",
+      "text": "The records management platform shall enforce NARA records management and retention schedules, support metadata capture, scanning, and indexing, preserve chain of custody for records transfer and records retrieval, and include help desk, user administration, dashboard reporting, and end-user training.",
+      "expected_present_phrases": [
+        "records-heavy operating environment",
+        "retrieval and chain-of-custody continuity matter",
+        "dashboards, help desk, training, user administration"
+      ],
+      "expected_absent_phrases": []
+    }
+  ],
+  "competitive_controls": [
+    {
+      "id": "adjacent-award-competitors-surface",
+      "resolved": {
+        "title": "Engineering support services"
+      },
+      "opportunity": {
+        "summary": "Engineering support services for facilities planning and modernization."
+      },
+      "award_signals": {
+        "competitive_landscape": {
+          "likely_incumbents": [],
+          "emerging_challengers": [
+            "Gamma Federal Services"
+          ],
+          "notes": []
+        },
+        "relevant_awards": [],
+        "adjacent_awards": [
+          {
+            "Award ID": "A123",
+            "Recipient Name": "Alpha Infrastructure Solutions",
+            "Description": "Facilities engineering modernization and planning support."
+          },
+          {
+            "Award ID": "B456",
+            "Recipient Name": "Beta Mission Works",
+            "Description": "Engineering planning and execution support for base modernization."
+          }
+        ]
+      },
+      "attachment_validation": {
+        "validated_incumbents": [],
+        "direct_mentions": [],
+        "supporting_snippets": [],
+        "notes": []
+      },
+      "attachment_bundle": {
+        "attachments_expected": true,
+        "attachments": [
+          {
+            "filename": "PWS.pdf"
+          }
+        ]
+      },
+      "vehicle_signals": [
+        "Attachment text names the vehicle path as OASIS+ SB."
+      ],
+      "notice_context_text": "Facilities engineering modernization and planning support with base execution.",
+      "expected_names": [
+        "Alpha Infrastructure Solutions",
+        "Beta Mission Works",
+        "Gamma Federal Services"
+      ]
+    }
+  ],
+  "usaspending_controls": [
+    {
+      "id": "title-and-naics-query-expansion",
+      "search_text": "FA466126Q0050",
+      "title": "Base Civil Engineering Support, 7 CES, Dyess AFB",
+      "summary": "Facilities, Sustainment, Restoration and Modernization (FSRM) projects under NAICS 541330.",
+      "buyer": "Department of the Air Force, Dyess AFB",
+      "expected_terms": [
+        "FA466126Q0050",
+        "Base Civil Engineering Support, 7 CES, Dyess AFB",
+        "Base Civil Engineering Support",
+        "FSRM",
+        "541330"
+      ],
+      "excluded_terms": [
+        "shall",
+        "contractor"
+      ]
+    }
+  ],
+  "stakeholder_controls": [
+    {
+      "id": "stakeholder-history-rendering",
+      "buyer": "Department of Veterans Affairs. Office of Information and Technology",
+      "stakeholder_contacts": [
+        {
+          "name": "Jane Smith",
+          "role": "Contracting Officer",
+          "email": "jane.smith@va.gov"
+        }
+      ],
+      "opportunity": {
+        "due_date": "2026-07-15"
+      },
+      "public_research": {
+        "stakeholder_contact_history": [
+          {
+            "name": "Jane Smith",
+            "role": "Contracting Officer",
+            "email": "jane.smith@va.gov",
+            "summary": "Public contact history surfaced prior SAM notice visibility: va cloud operations support rfq."
+          }
+        ]
+      },
+      "expected_history_phrase": "prior SAM notice visibility"
     }
   ]
 }

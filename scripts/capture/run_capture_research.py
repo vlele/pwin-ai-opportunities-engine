@@ -2881,6 +2881,13 @@ def _award_history_signals(
         name
         for name, _ in Counter(str(row.get("Recipient Name", "") or "") for row in competitive_rows if row.get("Recipient Name")).most_common(5)
     ]
+    adjacent_competitors = _dedupe_strings(
+        [
+            str(row.get("Recipient Name", "") or "")
+            for row in adjacent_rows
+            if str(row.get("Recipient Name", "") or "")
+        ]
+    )[:5]
     emerging_challengers = _dedupe_strings(
         [
             str(row.get("Recipient Name", "") or "")
@@ -2943,6 +2950,10 @@ def _award_history_signals(
             notes.append(
                 "Additional cross-agency matches indicate adjacent market performers, but they are not direct proof of incumbency on this solicitation."
             )
+            if adjacent_competitors:
+                notes.append(
+                    f"Adjacent scope-overlap performers from public award history include: {', '.join(adjacent_competitors[:4])}."
+                )
         for row in agency_rows[:4]:
             related_procurements.append(
                 f"Award {row.get('Award ID', 'N/A')}: {row.get('Recipient Name', 'Unknown')} | {_currency(row.get('Award Amount'))} | {row.get('Awarding Sub Agency', row.get('Awarding Agency', 'Unknown'))} | {_clean_excerpt(row.get('Description', ''), max_chars=180)}"
@@ -2967,6 +2978,10 @@ def _award_history_signals(
             notes.append(
                 f"{len(adjacent_rows)} adjacent cross-agency USAspending matches were excluded from funding and incumbency proof because they do not share the customer chain."
             )
+            if adjacent_competitors:
+                notes.append(
+                    f"Adjacent scope-overlap performers still worth pressure-testing as competitors: {', '.join(adjacent_competitors[:4])}."
+                )
         else:
             notes.append("No clearly relevant prior award history was surfaced from the current USAspending query set.")
         evidence_gaps.append("USAspending did not surface clearly relevant same-agency prior awards, so incumbent and funding signals still need manual validation.")
@@ -2993,6 +3008,7 @@ def _award_history_signals(
             "likely_incumbents": likely_incumbents,
             "frequent_primes": frequent_primes,
             "common_teammates": [],
+            "adjacent_competitors": adjacent_competitors,
             "emerging_challengers": emerging_challengers,
             "notes": notes or ["Competitive posture remains thin because no related award history was parsed."],
         },
@@ -3054,6 +3070,7 @@ def _public_research_assessment(public_research: dict[str, object]) -> dict[str,
         "oversight_anchor_count": oversight_anchor_count,
         "leadership_anchor_count": leadership_anchor_count,
         "public_discourse_anchor_count": public_discourse_anchor_count,
+        "external_pressure_signal_count": len(public_research.get("external_pressure_signals", []) or []),
         "core_requirement_anchor_count": core_requirement_anchor_count,
         "funding_or_buying_anchor_count": int(public_research.get("funding_or_buying_anchor_count", 0) or 0),
         "requirement_relevant_ratio": requirement_relevant_ratio,
@@ -3158,6 +3175,58 @@ def _memo_honesty_assessment(
         "requirement_relevant_ratio": requirement_relevant_ratio,
         "release_warning": release_warning,
         "drivers": concerns,
+    }
+
+
+def _capture_usefulness_assessment(
+    public_research_assessment: dict[str, object],
+    objective_validation_summary: dict[str, int],
+    attachment_parse_guardrails: dict[str, object],
+) -> dict[str, object]:
+    corroborated_objective_rows = int(objective_validation_summary.get("corroborated_objective_rows", 0) or 0)
+    fallback_objective_rows = int(objective_validation_summary.get("fallback_objective_rows", 0) or 0)
+    real_funding_signal_count = int(objective_validation_summary.get("real_funding_signal_count", 0) or 0)
+    attachment_workstream_count = int(objective_validation_summary.get("attachment_workstream_count", 0) or 0)
+    requirement_anchor_ready = bool(public_research_assessment.get("requirement_bearing_core_anchor_present"))
+    review_required_count = len(attachment_parse_guardrails.get("review_required_files", []) or [])
+    drivers: list[str] = []
+    score = 100
+
+    if not requirement_anchor_ready:
+        score -= 35
+        drivers.append("No requirement-bearing mission, budget, or forecast anchor survived public-source admission.")
+    if corroborated_objective_rows == 0:
+        score -= 25
+        drivers.append("No corroborated objective row survived this run.")
+    elif fallback_objective_rows >= corroborated_objective_rows:
+        score -= 15
+        drivers.append("Fallback objectives still outnumber corroborated objective rows.")
+    if real_funding_signal_count == 0:
+        score -= 15
+        drivers.append("No real funding signal was captured; funding remains a gap, not supporting evidence.")
+    if attachment_workstream_count == 0 and bool(attachment_parse_guardrails.get("pws_present")):
+        score -= 20
+        drivers.append("A PWS is present, but no requirement workstreams were promoted into the memo.")
+    if review_required_count:
+        score -= 10
+        drivers.append("One or more scope-bearing files still need OCR, table recovery, or manual review.")
+
+    score = max(0, score)
+    useful = requirement_anchor_ready and corroborated_objective_rows > 0 and real_funding_signal_count > 0
+    release_warning = (
+        "Usefulness warning: the memo can guide follow-up research, but it is not yet decision-grade because anchor evidence, objective corroboration, or funding proof is still thin."
+        if not useful
+        else ""
+    )
+    return {
+        "useful": useful,
+        "score": score,
+        "release_warning": release_warning,
+        "drivers": drivers,
+        "requirement_anchor_ready": requirement_anchor_ready,
+        "corroborated_objective_rows": corroborated_objective_rows,
+        "fallback_objective_rows": fallback_objective_rows,
+        "real_funding_signal_count": real_funding_signal_count,
     }
 
 
@@ -3416,6 +3485,13 @@ def main() -> int:
         notice_context_text,
         stakeholder_contacts,
     )
+    stakeholder_map.extend(
+        [
+            f"Public contact history: {item.get('name', 'Contact')} - {item.get('summary', '')}"
+            for item in (public_research.get("stakeholder_contact_history", []) or [])[:3]
+            if isinstance(item, dict) and str(item.get("summary", "") or "").strip()
+        ]
+    )
     usaspending_search_text = _preferred_usaspending_search_text(resolved, str(canonical_id or ""))
     usaspending_result = enrich_from_usaspending(
         usaspending_search_text,
@@ -3658,6 +3734,11 @@ def main() -> int:
     executive_win_themes = _dedupe_strings(
         [
             *(
+                [str(item.get("objective") or "").strip() for item in attachment_workstreams[:2] if str(item.get("objective") or "").strip()]
+                if scope_corroborated
+                else []
+            ),
+            *(
                 ["Evidence-backed federal mission fit"]
                 if scope_corroborated and (mission_corroborated or award_corroborated)
                 else []
@@ -3760,6 +3841,17 @@ def main() -> int:
     real_funding_signal_count = sum(
         1 for signal in budget_funding_signals if not str(signal or "").startswith("No funding corroboration found")
     )
+    objective_validation_summary = {
+        "objective_row_count": len(objective_rows),
+        "corroborated_objective_rows": corroborated_objective_rows,
+        "fallback_objective_rows": fallback_objective_rows,
+        "attachment_native_corroborated_rows": attachment_native_corroborated_rows,
+        "real_funding_signal_count": real_funding_signal_count,
+        "attachment_workstream_count": len(attachment_workstreams),
+        "attachment_anomaly_count": len(attachment_anomalies),
+        "attachment_review_required_count": len(attachment_parse_guardrails.get("review_required_files", []) or []),
+        "attachment_conflict_count": len(solicitation_facts.get("attachment_conflicts", []) or []),
+    }
     decision_sections = build_capture_decision_sections(
         vendor_profile=vendor_profile,
         resolved=resolved,
@@ -3818,19 +3910,36 @@ def main() -> int:
         incumbent_evidence_thin,
         len(generic_strategy_warnings),
     )
+    capture_usefulness = _capture_usefulness_assessment(
+        public_research_assessment,
+        {**objective_validation_summary, "generic_strategy_warning_count": len(generic_strategy_warnings)},
+        attachment_parse_guardrails,
+    )
+    combined_release_warnings = _dedupe_strings(
+        [
+            str(memo_honesty.get("release_warning") or "").strip(),
+            str(capture_usefulness.get("release_warning") or "").strip(),
+        ]
+    )
     decision_sections.setdefault("capture_judgment", {}).update(
         {
             "memo_honesty_score": memo_honesty.get("score", 0),
             "memo_honesty_confidence": memo_honesty.get("confidence_band", "Low"),
-            "release_warning": memo_honesty.get("release_warning", ""),
-            "honesty_drivers": memo_honesty.get("drivers", []),
+            "release_warning": " ".join(combined_release_warnings).strip(),
+            "honesty_drivers": _dedupe_strings(
+                list(memo_honesty.get("drivers", []) or [])
+                + list(capture_usefulness.get("drivers", []) or [])
+            ),
         }
     )
     decision_sections.setdefault("assumptions_unknowns_confidence", {}).update(
         {
             "memo_honesty_score": memo_honesty.get("score", 0),
-            "release_warning": memo_honesty.get("release_warning", ""),
-            "honesty_drivers": memo_honesty.get("drivers", []),
+            "release_warning": " ".join(combined_release_warnings).strip(),
+            "honesty_drivers": _dedupe_strings(
+                list(memo_honesty.get("drivers", []) or [])
+                + list(capture_usefulness.get("drivers", []) or [])
+            ),
         }
     )
     capture_generated_at = utc_now_iso()
@@ -3884,11 +3993,13 @@ def main() -> int:
         "objectives": objective_rows,
         "stakeholder_map": stakeholder_map,
         "stakeholder_contacts": stakeholder_contacts,
+        "stakeholder_contact_history": public_research.get("stakeholder_contact_history", []),
         "leadership_priority_signals": public_research.get("leadership_priority_signals", []),
         "mission_context_signals": public_research.get("mission_context_signals", []),
         "policy_compliance_signals": public_research.get("policy_compliance_signals", []),
         "oversight_signals": public_research.get("oversight_signals", []),
         "acquisition_forecast_signals": public_research.get("acquisition_forecast_signals", []),
+        "external_pressure_signals": public_research.get("external_pressure_signals", []),
         "budget_funding_signals": budget_funding_signals,
         "funding_assessment": funding_assessment,
         "related_procurements": related_procurements,
@@ -3994,6 +4105,7 @@ def main() -> int:
         "source_log": public_sources,
         "source_statuses": commercial_intel.get("source_statuses", []),
         "memo_honesty_assessment": memo_honesty,
+        "capture_usefulness_assessment": capture_usefulness,
         "validation": {
             "all_required_sections_present": False,
             "contains_placeholders": False,
@@ -4004,20 +4116,13 @@ def main() -> int:
             "attachments_expected": bool(attachment_bundle.get("attachments_expected")),
             "usaspending_search_status": usaspending_status,
             "objective_validation_summary": {
-                "objective_row_count": len(objective_rows),
-                "corroborated_objective_rows": corroborated_objective_rows,
-                "fallback_objective_rows": fallback_objective_rows,
-                "attachment_native_corroborated_rows": attachment_native_corroborated_rows,
-                "real_funding_signal_count": real_funding_signal_count,
-                "attachment_workstream_count": len(attachment_workstreams),
-                "attachment_anomaly_count": len(attachment_anomalies),
-                "attachment_review_required_count": len(attachment_parse_guardrails.get("review_required_files", []) or []),
-                "attachment_conflict_count": len(solicitation_facts.get("attachment_conflicts", []) or []),
+                **objective_validation_summary,
                 "generic_strategy_warning_count": len(generic_strategy_warnings),
             },
             "public_research_assessment": public_research_assessment,
             "attachment_parse_guardrails": attachment_parse_guardrails,
             "memo_honesty": memo_honesty,
+            "capture_usefulness": capture_usefulness,
             "stub_stage_exited_before_response": True,
             "menu_only_fallback_used": False,
         },

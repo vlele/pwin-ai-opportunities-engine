@@ -61,6 +61,38 @@
       "Prime posture is weak without confirmed vehicle access."
     ]
   },
+  "competitor_candidates": [
+    {
+      "name": "Alpha Systems",
+      "role": "incumbent_advantaged",
+      "rationale": "GovTribe predecessor task-order signal points to Alpha Systems as the advantaged performer.",
+      "confidence": "high",
+      "strengths": [
+        "Visible predecessor and continuity signal."
+      ],
+      "weaknesses": [
+        "Needs direct solicitation confirmation."
+      ],
+      "evidence": [
+        "GovTribe linked a related task order."
+      ]
+    },
+    {
+      "name": "Bravo Federal",
+      "role": "likely_bidder",
+      "rationale": "GovTribe surfaced adjacent customer and vehicle overlap.",
+      "confidence": "medium",
+      "strengths": [
+        "Vehicle access appears plausible."
+      ],
+      "weaknesses": [
+        "No incumbency signal."
+      ],
+      "evidence": [
+        "Related GovTribe vehicle record."
+      ]
+    }
+  ],
   "next_questions": [
     "Confirm whether the current opportunity stays on CIO-SP3 or moves to open market."
   ],

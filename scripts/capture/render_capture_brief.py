@@ -265,6 +265,13 @@ def _customer_block(section: dict[str, Any]) -> str:
     blocks = [
         f"**Mission Problem:** {_md_cell(section.get('mission_problem'))}",
     ]
+    if section.get("priority_rendering_warning"):
+        blocks.extend(
+            [
+                "",
+                f"**Priority Evidence Note:** {_md_cell(section.get('priority_rendering_warning'))}",
+            ]
+        )
     if section.get("strategic_reasoning_summary"):
         blocks.extend(
             [
@@ -286,6 +293,9 @@ def _customer_block(section: dict[str, Any]) -> str:
             "",
             "### Reasoned Pain Points",
             _markdown_list(section.get("strategic_pain_points", [])),
+            "",
+            "### External Pressure Signals",
+            _markdown_list(section.get("external_pressure_signals", [])),
             "",
             "### Requirement Workstreams",
             _markdown_list(section.get("requirement_workstreams", [])),
@@ -383,17 +393,18 @@ def _incumbent_block(section: dict[str, Any]) -> str:
 
 def _stakeholder_rows(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return "| Stakeholder | Role | Public Contact | Procurement Relevance | Capture Question | Communication |\n|:---|:---|:---|:---|:---|:---|\n| N/A | N/A | N/A | N/A | N/A | N/A |"
+        return "| Stakeholder | Role | Public Contact | Public History / Signals | Procurement Relevance | Capture Question | Communication |\n|:---|:---|:---|:---|:---|:---|:---|\n| N/A | N/A | N/A | N/A | N/A | N/A | N/A |"
     lines = [
-        "| Stakeholder | Role | Public Contact | Procurement Relevance | Capture Question | Communication |",
-        "|:---|:---|:---|:---|:---|:---|",
+        "| Stakeholder | Role | Public Contact | Public History / Signals | Procurement Relevance | Capture Question | Communication |",
+        "|:---|:---|:---|:---|:---|:---|:---|",
     ]
     for row in rows:
         lines.append(
-            "| {name} | {role} | {contact} | {influence} | {question} | {communication} |".format(
+            "| {name} | {role} | {contact} | {history} | {influence} | {question} | {communication} |".format(
                 name=_md_cell(row.get("name")),
                 role=_md_cell(row.get("role")),
                 contact=_md_cell(row.get("contact")),
+                history=_md_cell(row.get("history")),
                 influence=_md_cell(row.get("influence")),
                 question=_md_cell(row.get("capture_question")),
                 communication=_md_cell(row.get("communication")),
@@ -407,9 +418,10 @@ def _competitive_block(rows: list[dict[str, Any]]) -> str:
         return "- No specific competitor was strong enough to profile from the current public record."
     blocks: list[str] = []
     for row in rows:
+        role = str(row.get("role") or "").strip()
         blocks.extend(
             [
-                f"### {row.get('name', 'Competitor')}",
+                f"### {row.get('name', 'Competitor')}" + (f" ({role})" if role else ""),
                 f"- Why likely: {row.get('why_likely', 'N/A')}",
                 f"- Strengths: {row.get('strengths', 'N/A')}",
                 f"- Weaknesses / uncertainty: {row.get('weaknesses', 'N/A')}",
@@ -451,6 +463,7 @@ def _fit_block(section: dict[str, Any]) -> str:
             f"**Company Summary:** {_md_cell(section.get('company_summary'))}",
             f"**Recommended Prime / Team Posture:** {_md_cell(section.get('recommended_prime_team_posture'))}",
             f"**Semantic Fit Summary:** {_md_cell(section.get('semantic_fit_summary'))}",
+            f"**Vendor Fit Weighting Summary:** {_md_cell(section.get('fit_weighting_summary'))}",
             "",
             "### Capability Matches",
             _markdown_list(section.get("capability_hits", [])),
@@ -472,6 +485,12 @@ def _fit_block(section: dict[str, Any]) -> str:
             "",
             "### Historical Preference Cautions",
             _markdown_list(section.get("historical_preference_cautions", [])),
+            "",
+            "### Vendor Fit Weighting Signals",
+            _markdown_list(section.get("fit_weighting_signals", [])),
+            "",
+            "### Vendor Fit Weighting Cautions",
+            _markdown_list(section.get("fit_weighting_cautions", [])),
             "",
             "### Missing Proof / Gaps",
             _markdown_list(section.get("missing_proof", [])),
@@ -529,6 +548,12 @@ def _win_strategy_block(section: dict[str, Any]) -> str:
             "### Discriminators",
             _strategy_row_list(section.get("discriminator_rows", []) or section.get("discriminators", []), "Insufficient corroborated evidence to recommend differentiators yet."),
             "",
+            "### Workstream Capture Implications",
+            _strategy_row_list(
+                section.get("workstream_capture_implication_rows", []) or section.get("workstream_capture_implications", []),
+                "No workstream-specific capture implication survived validation in this run.",
+            ),
+            "",
             "### Reasoning-Based Win Themes and Differentiators",
             _strategy_row_list(
                 section.get("reasoning_based_win_theme_rows", []) or section.get("reasoning_based_win_themes", []),
@@ -543,6 +568,9 @@ def _win_strategy_block(section: dict[str, Any]) -> str:
             "",
             "### Reasoning-Based Risk Implications",
             _markdown_list(section.get("reasoning_based_risk_implications", [])),
+            "",
+            "### Proof Artifacts to Build",
+            _markdown_list(section.get("proof_artifact_recommendations", [])),
             "",
             "### Ghosting Strategy",
             _markdown_list(section.get("ghosting_strategy", [])),

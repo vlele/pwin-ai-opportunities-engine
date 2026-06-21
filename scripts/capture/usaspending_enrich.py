@@ -36,6 +36,20 @@ GENERIC_TERMS = {
     "next",
     "generation",
     "acquisition",
+    "shall",
+    "contractor",
+    "performance",
+    "work",
+    "copy",
+    "statement",
+    "revised",
+    "instructions",
+    "offerors",
+    "attachment",
+    "attachments",
+    "document",
+    "documents",
+    "pws",
 }
 SOLICITATION_ID_RE = re.compile(r"(?:solicitation(?: number)?|notice id)\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{5,})", re.IGNORECASE)
 ACRONYM_RE = re.compile(r"\(([A-Z][A-Z0-9-]{1,14})\)")
@@ -44,6 +58,7 @@ TITLE_PREFIX_RE = re.compile(
     r"^(?:rfp|rfq|rfi|sources sought|special notice|presolicitation|combined synopsis/solicitation)\s*[-:]\s*",
     re.IGNORECASE,
 )
+NAICS_RE = re.compile(r"\b\d{6}\b")
 MAX_QUERY_LENGTH = 96
 
 
@@ -80,10 +95,33 @@ def _all_generic_tokens(value: str) -> bool:
     return bool(tokens) and all(token in GENERIC_TERMS for token in tokens)
 
 
+def _title_phrase_candidates(title_text: str) -> list[str]:
+    cleaned_title = TITLE_PREFIX_RE.sub("", title_text).strip(" -:")
+    if not cleaned_title:
+        return []
+    candidates: list[str] = []
+    compact_title = _compact_query(cleaned_title)
+    if compact_title and not _all_generic_tokens(compact_title):
+        candidates.append(compact_title)
+    segments = [segment.strip(" -:") for segment in cleaned_title.split(",") if segment.strip(" -:")]
+    if segments:
+        first_segment = segments[0]
+        compact_first = _compact_query(first_segment)
+        if compact_first and not _all_generic_tokens(compact_first):
+            candidates.append(compact_first)
+        words = first_segment.split()
+        if len(words) >= 3:
+            tail = _compact_query(" ".join(words[-3:]))
+            if tail and not _all_generic_tokens(tail):
+                candidates.append(tail)
+    return _dedupe_terms(candidates)
+
+
 def build_search_terms(search_text: str, title: str = "", summary: str = "", buyer: str = "") -> list[str]:
     title_text = title or search_text
     combined = f"{title_text}\n{summary or ''}"
     terms: list[str] = []
+    compact_search_text = _compact_query(search_text)
 
     for match in SOLICITATION_ID_RE.finditer(combined):
         candidate = match.group(1).strip()
@@ -92,8 +130,10 @@ def build_search_terms(search_text: str, title: str = "", summary: str = "", buy
         compact = _compact_query(candidate)
         if compact:
             terms.append(compact)
+    if compact_search_text and not TITLE_PREFIX_RE.match(search_text) and not _all_generic_tokens(compact_search_text):
+        terms.append(compact_search_text)
 
-    for match in PHRASE_WITH_ACRONYM_RE.finditer(title_text):
+    for match in PHRASE_WITH_ACRONYM_RE.finditer(combined):
         phrase = TITLE_PREFIX_RE.sub("", re.sub(r"\s+", " ", match.group(1)).strip(" -:"))
         acronym = match.group(2).strip()
         if phrase and 2 <= len(phrase.split()) <= 8:
@@ -108,15 +148,11 @@ def build_search_terms(search_text: str, title: str = "", summary: str = "", buy
         if acronym.lower() not in GENERIC_TERMS:
             terms.append(acronym)
 
-    for acronym in ACRONYM_RE.findall(title_text):
+    for acronym in ACRONYM_RE.findall(combined):
         if acronym.lower() not in GENERIC_TERMS:
             terms.append(acronym.strip())
 
-    cleaned_title = TITLE_PREFIX_RE.sub("", title_text).strip(" -:")
-    if cleaned_title and cleaned_title.lower() != title_text.lower():
-        compact_title = _compact_query(cleaned_title)
-        if compact_title:
-            terms.append(compact_title)
+    terms.extend(_title_phrase_candidates(title_text))
 
     for match in re.findall(r"\b[A-Za-z][A-Za-z0-9-]{3,}\b", title_text):
         token = match.strip()
@@ -132,10 +168,10 @@ def build_search_terms(search_text: str, title: str = "", summary: str = "", buy
     if "NOAA" in buyer_text and any(term.lower() == "protech" for term in terms):
         terms.append("ProTech")
 
-    compact_search_text = _compact_query(search_text)
-    if compact_search_text and not TITLE_PREFIX_RE.match(search_text) and not _all_generic_tokens(compact_search_text):
-        terms.append(compact_search_text)
-    return _dedupe_terms(terms)[:6]
+    for naics in NAICS_RE.findall(combined):
+        terms.append(naics)
+
+    return _dedupe_terms(terms)[:8]
 
 
 def _merge_award_rows(searches: list[dict[str, Any]]) -> list[dict[str, Any]]:
