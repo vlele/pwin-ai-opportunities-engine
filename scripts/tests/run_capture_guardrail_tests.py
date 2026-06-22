@@ -129,6 +129,41 @@ def _evaluate_case(case: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _evaluate_objective_compaction_control(control: dict[str, object]) -> dict[str, object]:
+    attachment_bundle = control.get("attachment_bundle", {})
+    normalized_bundle = attachment_bundle if isinstance(attachment_bundle, dict) else {}
+    objectives = capture_run._decompose_objectives(
+        str(control.get("title", "") or ""),
+        str(control.get("summary", "") or ""),
+        str(control.get("explanation_summary", "") or ""),
+        normalized_bundle,
+    )
+    workstreams = capture_run._extract_attachment_workstreams(normalized_bundle)
+    rendered_lines = [
+        str(item.get("objective", "") or "").strip()
+        for item in workstreams
+        if isinstance(item, dict) and str(item.get("objective", "") or "").strip()
+    ] + [str(item or "").strip() for item in objectives if str(item or "").strip()]
+    failures: list[str] = []
+    max_objective_chars = int(control.get("max_objective_chars", 0) or 0)
+    if max_objective_chars and any(len(line) > max_objective_chars for line in rendered_lines):
+        failures.append("objective_not_compacted")
+    combined = _lower_lines(rendered_lines)
+    for phrase in control.get("expected_objective_phrases", []) or []:
+        if str(phrase).lower() not in combined:
+            failures.append(f"missing_objective_phrase:{phrase}")
+    for phrase in control.get("forbidden_objective_phrases", []) or []:
+        if str(phrase).lower() in combined:
+            failures.append(f"unexpected_objective_phrase:{phrase}")
+    return {
+        "id": control.get("id", ""),
+        "passed": not failures,
+        "failed_checks": failures,
+        "workstreams": workstreams,
+        "objectives": objectives,
+    }
+
+
 def _evaluate_generic_strategy_control(control: dict[str, object]) -> dict[str, object]:
     warnings = capture_run._generic_strategy_language_warnings(
         control.get("decision_sections", {}),
@@ -332,6 +367,9 @@ def _evaluate_competitive_control(control: dict[str, object]) -> dict[str, objec
     for expected_name in control.get("expected_names", []) or []:
         if str(expected_name) not in names:
             failures.append(f"missing_competitor:{expected_name}")
+    for unexpected_name in control.get("unexpected_names", []) or []:
+        if str(unexpected_name) in names:
+            failures.append(f"unexpected_competitor:{unexpected_name}")
     return {
         "id": control.get("id", ""),
         "passed": not failures,
@@ -446,6 +484,10 @@ def main() -> int:
     payload = _load_fixture()
     failures = _check_lexical_contamination(payload)
     case_results = [_evaluate_case(case) for case in payload.get("cases", [])]
+    objective_compaction_results = [
+        _evaluate_objective_compaction_control(control)
+        for control in payload.get("objective_compaction_controls", [])
+    ]
     control_results = [
         _evaluate_generic_strategy_control(control)
         for control in payload.get("generic_strategy_controls", [])
@@ -487,6 +529,7 @@ def main() -> int:
         for control in payload.get("usaspending_controls", [])
     ]
     failures.extend(result["id"] for result in case_results if not result["passed"])
+    failures.extend(result["id"] for result in objective_compaction_results if not result["passed"])
     failures.extend(result["id"] for result in control_results if not result["passed"])
     failures.extend(result["id"] for result in usefulness_results if not result["passed"])
     failures.extend(result["id"] for result in vendor_fit_results if not result["passed"])
@@ -502,6 +545,7 @@ def main() -> int:
         "generated_at": utc_now_iso(),
         "failed_checks": failures,
         "case_results": case_results,
+        "objective_compaction_results": objective_compaction_results,
         "control_results": control_results,
         "usefulness_results": usefulness_results,
         "vendor_fit_results": vendor_fit_results,

@@ -11,12 +11,19 @@
     "fa466126q0050",
     "7 ces",
     "pond-cdm smith",
-    "avantus federal"
+    "avantus federal",
+    "independent enterprise testing and support services",
+    "ietss",
+    "ebms donor",
+    "wellsky blood centers",
+    "fmbt",
+    "financial management business transformation"
   ],
   "core_reasoning_files": [
     "capture/capture_decision.py",
     "capture/run_capture_research.py",
     "capture/fetch_public_context.py",
+    "capture/fetch_notice_attachments.py",
     "capture/usaspending_enrich.py",
     "capture/render_capture_brief.py",
     "capture/agency_source_catalog.py",
@@ -118,7 +125,7 @@
       },
       "expected_present_phrases": [
         "outage response",
-        "daily status reporting"
+        "reporting cadence"
       ],
       "expected_artifact_phrase": "field-communications plan",
       "expected_absent_phrases": [
@@ -436,6 +443,59 @@
       ]
     }
   ],
+  "objective_compaction_controls": [
+    {
+      "id": "attachment-native-objectives-stay-compact",
+      "title": "Cold-chain logistics support",
+      "summary": "Temperature-controlled inventory, lot traceability, and discrepancy reporting support.",
+      "explanation_summary": "",
+      "attachment_bundle": {
+        "attachments": [
+          {
+            "filename": "PWS.pdf",
+            "category": "statement_of_work",
+            "section_blocks": [
+              {
+                "title": "Performance Work Statement",
+                "text": "Performance Work Statement; The mission of the office is to deliver reliable medical logistics. 1.3 Scope The contractor shall maintain temperature-controlled inventory, preserve lot traceability, and resolve shipment discrepancies within one business day. 1.5 General Requirements The contractor shall provide weekly discrepancy reports and corrective-action status.",
+                "source_text": "Performance Work Statement; The mission of the office is to deliver reliable medical logistics. 1.3 Scope The contractor shall maintain temperature-controlled inventory, preserve lot traceability, and resolve shipment discrepancies within one business day. 1.5 General Requirements The contractor shall provide weekly discrepancy reports and corrective-action status."
+              },
+              {
+                "title": "1.3 Scope",
+                "text": "1.3 Scope; The contractor shall maintain temperature-controlled inventory, preserve lot traceability, and resolve shipment discrepancies within one business day.",
+                "source_text": "1.3 Scope; The contractor shall maintain temperature-controlled inventory, preserve lot traceability, and resolve shipment discrepancies within one business day."
+              },
+              {
+                "title": "1.5 General Requirements",
+                "text": "1.5 General Requirements; The contractor shall provide weekly discrepancy reports and corrective-action status.",
+                "source_text": "1.5 General Requirements; The contractor shall provide weekly discrepancy reports and corrective-action status."
+              }
+            ],
+            "structured_rows": [
+              "Task 1; Maintain temperature-controlled inventory; preserve lot traceability; resolve shipment discrepancies within one business day.",
+              "Deliverable 2; Weekly discrepancy report; corrective-action status."
+            ],
+            "snippets": [
+              "The contractor shall maintain temperature-controlled inventory, preserve lot traceability, and resolve shipment discrepancies within one business day.",
+              "The contractor shall provide weekly discrepancy reports and corrective-action status."
+            ],
+            "structured_text_excerpt": "1.3 Scope The contractor shall maintain temperature-controlled inventory, preserve lot traceability, and resolve shipment discrepancies within one business day. 1.5 General Requirements The contractor shall provide weekly discrepancy reports and corrective-action status.",
+            "text_excerpt": "1.3 Scope The contractor shall maintain temperature-controlled inventory, preserve lot traceability, and resolve shipment discrepancies within one business day. 1.5 General Requirements The contractor shall provide weekly discrepancy reports and corrective-action status."
+          }
+        ]
+      },
+      "expected_objective_phrases": [
+        "temperature-controlled inventory",
+        "lot traceability",
+        "discrepancy reports"
+      ],
+      "forbidden_objective_phrases": [
+        "performance work statement",
+        "the mission of the office"
+      ],
+      "max_objective_chars": 340
+    }
+  ],
   "generic_strategy_controls": [
     {
       "id": "manual-generic-strategy-regression",
@@ -617,6 +677,47 @@
         "does not show strong overlap",
         "outside the vendor's stated preferred award band"
       ]
+    },
+    {
+      "id": "values-language-does-not-create-fit",
+      "profile": {
+        "fit_narrative": "Prioritize integrity, people first culture, and service excellence for buyers such as Department of Veterans Affairs.",
+        "core_competencies": [
+          "integrity",
+          "people first",
+          "service excellence"
+        ]
+      },
+      "buyer": "Department of Education. Office of Federal Student Aid",
+      "opportunity": {
+        "estimated_value": 5000000,
+        "place_of_performance": "Remote"
+      },
+      "notice_text": "The contractor shall provide warehouse discrepancy tracking, lot traceability, and weekly cold-chain reporting for medical logistics operations.",
+      "customer_priorities": {
+        "evidence_backed_priorities": [
+          "Lot traceability and discrepancy reporting appear central."
+        ]
+      },
+      "solicitation_facts": {
+        "contract_vehicle": ""
+      },
+      "vehicle_access_paths": [],
+      "set_aside_text": "Not stated",
+      "vehicle_access_ok": false,
+      "vehicle_access_required": false,
+      "set_aside_access_ok": true,
+      "qualification_gaps": {
+        "missing": [],
+        "missing_labels": [],
+        "surfaced": []
+      },
+      "expected_adjustment_direction": "negative",
+      "expected_signal_phrases": [],
+      "expected_caution_phrases": [
+        "buyer does not align",
+        "does not show strong overlap"
+      ]
     }
   ],
   "public_research_controls": [
@@ -646,10 +747,36 @@
     ],
     "excluded_domains": [
       "airforce.com"
-    ],
+      ],
       "career_url": "https://www.airforce.com/careers/logistics-and-administration/engineering",
       "career_title": "Engineering (3E531) - U.S. Air Force",
       "career_excerpt": "Explore engineering career benefits, training, and accession pathways in the U.S. Air Force."
+    },
+    {
+      "id": "public-discourse-must-stay-requirement-bearing",
+      "buyer": "Department of Veterans Affairs",
+      "title": "Claims Adjudication Workflow Support",
+      "notice_text": "Claims adjudication workflow automation, case routing, and appeals review dashboards for benefits operations.",
+      "domains": [
+        "va.gov"
+      ],
+      "expected_labels": [
+        "Department of Veterans Affairs"
+      ],
+      "expected_priority_keywords": [
+        "claims",
+        "adjudication",
+        "workflow"
+      ],
+      "excluded_priority_keywords": [
+        "shall",
+        "contractor",
+        "work"
+      ],
+      "excluded_domains": [],
+      "career_url": "https://www.va.gov/connecticut-health-care/news-releases/storm-water-drainage-draft-reports/",
+      "career_title": "Storm Water Drainage Draft Reports | VA Connecticut Health Care | Veterans Affairs",
+      "career_excerpt": "VA Connecticut published draft storm water drainage reports for facility improvements."
     }
   ],
   "agency_catalog_controls": [
@@ -782,6 +909,56 @@
         "Alpha Infrastructure Solutions",
         "Beta Mission Works",
         "Gamma Federal Services"
+      ]
+    },
+    {
+      "id": "weak-adjacent-awards-do-not-surface-as-competitors",
+      "resolved": {
+        "title": "Engineering support services"
+      },
+      "opportunity": {
+        "summary": "Engineering support services for facilities planning and modernization."
+      },
+      "award_signals": {
+        "competitive_landscape": {
+          "likely_incumbents": [],
+          "emerging_challengers": [],
+          "notes": []
+        },
+        "relevant_awards": [],
+        "adjacent_awards": [
+          {
+            "Award ID": "C111",
+            "Recipient Name": "Storm Water Works",
+            "Description": "Storm water drainage studies and draft environmental assessment support."
+          },
+          {
+            "Award ID": "D222",
+            "Recipient Name": "Clinical Outreach Group",
+            "Description": "Clinical patient outreach and testing support services."
+          }
+        ]
+      },
+      "attachment_validation": {
+        "validated_incumbents": [],
+        "direct_mentions": [],
+        "supporting_snippets": [],
+        "notes": []
+      },
+      "attachment_bundle": {
+        "attachments_expected": true,
+        "attachments": [
+          {
+            "filename": "PWS.pdf"
+          }
+        ]
+      },
+      "vehicle_signals": [],
+      "notice_context_text": "Facilities engineering modernization and planning support with base execution.",
+      "expected_names": [],
+      "unexpected_names": [
+        "Storm Water Works",
+        "Clinical Outreach Group"
       ]
     }
   ],

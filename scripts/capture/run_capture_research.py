@@ -27,11 +27,13 @@ from common.paths import load_json, safe_slug, standard_procurement_paths, today
 from common.source_registry import get_enabled_sources
 from common.validation import validate_capture_brief_text
 from capture.capture_decision import build_capture_decision_sections
+from capture.evaluator_anxiety import build_evaluator_anxiety_model
 from capture.fetch_notice_attachments import fetch_notice_attachments, load_local_attachments
 from capture.fetch_notice_context import load_notice_context
 from capture.fetch_public_context import fetch_public_research, fetch_url_excerpt
 from capture.render_capture_brief import render_capture_brief
 from capture.resolve_entry import resolve_entry
+from capture.solicitation_fact_model import build_solicitation_fact_model
 from capture.usaspending_enrich import enrich_from_usaspending
 
 TAG_RE = re.compile(r"<[^>]+>")
@@ -111,6 +113,14 @@ OBJECTIVE_TABLE_CELL_SPLIT_RE = re.compile(r"\s*(?:\||\t| {2,})\s*")
 OBJECTIVE_HEADING_PREFIX_RE = re.compile(r"^\s*(\d+(?:\.\d+){0,3})\s+(.+?)\s*$")
 WORKSTREAM_BULLET_RE = re.compile(r"^\s*[\u2022\u25cf\u00b7\uf0a7\-*]+\s*(.+?)\s*$")
 WORKSTREAM_PAGE_RE = re.compile(r"^page\s+\d+\s+of\s+\d+$", re.IGNORECASE)
+OBJECTIVE_WRAPPER_SECTION_TITLES = {
+    "performance work statement",
+    "statement of work",
+    "statement of objective",
+    "statement of objectives",
+    "description/specifications/work statement",
+    "description specifications work statement",
+}
 OBJECTIVE_BOILERPLATE_MARKERS = (
     "request for information",
     "responses are due",
@@ -155,6 +165,7 @@ OBJECTIVE_ADMIN_TOKENS = {
 }
 OBJECTIVE_PREFERRED_SECTION_HINTS = (
     "scope",
+    "scope of work",
     "general requirements",
     "deliverables",
     "tasks",
@@ -162,26 +173,28 @@ OBJECTIVE_PREFERRED_SECTION_HINTS = (
     "specific tasks",
     "services required",
     "performance objectives",
+    "quality control",
+    "performance requirements",
+    "acceptance criteria",
     "requirements",
 )
 WORKSTREAM_SECTION_HINTS = (
-    "vision statement",
-    "background",
+    "scope",
+    "scope of work",
     "description of services",
-    "electronic records management application",
+    "general requirements",
     "specific tasks",
-    "digitization",
-    "scanning",
-    "hosting",
-    "storage",
-    "dashboard",
-    "user administration",
-    "api",
-    "help desk",
-    "training",
+    "task requirements",
+    "services required",
+    "performance objectives",
+    "deliverables",
+    "quality control",
+    "quality assurance",
+    "acceptance criteria",
+    "performance requirements",
+    "staffing",
+    "reporting",
     "management reviews",
-    "independent audit",
-    "records management and retention",
     "transition-in",
     "transition in",
     "transition out",
@@ -192,9 +205,19 @@ WORKSTREAM_SECTION_SKIP_HINTS = (
     "acronyms",
     "definitions and acronyms",
     "government-furnished property",
-    "acceptance criteria",
-    "performance requirements summary",
     "related documents",
+)
+GENERIC_WORKSTREAM_TITLE_HINTS = (
+    "specific tasks",
+    "specific tasks and deliverables",
+    "deliverables",
+    "general requirements",
+    "requirements",
+    "scope of work",
+    "description of services",
+    "contractor support",
+    "include, at a minimum",
+    "performance work statement",
 )
 WORKSTREAM_SERVICE_LIST_ANCHORS = (
     "shall include but are not limited to",
@@ -269,6 +292,14 @@ GENERIC_STRATEGY_CUES = (
     "operating-readiness story",
     "proof point",
     "transition story",
+    "continuity and transition credibility matter because",
+    "reporting discipline matters because",
+    "quality-control discipline matters because",
+    "access and handling readiness matter because",
+    "package quality and review throughput matter because",
+    "show that the solution is governable in a federal environment",
+    "requirement throughput with documented discipline",
+    "no-drama access and security compliance",
 )
 GENERIC_STRATEGY_FIELDS = (
     ("hot button", "hot_buttons"),
@@ -434,6 +465,88 @@ def _clean_excerpt(value: object, max_chars: int = 4000) -> str:
     return text[:max_chars]
 
 
+def _normalize_inline_heading_body(text: str) -> str:
+    cleaned = _clean_excerpt(text, max_chars=1600).strip()
+    if not cleaned:
+        return ""
+    return re.sub(
+        r"^(\d+(?:\.\d+){0,3}\s+(?:Scope|General Requirements|Deliverables?|Tasks?|Specific Tasks?|Performance Objectives?|Requirements?|Quality Control|Performance Requirements))\s+(?=(?:The contractor|Contractor|Provide|Maintain|Deliver|Perform|Support|Report|Inspect|Review|Manage)\b)",
+        r"\1; ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+
+
+def _compact_requirement_text(
+    value: object,
+    *,
+    max_chars: int = 360,
+    max_fragments: int = 3,
+    require_action: bool = False,
+) -> str:
+    raw = _normalize_inline_heading_body(value)
+    if not raw:
+        return ""
+    root_heading_stripped = re.sub(
+        r"^(?:performance work statement|statement of work|statement of objectives?|description/specifications/work statement)\s*[:;.-]?\s*",
+        "",
+        raw,
+        flags=re.IGNORECASE,
+    ).strip()
+    candidate_parts = re.split(r"(?<=[.;])\s+|(?<=\))\s+(?=[A-Z])|\n+", root_heading_stripped)
+    ranked: list[tuple[int, str]] = []
+    for part in candidate_parts:
+        sentence = _clean_excerpt(part, max_chars=900).strip(" -;:")
+        if len(sentence) < 24:
+            continue
+        if _is_toc_like_objective_line(sentence) or _is_boilerplate_objective_sentence(sentence):
+            continue
+        if OBJECTIVE_SECTION_HEADING_RE.match(sentence) and len(sentence.split()) <= 8:
+            continue
+        lower = sentence.lower()
+        score = 0
+        if OBJECTIVE_ROW_PREFIX_RE.match(sentence):
+            score += 6
+        if any(keyword in lower for keyword in (*OBJECTIVE_KEYWORDS, *OBJECTIVE_EXTRA_ACTION_VERBS)):
+            score += 4
+        if any(marker in lower for marker in ("scope", "requirement", "deliverable", "transition", "quality", "acceptance", "aql", "prs", "staff", "report")):
+            score += 2
+        if any(marker in lower for marker in ("mission", "purpose", "background")) and not any(
+            keyword in lower for keyword in (*OBJECTIVE_KEYWORDS, *OBJECTIVE_EXTRA_ACTION_VERBS)
+        ):
+            score -= 3
+        if require_action and not any(keyword in lower for keyword in (*OBJECTIVE_KEYWORDS, *OBJECTIVE_EXTRA_ACTION_VERBS)):
+            continue
+        if score <= 0 and require_action:
+            continue
+        ranked.append((score, sentence))
+    if not ranked:
+        fallback = root_heading_stripped[:max_chars].strip(" ;:-")
+        return fallback
+    selected: list[str] = []
+    normalized_selected: list[str] = []
+    for _, sentence in sorted(ranked, key=lambda item: (-item[0], len(item[1]), item[1])):
+        normalized = re.sub(r"[^a-z0-9]+", " ", sentence.lower()).strip()
+        if not normalized:
+            continue
+        replaced = False
+        for index, existing in enumerate(normalized_selected):
+            shorter, longer = sorted((normalized, existing), key=len)
+            if shorter and shorter in longer:
+                if len(sentence) < len(selected[index]):
+                    selected[index] = sentence
+                    normalized_selected[index] = normalized
+                replaced = True
+                break
+        if replaced:
+            continue
+        selected.append(sentence)
+        normalized_selected.append(normalized)
+        if len("; ".join(selected)) >= max_chars or len(selected) >= max_fragments:
+            break
+    return "; ".join(selected)[:max_chars].strip(" ;:-")
+
+
 def _attachment_structured_rows(attachment_bundle: dict[str, object], max_items: int = 16) -> list[str]:
     candidate_categories = {"statement_of_work", "solicitation", "instructions_evaluation", "questions_answers", "amendment"}
     ordered = _ordered_attachment_items(
@@ -444,7 +557,7 @@ def _attachment_structured_rows(attachment_bundle: dict[str, object], max_items:
     rows: list[str] = []
     for item in ordered:
         for row in item.get("structured_rows", []) or []:
-            cleaned_row = _clean_excerpt(row, max_chars=360).strip(" ;:-")
+            cleaned_row = _compact_requirement_text(row, max_chars=320, max_fragments=2, require_action=True).strip(" ;:-")
             if cleaned_row and not _is_boilerplate_objective_sentence(cleaned_row):
                 rows.append(cleaned_row)
                 if len(rows) >= max_items:
@@ -489,7 +602,9 @@ def _attachment_structured_rows(attachment_bundle: dict[str, object], max_items:
                         lookahead += 1
                         if any(term in combined.lower() for term in ("shall", "must", "provide", "deliver", "maintain", "transition", "report", "staff")):
                             break
-                    rows.append(combined[:360])
+                    compact_combined = _compact_requirement_text(combined, max_chars=320, max_fragments=2, require_action=True)
+                    if compact_combined:
+                        rows.append(compact_combined)
                     index = lookahead
                     if len(rows) >= max_items:
                         return _dedupe_strings(rows)[:max_items]
@@ -516,14 +631,18 @@ def _attachment_structured_rows(attachment_bundle: dict[str, object], max_items:
                         combined = f"{combined}; {next_line}"
                         lookahead += 1
                         if any(term in combined.lower() for term in ("shall", "must", "provide", "deliver", "maintain", "transition", "report", "staff", "support")):
-                            rows.append(combined[:360])
+                            compact_combined = _compact_requirement_text(combined, max_chars=320, max_fragments=2, require_action=True)
+                            if compact_combined:
+                                rows.append(compact_combined)
                             break
                     index = lookahead
                     if len(rows) >= max_items:
                         return _dedupe_strings(rows)[:max_items]
                     continue
                 if ("|" in raw or "\t" in raw or re.search(r" {2,}", source_lines[index])) and len(current) >= 60:
-                    rows.append(current[:360])
+                    compact_current = _compact_requirement_text(current, max_chars=320, max_fragments=2, require_action=False)
+                    if compact_current:
+                        rows.append(compact_current)
                     if len(rows) >= max_items:
                         return _dedupe_strings(rows)[:max_items]
                 index += 1
@@ -555,14 +674,23 @@ def _attachment_section_blocks(
     for item in ordered:
         filename = str(item.get("filename", "attachment") or "attachment")
         category = str(item.get("category", "other") or "other")
-        for block in item.get("section_blocks", []) or []:
+        raw_blocks = [block for block in (item.get("section_blocks", []) or []) if isinstance(block, dict)]
+        specific_child_present = any(
+            str(block.get("title", "") or "").strip().lower() not in OBJECTIVE_WRAPPER_SECTION_TITLES
+            and bool(str(block.get("title", "") or "").strip())
+            for block in raw_blocks
+        )
+        for block in raw_blocks:
             if not isinstance(block, dict):
                 continue
             title = _clean_excerpt(block.get("title", ""), max_chars=220).strip(" ;:-")
-            text = _clean_excerpt(block.get("text", ""), max_chars=960).strip()
-            if not text:
+            if specific_child_present and title.lower() in OBJECTIVE_WRAPPER_SECTION_TITLES:
                 continue
-            key = _normalize_signal_text(f"{filename} {title} {text}")
+            source_text = _clean_excerpt(block.get("source_text", "") or block.get("text", ""), max_chars=1800).strip()
+            text = _compact_requirement_text(source_text or block.get("text", ""), max_chars=420, max_fragments=3, require_action=False).strip()
+            if not text or not source_text:
+                continue
+            key = _normalize_signal_text(f"{filename} {title} {source_text}")
             if not key or key in seen:
                 continue
             seen.add(key)
@@ -573,7 +701,7 @@ def _attachment_section_blocks(
                     "category": category,
                     "title": title or _objective_heading_title(text),
                     "text": rendered,
-                    "source_text": text,
+                    "source_text": source_text,
                 }
             )
             if len(blocks) >= max_items:
@@ -623,7 +751,7 @@ def _workstream_summary(title: str, content_lines: list[str]) -> str:
         if _is_boilerplate_objective_sentence(cleaned):
             continue
         summary_lines.append(cleaned)
-    prefix = _clean_excerpt(" ".join(summary_lines[:4]).strip(), max_chars=420)
+    prefix = _compact_requirement_text(" ".join(summary_lines[:5]).strip(), max_chars=420, max_fragments=3, require_action=False)
     if service_items:
         service_clause = ", ".join(_dedupe_strings(service_items)[:10])
         if prefix:
@@ -632,30 +760,68 @@ def _workstream_summary(title: str, content_lines: list[str]) -> str:
     return prefix
 
 
+def _workstream_display_title(title: str, summary: str) -> str:
+    cleaned_title = _clean_excerpt(title, max_chars=180).strip(" .;:-")
+    lower_title = cleaned_title.lower()
+    generic_title = (
+        not cleaned_title
+        or any(hint in lower_title for hint in GENERIC_WORKSTREAM_TITLE_HINTS)
+        or cleaned_title == cleaned_title.upper()
+        or len(cleaned_title.split()) > 8
+    )
+    if not generic_title:
+        return cleaned_title
+    normalized_summary = _clean_excerpt(summary, max_chars=240).strip(" .;:-")
+    match = re.search(
+        r"(?:the contractor shall|contractor shall|shall)\s+(.+?)(?:[.;]|$)",
+        normalized_summary,
+        re.IGNORECASE,
+    )
+    candidate = match.group(1).strip(" .;:-") if match else normalized_summary.split(";", 1)[0].strip(" .;:-")
+    candidate = re.sub(
+        r"^(?:provide|perform|maintain|deliver|support|manage|review|prepare|execute|coordinate)\s+",
+        "",
+        candidate,
+        flags=re.IGNORECASE,
+    )
+    candidate = _clean_excerpt(candidate, max_chars=96).strip(" .;:-")
+    if not candidate:
+        return cleaned_title or "Requirement workstream"
+    return candidate[0].upper() + candidate[1:]
+
+
 def _workstream_priority(title: str, objective: str) -> int:
     lower = f"{title} {objective}".lower()
     score = 0
     weighted_terms = (
-        ("electronic records management application", 120),
-        ("description of services", 110),
-        ("records management and retention", 105),
-        ("transition-in", 100),
-        ("transition out", 95),
-        ("independent audit", 92),
-        ("digitization", 90),
-        ("scanning", 88),
-        ("dashboard", 86),
-        ("help desk", 86),
-        ("training", 84),
-        ("api", 82),
-        ("background", 78),
-        ("vision statement", 76),
+        ("transition", 110),
+        ("traceability", 106),
+        ("iv&v", 104),
+        ("test", 102),
+        ("quality control", 100),
+        ("quality assurance", 98),
+        ("acceptance", 96),
+        ("clearance", 94),
+        ("zero trust", 92),
+        ("ficam", 90),
+        ("trm", 90),
+        ("engineering", 88),
+        ("deliverable", 86),
+        ("review", 84),
+        ("report", 82),
+        ("staffing", 80),
+        ("clin", 78),
+        ("price", 76),
     )
     for token, weight in weighted_terms:
         if token in lower:
             score = max(score, weight)
-    if any(token in lower for token in ("records", "retention", "security", "compliance", "transition", "audit")):
+    if any(token in lower for token in ("security", "compliance", "transition", "technical", "quality", "testing")):
         score += 15
+    if re.search(r"\b\d{1,3}\b", lower) or re.search(r"\b[A-Z]{2,}(?:-[A-Z0-9]+)*\b", title):
+        score += 6
+    if re.search(r"\b(?:shall|must|provide|deliver|support|conduct|execute|review|coordinate|submit|develop|maintain)\b", lower):
+        score += 8
     return score
 
 
@@ -677,14 +843,14 @@ def _section_backed_workstreams(attachment_bundle: dict[str, object], max_items:
             anchor in combined_lower for anchor in WORKSTREAM_SERVICE_LIST_ANCHORS
         ):
             continue
-        summary = _clean_excerpt(text, max_chars=900)
+        summary = _compact_requirement_text(text, max_chars=420, max_fragments=3, require_action=False)
         key = _normalize_signal_text(f"{title} {summary}")
         if not key or key in seen_block_keys:
             continue
         seen_block_keys.add(key)
         block_workstreams.append(
             {
-                "title": title,
+                "title": _workstream_display_title(title, summary),
                 "objective": summary,
                 "evidence_snippets": [str(block.get("text", "") or "").strip()],
                 "_priority": _workstream_priority(title, summary),
@@ -744,7 +910,7 @@ def _section_backed_workstreams(attachment_bundle: dict[str, object], max_items:
             seen_keys.add(key)
             workstreams.append(
                 {
-                    "title": title,
+                    "title": _workstream_display_title(title, summary),
                     "objective": summary,
                     "evidence_snippets": [f"{filename}: {title}: {summary}"],
                     "_priority": _workstream_priority(title, summary),
@@ -1454,6 +1620,77 @@ def _preferred_attachment_fact(
     return str(((candidates[0].get("facts") or {}).get(field) if isinstance(candidates[0].get("facts"), dict) else "") or "").strip()
 
 
+STAFFING_ROLE_HINTS = (
+    "manager",
+    "engineer",
+    "architect",
+    "specialist",
+    "analyst",
+    "technician",
+    "inspector",
+    "administrator",
+    "coordinator",
+    "planner",
+    "designer",
+    "scientist",
+    "officer",
+    "lead",
+    "director",
+    "supervisor",
+    "operator",
+    "estimator",
+    "scheduler",
+    "drafter",
+)
+
+
+def _staffing_role_candidate(text: str) -> str:
+    cleaned = _repair_pdf_spacing(_clean_excerpt(text, max_chars=120)).strip(" .;:-")
+    lower = cleaned.lower()
+    if not cleaned or len(lower.split()) > 8:
+        return ""
+    if any(marker in lower for marker in ("labor category", "key personnel", "base year", "option year", "hours", "optional", "total")):
+        return ""
+    if not any(hint in lower for hint in STAFFING_ROLE_HINTS):
+        return ""
+    return cleaned
+
+
+def _attachment_staffing_roles(attachment_bundle: dict[str, object], max_items: int = 10) -> list[str]:
+    roles: list[str] = []
+    for item in _ordered_attachment_items(attachment_bundle, max_items=8):
+        for row in (item.get("matrix_rows", []) or []):
+            if not isinstance(row, dict):
+                continue
+            cells = row.get("cells", [])
+            if not isinstance(cells, list):
+                cells = []
+            for candidate in cells[:3]:
+                role = _staffing_role_candidate(str(candidate or ""))
+                if role:
+                    roles.append(role)
+            label_role = _staffing_role_candidate(str(row.get("label") or ""))
+            if label_role:
+                roles.append(label_role)
+        for block in (item.get("section_blocks", []) or []):
+            if not isinstance(block, dict):
+                continue
+            source_text = str(block.get("source_text") or block.get("text") or "")
+            for fragment in re.split(r"[.;]\s+|\n+", source_text):
+                if not re.search(r"\b(?:provide|furnish|staff|position|key personnel|labor categor(?:y|ies))\b", fragment, re.IGNORECASE):
+                    continue
+                for match in re.finditer(
+                    r"\b([A-Z][A-Za-z/&-]+(?:\s+[A-Z][A-Za-z/&-]+){0,4}\s+(?:"
+                    + "|".join(re.escape(hint) for hint in STAFFING_ROLE_HINTS)
+                    + r"))\b",
+                    fragment,
+                ):
+                    role = _staffing_role_candidate(match.group(1))
+                    if role:
+                        roles.append(role)
+    return _dedupe_strings(roles)[:max_items]
+
+
 def _attachment_fact_matrix(attachment_bundle: dict[str, object]) -> dict[str, object]:
     rows: list[dict[str, object]] = []
     for item in _ordered_attachment_items(
@@ -1762,16 +1999,7 @@ def _extract_solicitation_facts(
     if not facts["funds_status"]:
         facts["funds_status"] = _preferred_attachment_fact(fact_rows, "funds_status")
 
-    staffing_roles: list[str] = []
-    for label in (
-        "Engineering Technicians, Except Drafters",
-        "Engineers / Architects",
-        "Construction Manager",
-        "Furnishings Manager",
-    ):
-        if re.search(re.escape(label), dense, re.IGNORECASE):
-            staffing_roles.append(label)
-    facts["staffing_roles"] = staffing_roles
+    facts["staffing_roles"] = _attachment_staffing_roles(attachment_bundle)
     facts["attachment_fact_rows"] = fact_rows
     facts["attachment_conflicts"] = attachment_conflicts
     facts["quoted_facts"] = _dedupe_strings(
@@ -2336,14 +2564,15 @@ def _preferred_objective_body_blocks(
         if not sentence_parts:
             sentence_parts = [source_text]
         for part in sentence_parts:
-            lower = part.lower()
-            if len(part) < 90 or len(part) > 520:
+            compact_part = _compact_requirement_text(part, max_chars=360, max_fragments=2, require_action=True)
+            lower = compact_part.lower()
+            if len(compact_part) < 70 or len(compact_part) > 360:
                 continue
-            if _is_boilerplate_objective_sentence(part):
+            if _is_boilerplate_objective_sentence(compact_part):
                 continue
             if not any(term in lower for term in action_terms):
                 continue
-            snippet = f"{heading}; {part}" if heading and heading.lower() not in part.lower() else part
+            snippet = f"{heading}; {compact_part}" if heading and heading.lower() not in compact_part.lower() else compact_part
             if include_filename:
                 snippet = f"{block.get('filename', 'attachment')}: {snippet}"
             blocks.append(snippet[:640])
@@ -2407,14 +2636,15 @@ def _preferred_objective_body_blocks(
                 if not sentence_parts:
                     sentence_parts = [paragraph]
                 for part in sentence_parts:
-                    lower = part.lower()
-                    if len(part) < 90 or len(part) > 520:
+                    compact_part = _compact_requirement_text(part, max_chars=360, max_fragments=2, require_action=True)
+                    lower = compact_part.lower()
+                    if len(compact_part) < 70 or len(compact_part) > 360:
                         continue
-                    if _is_boilerplate_objective_sentence(part):
+                    if _is_boilerplate_objective_sentence(compact_part):
                         continue
                     if not any(term in lower for term in action_terms):
                         continue
-                    snippet = f"{heading}; {part}"[:520]
+                    snippet = f"{heading}; {compact_part}"[:420]
                     if include_filename:
                         snippet = f"{filename}: {snippet}"[:640]
                     blocks.append(snippet)
@@ -2433,19 +2663,19 @@ def _objective_scope_texts(attachment_bundle: dict[str, object], max_items: int 
     )
     texts: list[str] = [
         *[
-            str(item.get("source_text", "") or "").strip()
+            _compact_requirement_text(str(item.get("source_text", "") or "").strip(), max_chars=420, max_fragments=3, require_action=False)
             for item in _attachment_section_blocks(attachment_bundle, allowed_categories=scope_categories, max_items=max_items * 2)
         ],
         *_preferred_objective_body_blocks(attachment_bundle, max_items=max_items),
     ]
     for item in ordered:
         for snippet in item.get("snippets", []) or []:
-            cleaned = _clean_excerpt(snippet, max_chars=320)
+            cleaned = _compact_requirement_text(snippet, max_chars=320, max_fragments=2, require_action=False)
             if cleaned:
                 texts.append(cleaned)
         text_excerpt = _attachment_text_value(item, max_chars=2200)
         if text_excerpt:
-            texts.append(text_excerpt)
+            texts.append(_compact_requirement_text(text_excerpt, max_chars=420, max_fragments=3, require_action=False))
     return _dedupe_strings(texts)
 
 
@@ -2458,7 +2688,7 @@ def _attachment_objective_candidates(attachment_bundle: dict[str, object], max_i
     )
     candidates: list[str] = [
         *[
-            str(item.get("source_text", "") or "").strip()[:520]
+            _compact_requirement_text(str(item.get("source_text", "") or "").strip(), max_chars=420, max_fragments=3, require_action=False)
             for item in _attachment_section_blocks(attachment_bundle, allowed_categories=candidate_categories, max_items=max_items)
         ],
         *_preferred_objective_body_blocks(attachment_bundle, max_items=max_items),
@@ -2499,7 +2729,9 @@ def _attachment_objective_candidates(attachment_bundle: dict[str, object], max_i
                     continue
                 if not any(marker in lower for marker in marker_keywords):
                     continue
-                candidates.append(sentence[:360])
+                compact_sentence = _compact_requirement_text(sentence, max_chars=320, max_fragments=2, require_action=False)
+                if compact_sentence:
+                    candidates.append(compact_sentence)
                 if len(candidates) >= max_items:
                     return _dedupe_strings(candidates)[:max_items]
     return _dedupe_strings(candidates)[:max_items]
@@ -2600,9 +2832,9 @@ def _decompose_objectives(
     for value in seed_values:
         parts = [value] if value in attachment_candidates or value in structured_candidate_set else OBJECTIVE_SENTENCE_RE.split(_clean_excerpt(value, max_chars=8000))
         for part in parts:
-            sentence = SPACE_RE.sub(" ", part).strip(" -")
+            sentence = _compact_requirement_text(part, max_chars=360, max_fragments=2, require_action=True)
             lower = sentence.lower()
-            if len(sentence) < 70 or len(sentence) > 520:
+            if len(sentence) < 70 or len(sentence) > 360:
                 continue
             if sentence.endswith("?"):
                 continue
@@ -2870,6 +3102,11 @@ def _award_history_signals(
         for row in agency_rows
         if int(row.get("_overlap_count", 0) or 0) >= 2 or int(row.get("_relevance_score", 0) or 0) >= 6
     ]
+    strong_adjacent_rows = [
+        row
+        for row in adjacent_rows
+        if int(row.get("_overlap_count", 0) or 0) >= 3 and int(row.get("_relevance_score", 0) or 0) >= 7
+    ]
     relevant_rows = strong_agency_rows
     budget_usable_for_capture = bool(relevant_rows) and not weak_query_only
     amount_rows = strong_agency_rows
@@ -2884,14 +3121,14 @@ def _award_history_signals(
     adjacent_competitors = _dedupe_strings(
         [
             str(row.get("Recipient Name", "") or "")
-            for row in adjacent_rows
+            for row in strong_adjacent_rows
             if str(row.get("Recipient Name", "") or "")
         ]
     )[:5]
     emerging_challengers = _dedupe_strings(
         [
             str(row.get("Recipient Name", "") or "")
-            for row in adjacent_rows
+            for row in strong_adjacent_rows
             if str(row.get("Recipient Name", "") or "")
         ]
     )[:4]
@@ -2950,7 +3187,7 @@ def _award_history_signals(
             notes.append(
                 "Additional cross-agency matches indicate adjacent market performers, but they are not direct proof of incumbency on this solicitation."
             )
-            if adjacent_competitors:
+            if strong_adjacent_rows and adjacent_competitors:
                 notes.append(
                     f"Adjacent scope-overlap performers from public award history include: {', '.join(adjacent_competitors[:4])}."
                 )
@@ -2978,7 +3215,7 @@ def _award_history_signals(
             notes.append(
                 f"{len(adjacent_rows)} adjacent cross-agency USAspending matches were excluded from funding and incumbency proof because they do not share the customer chain."
             )
-            if adjacent_competitors:
+            if strong_adjacent_rows and adjacent_competitors:
                 notes.append(
                     f"Adjacent scope-overlap performers still worth pressure-testing as competitors: {', '.join(adjacent_competitors[:4])}."
                 )
@@ -3001,7 +3238,7 @@ def _award_history_signals(
     return {
         "queries": queries,
         "relevant_awards": relevant_rows,
-        "adjacent_awards": adjacent_rows[:6],
+        "adjacent_awards": strong_adjacent_rows[:6],
         "budget_signals": budget_signals,
         "related_procurements": related_procurements,
         "competitive_landscape": {
@@ -3274,7 +3511,15 @@ def _generic_strategy_language_warnings(
                     continue
                 line = str(row.get("text") or "").strip()
                 anchor = str(row.get("evidence_anchor") or "").strip()
-                if line and not anchor and not line.lower().startswith("insufficient"):
+                lower = line.lower()
+                overlap = len(_signal_tokens(line) & requirement_tokens)
+                if line and not anchor and not lower.startswith("insufficient"):
+                    generic_hits.append(f"{label}: {line}")
+                    continue
+                if line and any(cue in lower for cue in GENERIC_STRATEGY_CUES):
+                    generic_hits.append(f"{label}: {line}")
+                    continue
+                if line and overlap < 2 and any(term in lower for term in ("execution", "readiness", "discipline", "proof point", "transition")):
                     generic_hits.append(f"{label}: {line}")
             continue
         values = strategy.get(key, [])
@@ -3517,6 +3762,18 @@ def main() -> int:
         attachment_workstreams,
     )
     attachment_anomalies = _extract_attachment_anomalies(attachment_bundle, solicitation_facts)
+    solicitation_fact_model = build_solicitation_fact_model(
+        solicitation_facts,
+        attachment_bundle,
+        attachment_workstreams=attachment_workstreams,
+    )
+    evaluator_anxiety_model = build_evaluator_anxiety_model(
+        solicitation_fact_model,
+        solicitation_facts=solicitation_facts,
+        attachment_anomalies=attachment_anomalies,
+        contract_type=str(solicitation_facts.get("contract_type") or ""),
+        award_basis=str(solicitation_facts.get("evaluation_basis") or ""),
+    )
     attachment_parse_guardrails = _attachment_parse_guardrails(attachment_bundle)
     executive_summary = _clean_excerpt(
         explanation.get("summary") or opportunity.get("summary") or "Fresh structured capture brief generated from current request context."
@@ -3870,9 +4127,11 @@ def main() -> int:
         learned_semantic_preferences=learned_semantic_preferences,
         normalized_evidence=cross_source_evidence,
         solicitation_facts=solicitation_facts,
+        solicitation_fact_model=solicitation_fact_model,
         attachment_workstreams=attachment_workstreams,
         staffing_pricing_signals=staffing_pricing_signals,
         attachment_anomalies=attachment_anomalies,
+        evaluator_anxiety_model=evaluator_anxiety_model,
     )
     generic_strategy_warnings = _generic_strategy_language_warnings(
         decision_sections,
@@ -3921,6 +4180,17 @@ def main() -> int:
             str(capture_usefulness.get("release_warning") or "").strip(),
         ]
     )
+    combined_source_statuses = _dedupe_strings(
+        [
+            json.dumps(item, sort_keys=True)
+            for item in (
+                list(public_research.get("source_statuses", []) or [])
+                + list(commercial_intel.get("source_statuses", []) or [])
+            )
+            if isinstance(item, dict)
+        ]
+    )
+    rendered_source_statuses = [json.loads(item) for item in combined_source_statuses]
     decision_sections.setdefault("capture_judgment", {}).update(
         {
             "memo_honesty_score": memo_honesty.get("score", 0),
@@ -4005,11 +4275,14 @@ def main() -> int:
         "related_procurements": related_procurements,
         "vehicle_signals": vehicle_signals,
         "solicitation_facts": solicitation_facts,
+        "solicitation_fact_model": solicitation_fact_model,
         "attachment_workstreams": attachment_workstreams,
         "attachment_anomalies": attachment_anomalies,
         "staffing_pricing_signals": staffing_pricing_signals,
+        "evaluator_anxiety_model": evaluator_anxiety_model,
         "cross_source_evidence": cross_source_evidence,
         "commercial_intel": {
+            "public_source_statuses": public_research.get("source_statuses", []),
             "source_statuses": commercial_intel.get("source_statuses", []),
             "matches": commercial_intel.get("matches", []),
             "evidence_models": commercial_intel.get("evidence_models", []),
@@ -4046,8 +4319,10 @@ def main() -> int:
             "scope_snippets": attachment_scope_snippets,
             "incumbent_validation": attachment_validation,
             "solicitation_facts": solicitation_facts,
+            "solicitation_fact_model": solicitation_fact_model,
             "workstreams": attachment_workstreams,
             "anomalies": attachment_anomalies,
+            "evaluator_anxiety_model": evaluator_anxiety_model,
         },
         "public_discourse_signals": public_research.get("public_discourse_signals", []),
         "public_research_assessment": public_research_assessment,
@@ -4103,7 +4378,7 @@ def main() -> int:
             "learned_semantic_preferences": learned_semantic_preferences,
         },
         "source_log": public_sources,
-        "source_statuses": commercial_intel.get("source_statuses", []),
+        "source_statuses": rendered_source_statuses,
         "memo_honesty_assessment": memo_honesty,
         "capture_usefulness_assessment": capture_usefulness,
         "validation": {
@@ -4130,8 +4405,10 @@ def main() -> int:
     evidence.update(decision_sections)
 
     brief_text = render_capture_brief(bundle_root / "templates" / "capture-brief.template.md", evidence)
-    brief_validation = validate_capture_brief_text(brief_text)
+    brief_validation = validate_capture_brief_text(brief_text, evidence)
     evidence["validation"]["all_required_sections_present"] = brief_validation["all_required_sections_present"]
+    evidence["validation"]["evidence_alignment_ok"] = brief_validation.get("evidence_alignment_ok", True)
+    evidence["validation"]["generic_strategy_hits"] = brief_validation.get("generic_strategy_hits", [])
     coverage_categories = int(public_research.get("qualified_category_count", 0) or 0)
     public_research_quality_score = int(public_research.get("quality_score", 0) or 0)
     core_context_anchor_count = int(public_research.get("core_context_anchor_count", 0) or 0)
@@ -4154,6 +4431,7 @@ def main() -> int:
         and usaspending_status == "ok"
         and attachment_completion_ready
         and brief_validation["all_required_sections_present"]
+        and brief_validation.get("evidence_alignment_ok", True)
         and len(public_sources) >= 8
         and coverage_categories >= 4
         and strong_public_sources >= 5

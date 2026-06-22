@@ -177,10 +177,6 @@ CATEGORY_URL_HINTS = {
         "roadmap",
         "digital",
         "data",
-        "fact-sheets",
-        "fact-sheet",
-        "facility-engineering",
-        "mission-support",
     ),
     "budget_funding": ("budget", "justification", "appropriation", "performance", "capital-investments", "operating-plan"),
     "acquisition_forecast": (
@@ -194,7 +190,7 @@ CATEGORY_URL_HINTS = {
         "expiring-contracts",
     ),
     "oversight": ("oversight", "audit", "report", "management", "inspection", "watchdog", "tax-administration"),
-    "leadership": ("commissioner", "leadership", "official", "organization", "remarks", "testimony", "about-irs"),
+    "leadership": ("commissioner", "leadership", "official", "organization", "remarks", "testimony"),
     "policy_compliance": ("publication", "privacy", "security", "safeguards", "accessibility", "zero-trust", "508", "nist"),
     "public_discourse": ("news", "newsroom", "press", "remarks", "testimony", "speech", "featured-stories"),
 }
@@ -208,11 +204,6 @@ CATEGORY_TEXT_HINTS = {
         "zero trust",
         "modernization",
         "technology",
-        "fact sheet",
-        "facility engineering",
-        "mission support",
-        "installation support",
-        "civil engineer",
     ),
     "budget_funding": ("budget", "appropriation", "performance", "funding", "investment", "justification"),
     "acquisition_forecast": (
@@ -256,11 +247,6 @@ MISSION_CONTEXT_MARKERS = (
     "roadmap",
     "operating plan",
     "research and development",
-    "fact sheet",
-    "facility engineering",
-    "civil engineer",
-    "installation support",
-    "mission support",
 )
 BUDGET_FUNDING_MARKERS = (
     "budget",
@@ -505,6 +491,11 @@ def _keyword_query_clause(keywords: list[str], limit: int = 3) -> str:
     if not selected:
         return ""
     return "(" + " OR ".join(f'"{keyword}"' for keyword in selected) + ")"
+
+
+def _minimum_requirement_overlap(priority_keyword_tokens: list[str], keyword_tokens: list[str]) -> int:
+    distinct_terms = {token for token in [*priority_keyword_tokens, *keyword_tokens] if str(token or "").strip()}
+    return 1 if len(distinct_terms) <= 2 else 2
 
 
 def _candidate_fetch_max_chars(category: str, url: str) -> int:
@@ -925,6 +916,7 @@ def _source_quality_score(
     score += min(4, entity_overlap)
     score += min(6, priority_overlap * 2)
     score += min(5, objective_overlap)
+    minimum_overlap = _minimum_requirement_overlap(priority_keyword_tokens, keyword_tokens)
     compact_combined = combined.replace(" ", "")
     marker_hit = _category_marker_hit(category, combined, url, text_hints)
     for hint in text_hints:
@@ -959,7 +951,7 @@ def _source_quality_score(
         }
     requirement_keywords_present = bool(keyword_tokens)
     requirement_relevant = entity_overlap > 0 and (
-        objective_overlap > 0
+        objective_overlap >= minimum_overlap
         and (priority_overlap > 0 or not priority_keyword_tokens)
         or (category == "leadership" and not requirement_keywords_present and entity_overlap > 0)
     )
@@ -1040,7 +1032,7 @@ def _source_quality_score(
         score -= 8
     if category in {"mission_context", "oversight", "public_discourse"} and (
         entity_overlap == 0
-        or objective_overlap == 0
+        or objective_overlap < minimum_overlap
         or (priority_keyword_tokens and priority_overlap == 0)
     ):
         return {
@@ -1051,7 +1043,7 @@ def _source_quality_score(
             "requirement_relevant": False,
         }
     if category in {"budget_funding", "acquisition_forecast"} and (
-        objective_overlap == 0 or (priority_keyword_tokens and priority_overlap == 0)
+        objective_overlap < minimum_overlap or (priority_keyword_tokens and priority_overlap == 0)
     ):
         return {
             "quality_score": -10,
@@ -1069,7 +1061,7 @@ def _source_quality_score(
             "requirement_relevant": False,
         }
     if category == "leadership" and requirement_keywords_present and (
-        objective_overlap == 0 or (priority_keyword_tokens and priority_overlap == 0)
+        objective_overlap < minimum_overlap or (priority_keyword_tokens and priority_overlap == 0)
     ):
         return {
             "quality_score": -10,
@@ -2045,6 +2037,37 @@ def fetch_public_research(
             "public_discourse": public_discourse_sources,
         }
     )
+    category_inputs = [
+        ("mission_context", mission_queries, mission_sources, mission_gaps),
+        ("budget_funding", budget_queries, budget_sources, budget_gaps),
+        ("acquisition_forecast", forecast_queries, forecast_sources, forecast_gaps),
+        ("oversight", oversight_queries, oversight_sources, oversight_gaps),
+        ("leadership", leadership_queries, leadership_sources, leadership_gaps),
+        ("policy_compliance", policy_queries, policy_sources, policy_gaps),
+        ("public_discourse", public_discourse_queries, public_discourse_sources, discourse_gaps),
+    ]
+    source_statuses: list[dict[str, Any]] = []
+    for category, queries, sources, gaps in category_inputs:
+        admitted_count = len(sources)
+        anchor_count = int(category_anchor_counts.get(category, 0) or 0)
+        requirement_count = sum(1 for source in sources if bool(source.get("requirement_relevant")))
+        if anchor_count > 0:
+            status = "anchor_found"
+        elif admitted_count > 0:
+            status = "admitted_non_anchor"
+        else:
+            status = "gap"
+        source_statuses.append(
+            {
+                "category": category,
+                "status": status,
+                "query_count": len(queries),
+                "admitted_source_count": admitted_count,
+                "anchor_count": anchor_count,
+                "requirement_relevant_count": requirement_count,
+                "gap": str((gaps or [""])[0] or "").strip(),
+            }
+        )
 
     return {
         "status": "ok" if source_log else "no_results",
@@ -2067,6 +2090,7 @@ def fetch_public_research(
         "external_pressure_signals": pressure_signal_rows,
         "stakeholder_contact_history": stakeholder_contact_history,
         "source_log": source_log,
+        "source_statuses": source_statuses,
         "evidence_gaps": _dedupe_strings(
             mission_gaps
             + budget_gaps

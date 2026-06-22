@@ -54,6 +54,15 @@ FIT_NOISE_TERMS = {
     "technology",
     "technologies",
     "program management",
+    "integrity",
+    "people",
+    "culture",
+    "values",
+    "excellence",
+    "service excellence",
+    "people first",
+    "mission first",
+    "customer first",
 }
 FIT_NARRATIVE_POSITIVE_CUES = (
     "prioritize",
@@ -176,7 +185,85 @@ GENERIC_STRATEGY_TEMPLATE_PREFIXES = (
     "a delivery story that links startup readiness, qa/qc rigor, reporting discipline, and workstream throughput in one narrative",
     "documented readiness for access, credentialing, clearance, nda, or other surfaced handling controls",
     "credible experience supporting scoped package artifacts and customer review coordination",
+    "continuity and transition credibility matter because",
+    "reporting discipline matters because",
+    "quality-control discipline matters because",
+    "access and handling readiness matter because",
+    "package quality and review throughput matter because",
+    "show that the solution is governable in a federal environment",
+    "ready on day one where the work happens",
+    "requirement throughput with documented discipline",
+    "qa/qc that protects mission outcomes",
+    "no-drama access and security compliance",
+    "clean boundary management while still adding value",
+    "treat visible specialized roles as execution-critical rather than side work",
 )
+STRATEGY_ACTION_VERBS = (
+    "prepare",
+    "perform",
+    "support",
+    "deliver",
+    "submit",
+    "develop",
+    "conduct",
+    "execute",
+    "coordinate",
+    "maintain",
+    "review",
+    "assess",
+    "ensure",
+    "provide",
+    "capture",
+    "document",
+    "obtain",
+    "validate",
+    "trace",
+    "plan",
+    "program",
+)
+GENERIC_REQUIREMENT_FRAGMENT_HINTS = (
+    "specific tasks and deliverables",
+    "specific tasks",
+    "deliverables",
+    "general requirements",
+    "performance work statement",
+    "description of services",
+    "contract line item number",
+    "clin description",
+    "price schedule",
+    "base period",
+    "option year",
+    "factor 2",
+    "section m",
+    "section l",
+    "project management in accordance with",
+    "the following in accordance with",
+)
+STRATEGY_CATEGORY_HINTS: dict[str, tuple[str, ...]] = {
+    "transition": ("transition", "phase-in", "phase in", "phase-out", "phase out", "handoff", "mobilization", "successor", "overlap"),
+    "testing_traceability": ("iv&v", "test", "testing", "traceability", "requirements evaluation", "rtm", "verification", "validation", "interface requirements", "test readiness", "jira"),
+    "quality_acceptance": ("quality control", "qa/qc", "quality assurance", "acceptance", "aql", "corrective action", "inspection", "surveillance", "timeliness", "accuracy", "format", "conformed"),
+    "access_security": ("clearance", "badge", "credential", "background", "visitor group", "trm", "ficam", "zero trust", "security control", "controlled unclassified", "privacy"),
+    "reporting_governance": ("status report", "report reviews", "data collection", "dashboard", "metrics", "electronic submission", "pm)", "cor)", "co)", "presentation", "status", "submission"),
+    "staffing_structure": ("fte", "labor category", "staffing", "personnel", "engineer", "architect", "manager", "technician", "specialist", "construction manager"),
+    "pricing_structure": ("clin", "slin", "unit price", "extended price", "rate", "ffp", "fixed price", "time and materials", "t&m", "labor hour", "oasis fee"),
+    "deliverable_review": ("deliverable", "review package", "package", "submission", "matrix", "plan", "report", "recommendations", "approval", "acceptance or rejection"),
+    "technical_execution": ("engineering", "design", "modernization", "sustainment", "restoration", "implementation wave", "technical deliverables", "technical support", "testing support", "response", "restore", "repair"),
+    "evaluation_alignment": ("best value", "technical approach", "past performance", "price realism", "evaluation basis"),
+}
+STRATEGY_CATEGORY_PRIORITY = {
+    "transition": 90,
+    "testing_traceability": 86,
+    "quality_acceptance": 82,
+    "access_security": 80,
+    "technical_execution": 78,
+    "reporting_governance": 76,
+    "deliverable_review": 74,
+    "staffing_structure": 72,
+    "pricing_structure": 70,
+    "evaluation_alignment": 68,
+    "general": 60,
+}
 
 
 def _clean_excerpt(value: object, max_chars: int = 4000) -> str:
@@ -435,7 +522,18 @@ def _profile_keywords(profile: dict[str, Any]) -> list[str]:
     keywords.extend(_string_list(profile.get("core_competencies", [])))
     other_tags = profile.get("other_taxonomy_tags", {}) if isinstance(profile.get("other_taxonomy_tags"), dict) else {}
     keywords.extend(_string_list(other_tags.get("keywords", [])))
-    return _dedupe_strings(keywords)
+    filtered: list[str] = []
+    for keyword in keywords:
+        cleaned = _clean_excerpt(keyword, max_chars=160)
+        tokens = {
+            token
+            for token in _signal_tokens(cleaned)
+            if token not in FIT_NARRATIVE_STOPWORDS and token not in FIT_NOISE_TERMS
+        }
+        if not tokens:
+            continue
+        filtered.append(cleaned)
+    return _dedupe_strings(filtered)
 
 
 def _profile_negative_keywords(profile: dict[str, Any]) -> list[str]:
@@ -1227,6 +1325,67 @@ def _workstream_lines(attachment_workstreams: list[dict[str, Any]]) -> list[str]
     return _dedupe_strings(lines)
 
 
+def _fact_model_rows(
+    solicitation_fact_model: dict[str, Any] | None,
+    key: str,
+    *,
+    max_items: int = 8,
+) -> list[dict[str, str]]:
+    if not isinstance(solicitation_fact_model, dict):
+        return []
+    rows = solicitation_fact_model.get(key, [])
+    if not isinstance(rows, list):
+        return []
+    output: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        output.append(
+            {
+                "text": _clean_excerpt(text, max_chars=260),
+                "evidence_anchor": _clean_excerpt(row.get("evidence_anchor") or text, max_chars=420),
+                "field": str(row.get("field") or "").strip(),
+                "source_kind": str(row.get("source_kind") or "").strip(),
+            }
+        )
+        if len(output) >= max_items:
+            break
+    return output
+
+
+def _fact_model_lines(
+    solicitation_fact_model: dict[str, Any] | None,
+    keys: list[str],
+    *,
+    max_items: int = 10,
+) -> list[str]:
+    lines: list[str] = []
+    for key in keys:
+        lines.extend(_strategy_row_texts(_fact_model_rows(solicitation_fact_model, key, max_items=max_items)))
+    return _dedupe_strings(lines)[:max_items]
+
+
+def _fact_model_anchors(
+    solicitation_fact_model: dict[str, Any] | None,
+    keys: list[str],
+    *,
+    max_items: int = 16,
+) -> list[str]:
+    anchors: list[str] = []
+    for key in keys:
+        anchors.extend(
+            [
+                str(row.get("evidence_anchor") or "").strip()
+                for row in _fact_model_rows(solicitation_fact_model, key, max_items=max_items)
+                if str(row.get("evidence_anchor") or "").strip()
+            ]
+        )
+    return _dedupe_strings(anchors)[:max_items]
+
+
 def _current_package_strategy_anchors(
     solicitation_facts: dict[str, Any],
     attachment_workstreams: list[dict[str, Any]],
@@ -1247,46 +1406,543 @@ def _current_package_strategy_anchors(
     }
 
 
+def _objective_scope_focus(text: str) -> str:
+    cleaned = _clean_excerpt(text, max_chars=220).strip(" .;:-")
+    cleaned = re.sub(
+        r"^(?:provide|perform|maintain|deliver|support|manage|review|inspect|develop|prepare|execute|administer)\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"^(?:the contractor shall|contractor shall)\s+", "", cleaned, flags=re.IGNORECASE)
+    return cleaned[:180].strip(" .;:-")
+
+
+def _workstream_focus(title: str, objective: str) -> str:
+    title_focus = _objective_scope_focus(re.sub(r"^\d+(?:\.\d+)*\s+", "", str(title or "").strip()))
+    objective_focus = _objective_scope_focus(objective or title or "")
+    if title_focus and len(title_focus.split()) >= 2 and title_focus.lower() not in {"scope", "general requirements", "deliverables"}:
+        return title_focus
+    return objective_focus or title_focus
+
+
+def _abstract_workstream_implication_text(title: str, objective: str) -> str:
+    combined = f"{title} {objective}".strip()
+    lower = combined.lower()
+    focus = _workstream_focus(title, objective or combined)
+    if not focus:
+        return ""
+    if any(marker in lower for marker in ("transition", "phase-in", "phase in", "continuity", "successor", "mobilization")):
+        return f"Continuity and transition credibility matter because the scope makes {focus} a day-one execution obligation."
+    if any(marker in lower for marker in ("report", "dashboard", "status", "metric", "presentation", "brief")):
+        return f"Reporting discipline matters because the package ties {focus} to visible status, metrics, or management-review outputs."
+    if any(marker in lower for marker in ("quality", "qa/qc", "aql", "prs", "inspection", "acceptance", "corrective action", "surveillance")):
+        return f"Quality-control discipline matters because the package measures {focus} through acceptance, surveillance, or corrective-action expectations."
+    if any(marker in lower for marker in ("badge", "credential", "clearance", "nda", "fouo", "site access", "escort", "background check")):
+        return f"Access and handling readiness matter because {focus} depends on credentialing, clearance, or controlled-information steps that can delay startup."
+    if any(marker in lower for marker in ("deliverable", "package", "review", "approval", "submission", "dd 1391", "cost estimate", "pws", "soo")):
+        return f"Package quality and review throughput matter because the scope directly requires {focus}, not just advisory support."
+    if any(marker in lower for marker in ("staff", "on-site", "on site", "field", "warehouse", "facility", "site")):
+        return f"Execution credibility where the work happens matters because the scope makes {focus} an operational workstream, not a remote back-office task."
+    return f"The package treats {focus} as real execution work, so the proposal needs proof of how the team will deliver it without rework or schedule drift."
+
+
+def _abstract_fact_implication(text: str) -> str:
+    cleaned = _clean_excerpt(text, max_chars=220).strip()
+    lower = cleaned.lower()
+    if lower.startswith("set-aside:"):
+        value = cleaned.split(":", 1)[-1].strip()
+        return f"Eligibility is a gate because the package points to {value}."
+    if lower.startswith("vehicle:"):
+        value = cleaned.split(":", 1)[-1].strip()
+        return f"Vehicle access is a real constraint because the package routes award through {value}."
+    if lower.startswith("contract type:"):
+        value = cleaned.split(":", 1)[-1].strip()
+        return f"Pricing and scope control matter because the package uses {value} execution."
+    if lower.startswith("evaluation basis:"):
+        value = cleaned.split(":", 1)[-1].strip()
+        return f"The proposal story should map directly to {value} because the source package names it explicitly."
+    if lower.startswith("period of performance:"):
+        value = cleaned.split(":", 1)[-1].strip()
+        return f"Staffing and delivery coverage need to fit the stated performance periods: {value}."
+    if lower.startswith("transition window:"):
+        value = cleaned.split(":", 1)[-1].strip()
+        return f"Transition realism matters because the package signals {value}."
+    if lower.startswith("funds status:"):
+        value = cleaned.split(":", 1)[-1].strip()
+        return f"Award timing still carries risk because the package says {value}"
+    return ""
+
+
+def _looks_like_scope_dump(text: str, anchor: str) -> bool:
+    normalized_text = _normalize_text(text)
+    normalized_anchor = _normalize_text(anchor)
+    if not normalized_text:
+        return False
+    if len(normalized_text) > 260 and normalized_anchor and (
+        normalized_text in normalized_anchor or normalized_anchor.startswith(normalized_text)
+    ):
+        return True
+    return False
+
+
+def _split_requirement_fragments(*values: object) -> list[str]:
+    fragments: list[str] = []
+    for value in values:
+        raw = _clean_excerpt(value, max_chars=2400)
+        if not raw:
+            continue
+        for fragment in re.split(r"[;\n]+|(?<=[.!?])\s+(?=[A-Z0-9])", raw):
+            cleaned = _clean_excerpt(fragment, max_chars=320).strip(" .;:-")
+            if cleaned:
+                fragments.append(cleaned)
+    return _dedupe_strings(fragments)
+
+
+def _starts_with_action_phrase(text: str) -> bool:
+    lowered = _clean_excerpt(text, max_chars=220).strip(" .;:-").lower()
+    if not lowered:
+        return False
+    return any(lowered.startswith(f"{verb} ") or lowered == verb for verb in STRATEGY_ACTION_VERBS)
+
+
+def _repair_requirement_phrase(text: str) -> str:
+    cleaned = _clean_excerpt(text, max_chars=220).strip(" .;:-")
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"^[^:]+\.(?:pdf|docx|doc|txt)\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^page\s+\d+\s+of\s+\d+\s+", "", cleaned, flags=re.IGNORECASE)
+    if ":" in cleaned:
+        label, tail = cleaned.split(":", 1)
+        label_tokens = [token for token in _normalize_text(label).split() if token]
+        tail_cleaned = tail.strip(" .;:-")
+        if len(label_tokens) <= 6 and (
+            _starts_with_action_phrase(tail_cleaned)
+            or "the contractor shall" in tail_cleaned.lower()
+            or "contractor shall" in tail_cleaned.lower()
+        ):
+            cleaned = tail_cleaned
+    cleaned = re.sub(r"^(?:the contractor shall|contractor shall|shall)\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^be able to obtain\s+", "obtain ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^be required to\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^be provided\s+", "provide ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^be submitted\s+", "submit ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^be maintained\s+", "maintain ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^be coordinated\s+", "coordinate ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^be reviewed\s+", "submit work products that are reviewed ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^the contractor\s+", "", cleaned, flags=re.IGNORECASE)
+    if cleaned.lower().startswith("throughout the performance of this contract shall be provided via electronic submission to"):
+        return "provide government-facing deliverables via electronic submission to the PM, COR, and CO throughout contract performance"
+    return _clean_excerpt(cleaned, max_chars=220).strip(" .;:-")
+
+
+def _is_generic_requirement_fragment(fragment: str) -> bool:
+    normalized = _normalize_text(fragment)
+    if not normalized:
+        return True
+    if any(
+        marker in normalized
+        for marker in (
+            "remittance address",
+            "electronic funds transfer",
+            "invoice",
+            "payment by",
+            "authorized nor permitted",
+            "contract or order for continuing software maintenance",
+            "other x upon government acceptance of deliverables",
+        )
+    ):
+        return True
+    if len([token for token in normalized.split() if len(token) >= 3]) < 4:
+        return True
+    if any(normalized.startswith(_normalize_text(prefix)) for prefix in GENERIC_REQUIREMENT_FRAGMENT_HINTS):
+        return True
+    if normalized in {"deliverables", "requirements", "specific tasks", "general requirements"}:
+        return True
+    return False
+
+
+def _strategy_row_category(field: str, text: str) -> str:
+    lowered = f"{field} {text}".lower()
+    if "transition plan" in lowered or ("transition" in lowered and any(marker in lowered for marker in ("days", "coordination", "ets", "handoff"))):
+        return "transition"
+    if any(marker in lowered for marker in ("ehrm-io integrated testing", "test and evaluation support", "requirements traceability matrix", "traceability matrix (rtm)", "iv&v requirements evaluation")):
+        return "testing_traceability"
+    if any(marker in lowered for marker in ("background", "clearance", "visitor group", "badge", "credential", "threat to the health, safety, security")):
+        return "access_security"
+    if any(marker in lowered for marker in ("engineering technician services", "engineers / architects", "facilities, sustainment, restoration and modernization", "fsrm")) and any(
+        marker in lowered for marker in ("develop", "plan", "program", "execute", "support")
+    ):
+        return "technical_execution"
+    scores: dict[str, int] = {}
+    for category, markers in STRATEGY_CATEGORY_HINTS.items():
+        scores[category] = sum(1 for marker in markers if marker in lowered)
+    if field == "acceptance":
+        scores["quality_acceptance"] += 3
+    if field == "access":
+        scores["access_security"] += 3
+    if field == "staffing":
+        scores["staffing_structure"] += 3
+    if field == "pricing":
+        scores["pricing_structure"] += 3
+    if field == "evaluation_basis":
+        scores["evaluation_alignment"] += 3
+    if field == "workstream":
+        scores["technical_execution"] += 1
+        scores["deliverable_review"] += 1
+    if field == "deliverable":
+        scores["deliverable_review"] += 2
+    ranked = sorted(
+        ((score, category) for category, score in scores.items() if score > 0),
+        key=lambda item: (-item[0], -STRATEGY_CATEGORY_PRIORITY.get(item[1], 0), item[1]),
+    )
+    return ranked[0][1] if ranked else "general"
+
+
+def _strategy_fragment_score(fragment: str, category: str) -> int:
+    lowered = fragment.lower()
+    score = len([token for token in _signal_tokens(fragment) if len(token) >= 3])
+    if _starts_with_action_phrase(_repair_requirement_phrase(fragment)) or "the contractor shall" in lowered:
+        score += 6
+    if re.search(r"\b\d{1,3}\b", fragment) or re.search(r"\b[A-Z]{2,}(?:-[A-Z0-9]+)*\b", fragment):
+        score += 3
+    score += sum(2 for marker in STRATEGY_CATEGORY_HINTS.get(category, ()) if marker in lowered)
+    if any(marker in lowered for marker in ("pm)", "cor)", "co)", "rtm", "jira", "qcp", "fsrm", "iv&v")):
+        score += 3
+    if _is_generic_requirement_fragment(fragment):
+        score -= 8
+    if len(fragment.split()) > 30:
+        score -= 2
+    return score
+
+
+def _best_strategy_focus(text: str, anchor: str, field: str) -> tuple[str, str, int]:
+    category = _strategy_row_category(field, f"{text} {anchor}")
+    fragments = _split_requirement_fragments(anchor, text)
+    scored = sorted(
+        (
+            (_strategy_fragment_score(fragment, category), fragment)
+            for fragment in fragments
+            if not _is_generic_requirement_fragment(fragment)
+        ),
+        key=lambda item: (-item[0], len(item[1])),
+    )
+    if not scored:
+        fallback = _repair_requirement_phrase(text or anchor)
+        return category, fallback, _strategy_fragment_score(fallback, category) if fallback else 0
+    focus = _repair_requirement_phrase(scored[0][1])
+    secondary = ""
+    if category == "transition":
+        for score, fragment in scored[1:]:
+            cleaned = _repair_requirement_phrase(fragment)
+            lowered = cleaned.lower()
+            if score < 4:
+                continue
+            if any(marker in lowered for marker in ("meeting", "coordination", "handoff", "support", "days", "day")) and cleaned.lower() not in focus.lower():
+                secondary = cleaned
+                break
+    if category in {"reporting_governance", "testing_traceability", "quality_acceptance", "deliverable_review", "technical_execution"} and not secondary:
+        preferred_terms = ("response", "outage", "returned", "turnaround", "cadence")
+        for score, fragment in scored[1:]:
+            cleaned = _repair_requirement_phrase(fragment)
+            lowered = cleaned.lower()
+            if score < 3:
+                continue
+            if any(term in lowered for term in preferred_terms) and cleaned.lower() not in focus.lower():
+                secondary = cleaned
+                break
+    if category in {"reporting_governance", "testing_traceability", "quality_acceptance", "deliverable_review", "technical_execution"} and not secondary:
+        for score, fragment in scored[1:]:
+            cleaned = _repair_requirement_phrase(fragment)
+            lowered = cleaned.lower()
+            if score < 4:
+                continue
+            if any(
+                marker in lowered
+                for marker in (
+                    "report",
+                    "submission",
+                    "pm)",
+                    "cor)",
+                    "co)",
+                    "traceability",
+                    "requirements",
+                    "test",
+                    "cadence",
+                    "turnaround",
+                    "returned",
+                    "corrective-action",
+                    "response",
+                    "outage",
+                )
+            ) and cleaned.lower() not in focus.lower():
+                secondary = cleaned
+                break
+    if secondary:
+        focus = _clean_excerpt(f"{focus}; {secondary}", max_chars=220).strip(" .;:-")
+    return category, focus, scored[0][0]
+
+
+def _render_hot_button_text(category: str, focus: str) -> str:
+    if not focus:
+        return ""
+    if category == "transition":
+        return f"The package requires the team to {focus}, so transition sequencing and early coordination will be a real evaluator concern."
+    if category == "testing_traceability":
+        return f"The package requires the team to {focus}, so traceability, test evidence, and defect discipline are likely to matter more than generic QA claims."
+    if category == "quality_acceptance":
+        if "returned" in focus.lower() and "package" in focus.lower():
+            return f"The package ties returned packages and turnaround pressure to {focus}, so QA/QC accuracy, acceptance readiness, and rework avoidance are likely to be visible in evaluation."
+        return f"The package requires the team to {focus}, so QA/QC accuracy, acceptance readiness, and rework avoidance are likely to be visible in evaluation."
+    if category == "access_security":
+        return f"The package requires the team to {focus}, so access and security readiness become day-one gates rather than back-office tasks."
+    if category == "reporting_governance":
+        return f"The package requires the team to {focus}, so reporting cadence, government review visibility, and issue escalation will need to look controlled."
+    if category == "staffing_structure":
+        return f"The solicitation exposes {focus}, so the buyer is likely to scrutinize coverage of named roles and option labor for realism."
+    if category == "pricing_structure":
+        return f"The solicitation exposes {focus}, so priced scope coverage and CLIN realism will be scrutinized."
+    if category == "technical_execution":
+        if "outage" in focus.lower():
+            return f"The package puts outage response on the critical path through {focus}, so the buyer is likely to care whether the team has done this specific technical work before."
+        return f"The package requires the team to {focus}, so the buyer is likely to care whether the team has done this specific technical work before."
+    if category == "deliverable_review":
+        if "returned" in focus.lower() and "package" in focus.lower():
+            return f"The package ties returned packages and turnaround pressure to {focus}, so review quality, routing discipline, and rework control will matter."
+        return f"The package requires the team to {focus}, so deliverable ownership, review routing, and approval quality will matter, not just labor capacity."
+    if category == "evaluation_alignment":
+        return f"The package makes {focus} explicit, so proposal structure will need to map tightly to the named factors."
+    return f"The package requires the team to {focus}, so the proposal has to look operational rather than generic."
+
+
+def _render_win_theme_text(category: str, focus: str) -> str:
+    if not focus:
+        return ""
+    if category == "transition":
+        return f"Show a transition approach that can {focus} without disrupting the operating rhythm already visible in the package."
+    if category == "testing_traceability":
+        return f"Lead with evidence that the team can {focus} and keep traceability from approved requirements through test artifacts and issue closure."
+    if category == "quality_acceptance":
+        if "returned" in focus.lower() and "package" in focus.lower():
+            return f"Show the QA/QC control loop that reduces returned packages while the team executes {focus} and protects turnaround commitments."
+        return f"Show the QA/QC control loop for {focus}, including acceptance checks, defect escalation, and corrective-action closure."
+    if category == "access_security":
+        return f"Prove startup readiness for {focus}, including who clears the security and access gates before execution starts."
+    if category == "reporting_governance":
+        return f"Show who owns {focus}, what reporting cadence the government sees, and how issues are surfaced before they become surprises."
+    if category == "staffing_structure":
+        return f"Tie the staffing plan directly to {focus} so the execution story looks fully covered rather than generically staffed."
+    if category == "pricing_structure":
+        return f"Make the pricing posture look executable for {focus}, including CLIN coverage, option logic, and the visible labor mix."
+    if category == "technical_execution":
+        if "outage" in focus.lower():
+            return f"Lead with an outage response plan showing how the team will {focus} without slowing the technical workstream."
+        return f"Lead with proof that the team can {focus} and deliver the technical workstream without slowing program decisions."
+    if category == "deliverable_review":
+        if "returned" in focus.lower() and "package" in focus.lower():
+            return f"Show the review workflow that reduces returned packages while the team executes {focus} and protects turnaround commitments."
+        return f"Show how the team will {focus} with review-ready packages, clear approval routing, and minimal rework."
+    if category == "evaluation_alignment":
+        return f"Map the proposal directly to {focus} instead of relying on broad corporate capability language."
+    return f"Show how the team will {focus} with visible ownership, schedule control, and low rework."
+
+
+def _render_differentiator_text(category: str, focus: str) -> str:
+    if not focus:
+        return ""
+    if category == "transition":
+        return f"A transition artifact that proves the team can {focus}, with named milestones and customer coordination points."
+    if category == "testing_traceability":
+        return f"A sample RTM, requirements-evaluation, or test-evidence package that proves the team can {focus}."
+    if category == "quality_acceptance":
+        return f"A QCP or acceptance-control loop that proves the team can {focus} without avoidable rework."
+    if category == "access_security":
+        return f"A startup-readiness package that proves the team can {focus} before controlled work begins."
+    if category == "reporting_governance":
+        return f"A government-facing reporting matrix that proves the team can {focus} with clear owner and review gates."
+    if category == "staffing_structure":
+        return f"A named labor-mix matrix that proves the team can cover {focus} with the proposed roles and option structure."
+    if category == "pricing_structure":
+        return f"CLIN-level pricing traceability that proves the team can cover {focus} without buying in."
+    if category == "technical_execution":
+        return f"Past performance or sample artifacts that prove the team can {focus} in an equivalent technical environment."
+    if category == "deliverable_review":
+        return f"A deliverable-routing workflow that proves the team can {focus} with controlled review and approval."
+    if category == "evaluation_alignment":
+        return f"A proposal crosswalk that proves the team can answer {focus} in the structure the evaluators asked for."
+    return f"Proof that the team can {focus} in the execution setting surfaced by the package."
+
+
+def _render_proof_requirement_text(category: str, focus: str) -> str:
+    if not focus:
+        return ""
+    if category == "transition":
+        return f"Bring a first-30-day transition plan showing how the team will {focus}."
+    if category == "testing_traceability":
+        return f"Bring one sample traceability or test artifact showing how the team will {focus}."
+    if category == "quality_acceptance":
+        return f"Bring one QA/QC artifact showing how the team will {focus} and close findings."
+    if category == "access_security":
+        return f"Bring one startup-readiness artifact showing how the team will {focus} before execution starts."
+    if category == "reporting_governance":
+        return f"Bring one reporting or submission matrix showing how the team will {focus}."
+    if category == "staffing_structure":
+        return f"Bring one staffing matrix showing how the team will cover {focus}."
+    if category == "pricing_structure":
+        return f"Bring one CLIN or pricing trace showing how the team will price {focus}."
+    if category == "technical_execution":
+        return f"Bring one sample technical artifact showing how the team will {focus}."
+    if category == "deliverable_review":
+        return f"Bring one deliverable-routing artifact showing how the team will {focus}."
+    if category == "evaluation_alignment":
+        return f"Bring one evaluator crosswalk showing how the proposal will answer {focus}."
+    return f"Bring one current-package artifact showing how the team will {focus}."
+
+
+def _strategy_candidate_rows(
+    solicitation_fact_model: dict[str, Any] | None,
+    attachment_workstreams: list[dict[str, Any]],
+    staffing_pricing_signals: dict[str, Any],
+    solicitation_facts: dict[str, Any],
+) -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    for key in (
+        "workstream_fact_rows",
+        "deliverable_fact_rows",
+        "acceptance_fact_rows",
+        "access_fact_rows",
+        "evaluation_fact_rows",
+        "pricing_fact_rows",
+        "staffing_fact_rows",
+    ):
+        candidates.extend(_fact_model_rows(solicitation_fact_model, key, max_items=6))
+    if not candidates:
+        for item in attachment_workstreams or []:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            objective = str(item.get("objective") or "").strip()
+            anchor = _string_list(item.get("evidence_snippets"), max_items=1)
+            if not objective or not anchor:
+                continue
+            candidates.append(
+                {
+                    "field": "workstream",
+                    "text": _clean_excerpt(f"{title}; {objective}" if title else objective, max_chars=260),
+                    "evidence_anchor": _clean_excerpt(f"{title}; {anchor[0]}" if title else anchor[0], max_chars=420),
+                    "source_kind": "attachment_workstream",
+                }
+            )
+    quoted_facts = _string_list(solicitation_facts.get("quoted_facts", []), max_items=8)
+    for fact in quoted_facts:
+        candidates.append(
+            {
+                "field": "contract_fact",
+                "text": _clean_excerpt(fact, max_chars=220),
+                "evidence_anchor": _clean_excerpt(fact, max_chars=220),
+                "source_kind": "quoted_fact",
+            }
+        )
+    for note in _string_list(staffing_pricing_signals.get("evaluation_notes", []), max_items=2):
+        candidates.append(
+            {
+                "field": "evaluation_basis",
+                "text": _clean_excerpt(note, max_chars=220),
+                "evidence_anchor": _clean_excerpt(note, max_chars=220),
+                "source_kind": "evaluation_note",
+            }
+        )
+    return candidates
+
+
+def _render_specific_strategy_rows(
+    candidate_rows: list[dict[str, str]],
+    *,
+    mode: str,
+    max_items: int,
+) -> list[dict[str, str]]:
+    rendered: list[dict[str, str]] = []
+    seen_text: set[str] = set()
+    seen_categories: dict[str, int] = {}
+    scored_rows: list[tuple[int, dict[str, str]]] = []
+    for row in candidate_rows:
+        if not isinstance(row, dict):
+            continue
+        category, focus, score = _best_strategy_focus(
+            str(row.get("text") or ""),
+            str(row.get("evidence_anchor") or ""),
+            str(row.get("field") or ""),
+        )
+        if not focus:
+            continue
+        if mode == "hot_button":
+            text = _render_hot_button_text(category, focus)
+        elif mode == "win_theme":
+            text = _render_win_theme_text(category, focus)
+        elif mode == "differentiator":
+            text = _render_differentiator_text(category, focus)
+        else:
+            text = _render_proof_requirement_text(category, focus)
+        cleaned_text = _clean_excerpt(text, max_chars=320).strip()
+        if not cleaned_text or any(cleaned_text.lower().startswith(prefix) for prefix in GENERIC_STRATEGY_TEMPLATE_PREFIXES):
+            continue
+        scored_rows.append(
+            (
+                score + STRATEGY_CATEGORY_PRIORITY.get(category, STRATEGY_CATEGORY_PRIORITY["general"]),
+                {
+                    "text": cleaned_text,
+                    "evidence_anchor": _clean_excerpt(row.get("evidence_anchor") or focus, max_chars=420),
+                    "category": category,
+                },
+            )
+        )
+    for _, row in sorted(scored_rows, key=lambda item: (-item[0], len(str(item[1].get("text") or "")))):
+        category = str(row.get("category") or "general")
+        category_limit = 2 if category in {"transition", "testing_traceability", "quality_acceptance"} else 1
+        if seen_categories.get(category, 0) >= category_limit:
+            continue
+        normalized = _normalize_text(row.get("text") or "")
+        if not normalized or normalized in seen_text:
+            continue
+        seen_text.add(normalized)
+        seen_categories[category] = seen_categories.get(category, 0) + 1
+        rendered.append({"text": str(row.get("text") or ""), "evidence_anchor": str(row.get("evidence_anchor") or "")})
+        if len(rendered) >= max_items:
+            break
+    return rendered
+
+
 def _workstream_capture_implication_rows(
     attachment_workstreams: list[dict[str, Any]],
     solicitation_facts: dict[str, Any],
     staffing_pricing_signals: dict[str, Any],
     attachment_anomalies: list[dict[str, Any]],
+    solicitation_fact_model: dict[str, Any] | None = None,
     max_items: int = 5,
 ) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for item in attachment_workstreams or []:
-        if not isinstance(item, dict):
-            continue
-        title = str(item.get("title") or "").strip()
-        objective = _clean_excerpt(item.get("objective") or "", max_chars=260).strip()
-        evidence_anchor = _string_list(item.get("evidence_snippets"), max_items=1)
-        if not objective or not evidence_anchor:
-            continue
-        if title and objective.lower().startswith(title.lower()):
-            text = objective
-        elif title:
-            text = f"{title}: {objective}"
-        else:
-            text = objective
-        key = _normalize_text(text)
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        rows.append({"text": text, "evidence_anchor": evidence_anchor[0]})
-        if len(rows) >= max_items:
-            break
+    rows = _render_specific_strategy_rows(
+        _strategy_candidate_rows(
+            solicitation_fact_model,
+            attachment_workstreams,
+            staffing_pricing_signals,
+            solicitation_facts,
+        ),
+        mode="hot_button",
+        max_items=max_items,
+    )
+    seen: set[str] = {_normalize_text(str(item.get("text") or "")) for item in rows if isinstance(item, dict)}
     if len(rows) < max_items:
         for fact in _solicitation_fact_lines(solicitation_facts):
-            if any(marker in fact.lower() for marker in ("set-aside", "vehicle", "contract type", "evaluation basis", "period of performance", "funds status")):
-                key = _normalize_text(fact)
-                if not key or key in seen:
-                    continue
-                seen.add(key)
-                rows.append({"text": fact, "evidence_anchor": fact})
-                if len(rows) >= max_items:
-                    break
+            abstracted = _abstract_fact_implication(fact)
+            if not abstracted:
+                continue
+            key = _normalize_text(abstracted)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            rows.append({"text": abstracted, "evidence_anchor": fact})
+            if len(rows) >= max_items:
+                break
     if len(rows) < max_items:
         for note in _string_list(staffing_pricing_signals.get("evaluation_notes"), max_items=3):
             key = _normalize_text(note)
@@ -1416,6 +2072,7 @@ def _prune_generic_strategy_rows(rows: list[dict[str, str]]) -> list[dict[str, s
         for row in rows
         if isinstance(row, dict)
         and not any(str(row.get("text") or "").strip().lower().startswith(prefix) for prefix in GENERIC_STRATEGY_TEMPLATE_PREFIXES)
+        and not _looks_like_scope_dump(str(row.get("text") or "").strip(), str(row.get("evidence_anchor") or "").strip())
     ]
     return specific_rows or rows
 
@@ -1464,12 +2121,12 @@ def _strategic_capture_reasoning(
     ]
     security_visible = any(
         marker in workstream_text or any(marker in note.lower() for note in staffing_notes)
-        for marker in ("af form 1199", "leads", "naci", "cac", "clearance", "nda", "fouo")
+        for marker in ("access", "badge", "credential", "clearance", "nda", "controlled", "background")
     )
-    acquisition_support_visible = any(marker in workstream_text for marker in ("dd 1391", "acquisition-package", "sow", "pws", "soo", "cost estimate"))
-    reporting_visible = any(marker in workstream_text for marker in ("psr", "project status report", "qa/qc", "presentation materials"))
-    furnishings_visible = any(marker in workstream_text for marker in ("furnishings", "dorm", "warehouse"))
-    on_site_visible = any(marker in workstream_text for marker in ("on-site", "on site", "site access", "delivery continuity", "field-facing"))
+    acquisition_support_visible = any(marker in workstream_text for marker in ("deliverable", "package", "review", "approval", "submission", "cost estimate", "artifact"))
+    reporting_visible = any(marker in workstream_text for marker in ("psr", "status report", "qa/qc", "quality", "metric", "dashboard", "presentation"))
+    specialized_role_visible = len(_string_list(solicitation_facts.get("staffing_roles", []), max_items=8)) >= 2
+    on_site_visible = any(marker in workstream_text for marker in ("on-site", "on site", "site", "facility", "field", "delivery continuity", "mobilization"))
 
     central_pain_point = (
         "The buyer is not just buying labor. It is buying a delivery team that can become operational quickly where the work happens, keep requirement workstreams moving, maintain clean documentation and QA/QC discipline, and avoid mission friction from staffing, access, or transition delays."
@@ -1494,8 +2151,8 @@ def _strategic_capture_reasoning(
             else []
         ),
         *(
-            ["A specialized support function appears in the staffing mix and may be underweighted by otherwise-credible bidders; that creates a practical differentiator if treated as part of mission continuity rather than an afterthought."]
-            if furnishings_visible
+            ["Multiple visible roles or specialized staffing signals suggest bidders will be judged on staffing realism, not just labor-category coverage."]
+            if specialized_role_visible
             else []
         ),
     ]
@@ -1522,8 +2179,8 @@ def _strategic_capture_reasoning(
                 else []
             ),
             *(
-                ["A specialized support function is part of the mission load and can become a credibility gap if treated like generic admin support."]
-                if furnishings_visible
+                ["The visible staffing structure can become a credibility gap if it is handled as generic labor coverage instead of requirement-specific execution."]
+                if specialized_role_visible
                 else []
             ),
         ]
@@ -1556,8 +2213,8 @@ def _strategic_capture_reasoning(
                 else []
             ),
             *(
-                ["Treat specialized support functions as part of mission continuity, not side work."]
-                if furnishings_visible
+                ["Treat visible specialized roles as execution-critical rather than side work."]
+                if specialized_role_visible
                 else []
             ),
         ]
@@ -1575,18 +2232,18 @@ def _strategic_capture_reasoning(
                 else []
             ),
             *(
-                ["A one-page OCI and sensitive-information protocol that states what the team will and will not do when supporting acquisition-package and review activities."]
+                ["A one-page OCI and sensitive-information protocol that states what the team will and will not do when supporting deliverable, package, or review activities."]
                 if acquisition_support_visible
                 else []
             ),
             *(
-                ["A sample monthly PSR and QA/QC control loop tailored to the task hierarchy, issues, benchmarks, and corrective actions visible in the PWS."]
+                ["A sample reporting and QA/QC control loop tailored to the visible task hierarchy, review cadence, and corrective-action expectations."]
                 if reporting_visible
                 else []
             ),
             *(
-                ["A role-specific continuity playbook so any specialized support function does not look like an afterthought."]
-                if furnishings_visible
+                ["A role-specific continuity playbook so visible specialized roles do not look like afterthoughts."]
+                if specialized_role_visible
                 else []
             ),
             *(
@@ -1620,7 +2277,7 @@ def _strategic_capture_reasoning(
                 else []
             ),
             *(
-                ["Optional engineer CLINs should be priced like real surge capacity, not as a recovery mechanism for an underbid base."]
+                ["Visible optional CLINs or surge roles should be priced like real delivery capacity, not as recovery for an underbid base."]
                 if "option year" in str(solicitation_facts.get("period_of_performance") or "").lower() or _string_list(solicitation_facts.get("staffing_roles", []), max_items=8)
                 else []
             ),
@@ -1911,6 +2568,7 @@ def _competitive_analysis(
     workstream_tokens = _signal_tokens(" ".join(_workstream_lines(attachment_workstreams)))
     vehicle_text = str(solicitation_facts.get("contract_vehicle") or "").strip()
     set_aside_text = str(solicitation_facts.get("set_aside") or "").strip()
+    confidence_rank = {"high": 3, "medium": 2, "low": 1}
 
     for candidate in evidence_model_competitor_candidates(normalized_evidence, max_items=8):
         if not isinstance(candidate, dict):
@@ -1941,6 +2599,7 @@ def _competitive_analysis(
                     else "Low as a likely prime competitor."
                 ),
                 "evidence": " | ".join(evidence) or "Cross-source normalized competitive signal.",
+                "confidence": str(candidate.get("confidence") or "medium").strip().title(),
             }
         )
 
@@ -1978,6 +2637,7 @@ def _competitive_analysis(
             strengths.append(f"Validate whether this firm already holds or accesses {vehicle_text}.")
         if set_aside_text and "small business" in set_aside_text.lower():
             strengths.append(f"Socioeconomic posture may matter because the package signals {set_aside_text}.")
+        confidence = "High" if incumbent_name and _normalize_text(name) == _normalize_text(incumbent_name) else "Medium" if agency_match or overlap >= 2 else "Low"
         description = _clean_excerpt(award.get("Description", ""), max_chars=180)
         rows.append(
             {
@@ -1989,10 +2649,18 @@ def _competitive_analysis(
                 "likely_strategy": f"Likely to emphasize {'continuity and agency familiarity' if agency_match else 'adjacent domain credibility and relevant scale'}.",
                 "partner_relevance": "Low as a likely prime competitor unless the firm is clearly positioned as a subcontractor on this procurement.",
                 "evidence": description or "Public award description not returned.",
+                "confidence": confidence,
             }
         )
         if len(rows) >= 8:
             break
+    rows.sort(
+        key=lambda item: (
+            -confidence_rank.get(str(item.get("confidence") or "").strip().lower(), 0),
+            0 if "incumbent" in str(item.get("role") or "").lower() else 1,
+            str(item.get("name") or ""),
+        )
+    )
     return rows
 
 
@@ -2659,6 +3327,7 @@ def _win_strategy(
     staffing_pricing_signals: dict[str, Any],
     attachment_anomalies: list[dict[str, Any]],
     strategic_reasoning: dict[str, Any],
+    solicitation_fact_model: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     workstream_lines = _workstream_lines(attachment_workstreams)
     staffing_notes = _string_list(staffing_pricing_signals.get("staffing_notes", []), max_items=6)
@@ -2666,16 +3335,61 @@ def _win_strategy(
     evaluation_notes = _string_list(staffing_pricing_signals.get("evaluation_notes", []), max_items=4)
     staffing_roles = _string_list(solicitation_facts.get("staffing_roles", []), max_items=8)
     attachment_text = " ".join(workstream_lines + staffing_notes + pricing_notes + evaluation_notes).lower()
+    solicitation_fact_model = solicitation_fact_model if isinstance(solicitation_fact_model, dict) else {}
     strategy_anchors = _current_package_strategy_anchors(solicitation_facts, attachment_workstreams)
-    section_anchors = strategy_anchors.get("section_anchors", [])
-    fact_anchors = strategy_anchors.get("fact_anchors", [])
-    current_package_anchors = strategy_anchors.get("all_anchors", [])
+    section_anchors = _dedupe_strings(
+        strategy_anchors.get("section_anchors", [])
+        + _fact_model_anchors(
+            solicitation_fact_model,
+            ["workstream_fact_rows", "deliverable_fact_rows", "acceptance_fact_rows", "pricing_fact_rows"],
+            max_items=14,
+        )
+    )
+    fact_anchors = _dedupe_strings(
+        strategy_anchors.get("fact_anchors", [])
+        + _fact_model_anchors(
+            solicitation_fact_model,
+            ["contract_fact_rows", "evaluation_fact_rows", "access_fact_rows", "staffing_fact_rows"],
+            max_items=14,
+        )
+    )
+    current_package_anchors = _dedupe_strings(strategy_anchors.get("all_anchors", []) + section_anchors + fact_anchors)
     workstream_capture_implication_rows = _workstream_capture_implication_rows(
         attachment_workstreams,
         solicitation_facts,
         staffing_pricing_signals,
         attachment_anomalies,
+        solicitation_fact_model=solicitation_fact_model,
         max_items=5,
+    )
+    attachment_native_ready = bool(solicitation_fact_model.get("package_strength", {}).get("attachment_native_ready")) or (
+        bool(section_anchors) and len(section_anchors) >= 2 and (len(workstream_lines) >= 2 or len(_fact_model_lines(solicitation_fact_model, ["deliverable_fact_rows"], max_items=3)) >= 1)
+    )
+    specific_strategy_candidates = _strategy_candidate_rows(
+        solicitation_fact_model,
+        attachment_workstreams,
+        staffing_pricing_signals,
+        solicitation_facts,
+    )
+    specific_hot_button_rows = _render_specific_strategy_rows(
+        specific_strategy_candidates,
+        mode="hot_button",
+        max_items=4 if attachment_native_ready else 5,
+    )
+    specific_win_theme_rows = _render_specific_strategy_rows(
+        specific_strategy_candidates,
+        mode="win_theme",
+        max_items=3 if attachment_native_ready else 5,
+    )
+    specific_differentiator_rows = _render_specific_strategy_rows(
+        specific_strategy_candidates,
+        mode="differentiator",
+        max_items=4 if attachment_native_ready else 5,
+    )
+    specific_proof_requirement_rows = _render_specific_strategy_rows(
+        specific_strategy_candidates,
+        mode="proof",
+        max_items=4 if attachment_native_ready else 5,
     )
     proof_artifact_recommendations = _proof_artifact_recommendations(
         solicitation_facts,
@@ -2684,7 +3398,6 @@ def _win_strategy(
         attachment_anomalies,
         strategic_reasoning,
     )
-    attachment_native_ready = bool(section_anchors) and len(section_anchors) >= 2 and len(workstream_lines) >= 3
     strong_requirement_evidence = (
         len(section_anchors) >= 2
         or (len(section_anchors) >= 1 and len(fact_anchors) >= 1)
@@ -2695,19 +3408,24 @@ def _win_strategy(
     specific_pain_points = _string_list(requirement_specific.get("pain_points", []), max_items=8)
     specific_win_themes = _string_list(requirement_specific.get("win_themes", []), max_items=8)
     specific_differentiators = _string_list(requirement_specific.get("differentiators", []), max_items=8)
-    strong_requirement_detail = len(workstream_lines) >= 4
-    enough_specific_hot_buttons = len(specific_hot_buttons) >= 5 or (strong_requirement_detail and len(specific_hot_buttons) >= 2)
-    enough_specific_win_themes = len(specific_win_themes) >= 5 or (strong_requirement_detail and len(specific_win_themes) >= 2)
-    enough_specific_differentiators = len(specific_differentiators) >= 5 or (strong_requirement_detail and len(specific_differentiators) >= 2)
+    evidence_backed_discriminators = _dedupe_strings(
+        capability_fit.get("capability_hits", [])[:4]
+        + capability_fit.get("past_performance_hits", [])[:4]
+    )[:4]
+    strong_requirement_detail = len(workstream_lines) >= 4 or len(_fact_model_lines(solicitation_fact_model, ["deliverable_fact_rows", "pricing_fact_rows", "acceptance_fact_rows"], max_items=6)) >= 2
+    enough_specific_hot_buttons = len(specific_hot_buttons) >= 3 or (attachment_native_ready and len(workstream_capture_implication_rows) >= 1) or (strong_requirement_detail and len(specific_hot_buttons) >= 1)
+    enough_specific_win_themes = len(specific_win_themes) >= 3 or (attachment_native_ready and len(workstream_capture_implication_rows) >= 1) or (strong_requirement_detail and len(specific_win_themes) >= 1)
+    enough_specific_differentiators = len(specific_differentiators) >= 3 or (attachment_native_ready and (len(evidence_backed_discriminators) + len(specific_differentiators)) >= 1) or (strong_requirement_detail and len(specific_differentiators) >= 1)
     main_win_theme_candidates = _dedupe_strings(
-        _strategy_row_texts(workstream_capture_implication_rows)
+        _strategy_row_texts(specific_win_theme_rows)
+        + _strategy_row_texts(workstream_capture_implication_rows)
         + specific_win_themes
         + _string_list(strategic_reasoning.get("reasoned_win_themes", []), max_items=6)
         + ([] if enough_specific_win_themes else customer_priorities.get("evidence_backed_priorities", [])[:2])
     )
-    security_visible = any(
+    security_visible = bool(_fact_model_lines(solicitation_fact_model, ["access_fact_rows"], max_items=2)) or any(
         marker in attachment_text
-        for marker in ("af form 1199", "leads", "naci", "cac", "clearance", "fouo", "nda")
+        for marker in ("access", "badge", "credential", "clearance", "controlled", "nda", "background")
     )
     anomaly_signals = [
         str(item.get("signal") or "").strip()
@@ -2715,7 +3433,8 @@ def _win_strategy(
         if isinstance(item, dict) and str(item.get("signal") or "").strip()
     ]
     hot_buttons = _dedupe_strings(
-        _strategy_row_texts(workstream_capture_implication_rows[:2])
+        _strategy_row_texts(specific_hot_button_rows)
+        + _strategy_row_texts(workstream_capture_implication_rows[:2])
         + specific_hot_buttons
         + ([] if enough_specific_hot_buttons else customer_priorities.get("evidence_backed_priorities", [])[:3])
         + ([] if enough_specific_hot_buttons else customer_priorities.get("likely_priorities", [])[:2])
@@ -2723,31 +3442,28 @@ def _win_strategy(
         + ([] if enough_specific_hot_buttons else specific_pain_points[:2])
         + (
             ["The customer needs a credible staffing plan for the visible labor mix and execution setting."]
-            if staffing_roles and not enough_specific_hot_buttons
+            if staffing_roles and not enough_specific_hot_buttons and not attachment_native_ready
             else []
         )
         + (
-            ["Monthly PSR reporting and management visibility matter because the PWS calls for task-hierarchy status reporting and presentation materials."]
-            if ("project reporting and qa/qc control" in attachment_text or "project status report" in attachment_text) and not enough_specific_hot_buttons
+            ["Visible reporting, QA/QC, or review cadence matters because the package ties execution to recurring management visibility."]
+            if ("project reporting and qa/qc control" in attachment_text or "project status report" in attachment_text or "quality" in attachment_text or "status" in attachment_text) and not enough_specific_hot_buttons and not attachment_native_ready
             else []
         )
         + (
             ["Access, credentialing, clearance, or information-handling readiness matters because those control steps can delay day-one execution."]
-            if security_visible and not enough_specific_hot_buttons
+            if security_visible and not enough_specific_hot_buttons and not attachment_native_ready
             else []
         )
     )
-    evidence_backed_discriminators = _dedupe_strings(
-        capability_fit.get("capability_hits", [])[:4]
-        + capability_fit.get("past_performance_hits", [])[:4]
-    )[:4]
     policy_story_ready = bool(policy_signals and evidence_backed_discriminators)
     win_themes = _dedupe_strings(
         [
+            *_strategy_row_texts(specific_win_theme_rows),
             *specific_win_themes,
             *(
                 []
-                if enough_specific_win_themes
+                if enough_specific_win_themes or attachment_native_ready
                 else [
                     "Show how the team will execute the primary requirement workstreams from day one, not just provide a labor category map.",
                     "Tie past performance to the visible workstreams surfaced in the attachments: execution support, deliverable development, reporting cadence, and quality discipline.",
@@ -2755,17 +3471,17 @@ def _win_strategy(
             ),
             *(
                 ["Present a low-disruption transition story that directly answers continuity concerns."]
-                if any("continuity" in item.lower() or "transition" in item.lower() for item in hot_buttons) and not enough_specific_win_themes
+                if any("continuity" in item.lower() or "transition" in item.lower() for item in hot_buttons) and not enough_specific_win_themes and not attachment_native_ready
                 else []
             ),
             *(
                 ["Prove fixed-price discipline with a fully burdened on-site labor mix, realistic QA/QC effort, and disciplined reporting controls."]
-                if contract_type == "Firm Fixed Price" and not enough_specific_win_themes
+                if contract_type == "Firm Fixed Price" and not enough_specific_win_themes and not attachment_native_ready
                 else []
             ),
             *(
-                ["Show how DD 1391, SOW/PWS, programming-document, and cost-estimate support will move projects through the acquisition pipeline without rework."]
-                if ("dd 1391" in attachment_text or "acquisition-package" in attachment_text) and not enough_specific_win_themes
+                ["Show how scoped artifacts, deliverables, or review packages will move through the customer's approval pipeline without rework."]
+                if (_fact_model_lines(solicitation_fact_model, ["deliverable_fact_rows"], max_items=2) or "package" in attachment_text or "deliverable" in attachment_text) and not enough_specific_win_themes and not attachment_native_ready
                 else []
             ),
             *([] if enough_specific_win_themes else _string_list(strategic_reasoning.get("reasoned_win_themes", []), max_items=6)),
@@ -2773,21 +3489,26 @@ def _win_strategy(
     )
     discriminators = _dedupe_strings(
         [
-            *([f"Relevant proof point: {item}" for item in evidence_backed_discriminators]),
+            *_strategy_row_texts(specific_differentiator_rows),
+            *(
+                []
+                if specific_differentiator_rows and attachment_native_ready
+                else [f"Relevant proof point: {item}" for item in evidence_backed_discriminators]
+            ),
             *specific_differentiators,
             *(
                 ["A delivery story that links startup readiness, QA/QC rigor, reporting discipline, and workstream throughput in one narrative."]
-                if workstream_lines and not enough_specific_differentiators
+                if workstream_lines and not enough_specific_differentiators and not attachment_native_ready
                 else []
             ),
             *(
                 ["Documented readiness for access, credentialing, clearance, NDA, or other surfaced handling controls."]
-                if security_visible and not enough_specific_differentiators
+                if security_visible and not enough_specific_differentiators and not attachment_native_ready
                 else []
             ),
             *(
-                ["Credible experience supporting scoped package artifacts and customer review coordination."]
-                if ("dd 1391" in attachment_text or "acquisition-package" in attachment_text) and not enough_specific_differentiators
+                ["Credible experience supporting scoped deliverables, package artifacts, or customer review coordination."]
+                if (_fact_model_lines(solicitation_fact_model, ["deliverable_fact_rows"], max_items=2) or "deliverable" in attachment_text or "package" in attachment_text) and not enough_specific_differentiators and not attachment_native_ready
                 else []
             ),
             *([] if enough_specific_differentiators else _string_list(strategic_reasoning.get("reasoned_differentiators", []), max_items=6)),
@@ -2905,13 +3626,14 @@ def _win_strategy(
     else:
         hot_button_rows = _prune_generic_strategy_rows(_anchor_strategy_lines(
             hot_buttons,
-            current_package_anchors,
+            section_anchors or current_package_anchors,
             fallback=NO_HOT_BUTTON_EVIDENCE,
-            max_items=6,
+            max_items=4 if attachment_native_ready else 6,
+            min_overlap=1 if attachment_native_ready else 2,
         ))
         win_theme_rows = _prune_generic_strategy_rows(_anchor_strategy_lines(
             win_themes,
-            current_package_anchors,
+            section_anchors or current_package_anchors,
             fallback=NO_WIN_THEME_EVIDENCE,
             max_items=3 if attachment_native_ready else 6,
             min_overlap=1 if attachment_native_ready else 2,
@@ -2928,20 +3650,31 @@ def _win_strategy(
             discriminators,
             current_package_anchors,
             fallback=NO_DIFFERENTIATOR_EVIDENCE,
-            max_items=6,
+            max_items=4 if attachment_native_ready else 6,
+            min_overlap=1 if attachment_native_ready and section_anchors else 2,
         ))
-        reasoning_win_theme_rows = _prune_generic_strategy_rows(_anchor_strategy_lines(
-            _string_list(strategic_reasoning.get("reasoned_win_themes", []), max_items=8),
-            current_package_anchors,
-            fallback=NO_REASONED_THEME_EVIDENCE,
-            max_items=6,
-        ))
-        proof_requirement_rows = _prune_generic_strategy_rows(_anchor_strategy_lines(
-            _string_list(strategic_reasoning.get("proof_requirements", []), max_items=8),
-            current_package_anchors,
-            fallback=NO_PROOF_REQUIREMENT_EVIDENCE,
-            max_items=6,
-        ))
+        reasoning_win_theme_rows = _prune_generic_strategy_rows(
+            specific_win_theme_rows
+            or _fact_model_rows(strategic_reasoning, "reasoned_win_theme_rows", max_items=4 if attachment_native_ready else 6)
+            or _anchor_strategy_lines(
+                _string_list(strategic_reasoning.get("reasoned_win_themes", []), max_items=8),
+                section_anchors or current_package_anchors,
+                fallback=NO_REASONED_THEME_EVIDENCE,
+                max_items=4 if attachment_native_ready else 6,
+                min_overlap=1 if attachment_native_ready else 2,
+            )
+        )
+        proof_requirement_rows = _prune_generic_strategy_rows(
+            specific_proof_requirement_rows
+            or _fact_model_rows(strategic_reasoning, "proof_requirement_rows", max_items=4 if attachment_native_ready else 6)
+            or _anchor_strategy_lines(
+                _string_list(strategic_reasoning.get("proof_requirements", []), max_items=8),
+                section_anchors or current_package_anchors,
+                fallback=NO_PROOF_REQUIREMENT_EVIDENCE,
+                max_items=4 if attachment_native_ready else 6,
+                min_overlap=1 if attachment_native_ready else 2,
+            )
+        )
     hot_buttons = _strategy_row_texts(hot_button_rows)
     win_themes = _strategy_row_texts(win_theme_rows)
     discriminators = _strategy_row_texts(discriminator_rows)
@@ -2951,6 +3684,7 @@ def _win_strategy(
         "central_pain_point": str(strategic_reasoning.get("central_pain_point") or "").strip(),
         "reasoning_summary": str(strategic_reasoning.get("reasoning_summary") or "").strip(),
         "reasoning_based_pain_points": _string_list(strategic_reasoning.get("reasoned_pain_points", []), max_items=6),
+        "evaluator_anxiety_rows": _fact_model_rows(strategic_reasoning, "evaluator_anxiety_rows", max_items=6),
         "reasoning_based_win_themes": reasoning_based_win_themes,
         "reasoning_based_differentiators": _string_list(strategic_reasoning.get("reasoned_differentiators", []), max_items=8),
         "reasoning_based_proof_requirements": reasoning_based_proof_requirements,
@@ -3159,16 +3893,20 @@ def build_capture_decision_sections(
     learned_semantic_preferences: dict[str, Any],
     normalized_evidence: dict[str, Any] | None = None,
     solicitation_facts: dict[str, Any] | None = None,
+    solicitation_fact_model: dict[str, Any] | None = None,
     attachment_workstreams: list[dict[str, Any]] | None = None,
     staffing_pricing_signals: dict[str, Any] | None = None,
     attachment_anomalies: list[dict[str, Any]] | None = None,
+    evaluator_anxiety_model: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     vendor_name = _profile_company_name(vendor_profile)
     normalized_evidence = normalized_evidence if isinstance(normalized_evidence, dict) else {}
     solicitation_facts = solicitation_facts if isinstance(solicitation_facts, dict) else {}
+    solicitation_fact_model = solicitation_fact_model if isinstance(solicitation_fact_model, dict) else {}
     attachment_workstreams = attachment_workstreams if isinstance(attachment_workstreams, list) else []
     staffing_pricing_signals = staffing_pricing_signals if isinstance(staffing_pricing_signals, dict) else {}
     attachment_anomalies = attachment_anomalies if isinstance(attachment_anomalies, list) else []
+    evaluator_anxiety_model = evaluator_anxiety_model if isinstance(evaluator_anxiety_model, dict) else {}
     normalized_incumbent = normalized_evidence.get("incumbent", {}) if isinstance(normalized_evidence.get("incumbent"), dict) else {}
     normalized_vehicle = normalized_evidence.get("vehicle", {}) if isinstance(normalized_evidence.get("vehicle"), dict) else {}
     normalized_contract_value = normalized_evidence.get("contract_value_or_ceiling", {}) if isinstance(normalized_evidence.get("contract_value_or_ceiling"), dict) else {}
@@ -3215,7 +3953,14 @@ def build_capture_decision_sections(
     semantic_context = _semantic_capture_context(opportunity, learned_semantic_preferences)
     customer_priorities = _priority_analysis(notice_text, public_research, attachment_bundle, award_basis, contract_type)
     workstream_lines = _workstream_lines(attachment_workstreams)
-    strategic_reasoning = _strategic_capture_reasoning(
+    promoted_workstream_lines = _fact_model_lines(
+        solicitation_fact_model,
+        ["workstream_fact_rows", "deliverable_fact_rows"],
+        max_items=8,
+    )
+    access_fact_lines = _fact_model_lines(solicitation_fact_model, ["access_fact_rows"], max_items=4)
+    staffing_fact_lines = _fact_model_lines(solicitation_fact_model, ["staffing_fact_rows"], max_items=4)
+    strategic_reasoning = evaluator_anxiety_model or _strategic_capture_reasoning(
         solicitation_facts,
         attachment_workstreams,
         staffing_pricing_signals,
@@ -3229,12 +3974,12 @@ def build_capture_decision_sections(
             customer_priorities.get("evidence_backed_priorities", [])
             + (
                 ["The requirement appears centered on direct execution support rather than generic staff augmentation."]
-                if any("on-site" in item.lower() or "delivery continuity" in item.lower() or "execution" in item.lower() for item in workstream_lines)
+                if any("execution" in item.lower() or "operational" in item.lower() or "deliver" in item.lower() for item in workstream_lines)
                 else []
             )
             + (
-                ["The customer needs package or deliverable throughput, including planning, scope, or cost artifacts called out in the attachments."]
-                if any("dd 1391" in item.lower() or "acquisition-package" in item.lower() for item in workstream_lines)
+                ["The customer needs visible deliverable throughput, review quality, or package discipline based on extracted attachment-native scope facts."]
+                if promoted_workstream_lines
                 else []
             )
             + (
@@ -3247,12 +3992,12 @@ def build_capture_decision_sections(
             customer_priorities.get("likely_priorities", [])
             + (
                 ["Specialized staffing continuity may matter because multiple distinct roles are explicitly visible in the labor mix."]
-                if any("furnishings" in item.lower() or "staffing mix" in item.lower() for item in workstream_lines)
+                if staffing_fact_lines
                 else []
             )
             + (
                 ["Access, credentialing, or information-handling controls are likely evaluated informally because they can break day-one execution even when technical approach looks fine."]
-                if any("access, security" in item.lower() or "information-handling" in item.lower() for item in workstream_lines)
+                if access_fact_lines
                 else []
             )
         )
@@ -3261,6 +4006,10 @@ def build_capture_decision_sections(
     customer_priorities["pain_points"] = _dedupe_strings(
         customer_priorities.get("pain_points", [])
         + _string_list(strategic_reasoning.get("reasoned_pain_points", []), max_items=4)
+    )
+    customer_priorities["evaluator_anxieties"] = _strategy_row_texts(
+        _fact_model_rows(solicitation_fact_model, "conflict_rows", max_items=2)
+        + _fact_model_rows(evaluator_anxiety_model, "evaluator_anxiety_rows", max_items=6)
     )
     customer_priorities["strategic_pain_points"] = _string_list(strategic_reasoning.get("reasoned_pain_points", []), max_items=6)
     customer_priorities["strategic_reasoning_summary"] = str(strategic_reasoning.get("reasoning_summary") or "").strip()
@@ -3445,6 +4194,7 @@ def build_capture_decision_sections(
         staffing_pricing_signals,
         attachment_anomalies,
         strategic_reasoning,
+        solicitation_fact_model,
     )
     if semantic_context.get("cautions"):
         win_strategy["win_themes"] = _dedupe_strings(
@@ -3640,7 +4390,27 @@ def build_capture_decision_sections(
             ]
         ),
         "solicitation_facts": _solicitation_fact_lines(solicitation_facts),
+        "promoted_solicitation_facts": _fact_model_lines(
+            solicitation_fact_model,
+            [
+                "contract_fact_rows",
+                "workstream_fact_rows",
+                "deliverable_fact_rows",
+                "evaluation_fact_rows",
+            ],
+            max_items=12,
+        ),
         "operational_constraints": _operational_constraint_lines(solicitation_facts, staffing_pricing_signals, attachment_workstreams),
+        "pricing_acceptance_signals": _fact_model_lines(
+            solicitation_fact_model,
+            ["pricing_fact_rows", "acceptance_fact_rows", "access_fact_rows"],
+            max_items=10,
+        ),
+        "cross_document_conflicts": _fact_model_lines(
+            solicitation_fact_model,
+            ["conflict_rows"],
+            max_items=6,
+        ),
         "staffing_pricing_signals": _dedupe_strings(
             _string_list(staffing_pricing_signals.get("staffing_notes", []), max_items=6)
             + _string_list(staffing_pricing_signals.get("pricing_notes", []), max_items=6)

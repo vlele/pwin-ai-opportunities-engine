@@ -294,6 +294,9 @@ def _customer_block(section: dict[str, Any]) -> str:
             "### Reasoned Pain Points",
             _markdown_list(section.get("strategic_pain_points", [])),
             "",
+            "### Evaluator Anxieties",
+            _markdown_list(section.get("evaluator_anxieties", [])),
+            "",
             "### External Pressure Signals",
             _markdown_list(section.get("external_pressure_signals", [])),
             "",
@@ -342,11 +345,20 @@ def _acquisition_block(section: dict[str, Any]) -> str:
             "### Solicitation Fact Checks",
             _markdown_list(section.get("solicitation_facts", [])),
             "",
+            "### Promoted Attachment-Native Facts",
+            _markdown_list(section.get("promoted_solicitation_facts", [])),
+            "",
             "### Operational / Security Constraints",
             _markdown_list(section.get("operational_constraints", [])),
             "",
             "### Staffing / Pricing Signals",
             _markdown_list(section.get("staffing_pricing_signals", [])),
+            "",
+            "### Pricing / Acceptance / Access Signals",
+            _markdown_list(section.get("pricing_acceptance_signals", [])),
+            "",
+            "### Cross-Document Conflicts",
+            _markdown_list(section.get("cross_document_conflicts", [])),
             "",
             "### Vehicle / Eligibility Assessment",
             _markdown_list(section.get("vehicle_assessment", [])),
@@ -419,9 +431,10 @@ def _competitive_block(rows: list[dict[str, Any]]) -> str:
     blocks: list[str] = []
     for row in rows:
         role = str(row.get("role") or "").strip()
+        confidence = str(row.get("confidence") or "").strip()
         blocks.extend(
             [
-                f"### {row.get('name', 'Competitor')}" + (f" ({role})" if role else ""),
+                f"### {row.get('name', 'Competitor')}" + (f" ({role})" if role else "") + (f" - {confidence} confidence" if confidence else ""),
                 f"- Why likely: {row.get('why_likely', 'N/A')}",
                 f"- Strengths: {row.get('strengths', 'N/A')}",
                 f"- Weaknesses / uncertainty: {row.get('weaknesses', 'N/A')}",

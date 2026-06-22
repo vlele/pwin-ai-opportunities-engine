@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "name": "scope_table_acceptance_bundle",
+      "text": "1.3 Scope\nThe contractor shall provide on-site engineering support and submit weekly status reports.\nCLIN 0001 | Base Operations Support | 12 Months | FFP\nCLIN 0002 | Surge Engineering | Optional | FFP\nPricing Table | Labor Category | Hours | Rate | Extended Price\nAcceptance Level | AQL | Remedy\nDeliverable review failures trigger corrective action within 5 days.\n2.1 Deliverables\nThe contractor shall submit a transition plan, staffing matrix, and monthly QA report.",
+      "expect": {
+        "min_section_blocks": 2,
+        "min_matrix_rows": 2,
+        "min_pricing_rows": 1,
+        "min_acceptance_rows": 1,
+        "min_table_blocks": 2
+      }
+    },
+    {
+      "name": "toc_heavy_scope_body_preference",
+      "text": "Table of Contents\n1. Scope........3\n1.5 General Requirements........5\n1.5 General Requirements\nThe contractor shall maintain the project schedule, deliver design submittals, and support review meetings.\n5.0 Deliverables\nMonthly deliverables include a status report, issue log, and corrective action tracker.",
+      "expect": {
+        "min_section_blocks": 2,
+        "max_parse_warnings": 1,
+        "min_section_graph_nodes": 2
+      }
+    }
+  ]
+}

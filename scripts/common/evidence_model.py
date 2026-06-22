@@ -11,6 +11,29 @@ SOURCE_PRIORITY = {
     "govtribe_mcp_commercial_intel": 60,
     "govwin_iq_commercial_intel": 60,
 }
+SIGNAL_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "from",
+    "into",
+    "under",
+    "through",
+    "support",
+    "services",
+    "service",
+    "program",
+    "system",
+    "task",
+    "order",
+    "contract",
+    "solicitation",
+    "notice",
+    "work",
+}
 
 
 def _priority(source_id: str) -> int:
@@ -46,6 +69,19 @@ def _coerce_string_list(value: Any, *, max_items: int = 8) -> list[str]:
 
 def _normalize_key(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _signal_tokens(value: Any) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9][a-z0-9/-]{2,}", str(value or "").lower())
+        if token not in SIGNAL_STOPWORDS
+    }
+
+
+def _adjacent_competitor_row_usable(row: dict[str, Any], reference_tokens: set[str]) -> bool:
+    description_tokens = _signal_tokens(str(row.get("Description") or ""))
+    return len(reference_tokens & description_tokens) >= 3
 
 
 def _normalize_confidence(value: Any) -> str:
@@ -519,6 +555,7 @@ def build_capture_official_evidence_model(
             " ".join(vehicle_signals),
         ]
     )
+    reference_tokens = _signal_tokens(text)
     model = empty_evidence_model(
         source_id="sam_contract_opportunities",
         source_name="Official solicitation package",
@@ -621,6 +658,8 @@ def build_capture_official_evidence_model(
         )
     for row in (award_signals.get("adjacent_awards") or [])[:6]:
         if not isinstance(row, dict):
+            continue
+        if not _adjacent_competitor_row_usable(row, reference_tokens):
             continue
         name = str(row.get("Recipient Name") or "").strip()
         key = _normalize_key(name)

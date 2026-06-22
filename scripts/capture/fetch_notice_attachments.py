@@ -4,6 +4,7 @@ import io
 import json
 import mimetypes
 import os
+from collections import Counter
 from pathlib import Path
 import re
 from typing import Any
@@ -101,6 +102,7 @@ ATTACHMENT_TABLE_ROW_RE = re.compile(
     r"^\s*(?:CLIN|SubCLIN|Task|Subtask|AQL|PRS|Performance Objective|Deliverable|Transition|SLIN)\b",
     re.IGNORECASE,
 )
+TABLE_CELL_SPLIT_RE = re.compile(r"\s*(?:\||\t| {2,})\s*")
 ATTACHMENT_MATRIX_MARKERS = (
     "clin",
     "subclin",
@@ -183,6 +185,42 @@ ACTION_VERB_HINTS = (
     "perform",
     "report",
     "transition",
+)
+ROOT_SCOPE_HEADINGS = (
+    "statement of work",
+    "performance work statement",
+    "description/specifications/work statement",
+    "description specifications work statement",
+    "statement of objectives",
+    "statement of objective",
+)
+COMPACT_SECTION_PREFERRED_MARKERS = (
+    "shall",
+    "must",
+    "provide",
+    "deliver",
+    "maintain",
+    "perform",
+    "support",
+    "report",
+    "transition",
+    "inspect",
+    "review",
+    "manage",
+    "task",
+    "deliverable",
+    "clin",
+    "subclin",
+    "scope",
+    "requirement",
+    "acceptance",
+    "quality",
+    "aql",
+    "prs",
+)
+INLINE_HEADING_BODY_RE = re.compile(
+    r"^(\d+(?:\.\d+){0,3}\s+(?:Scope|General Requirements|Deliverables?|Tasks?|Specific Tasks?|Performance Objectives?|Requirements?))\s+(?=(?:The contractor|Contractor|Provide|Maintain|Deliver|Perform|Support|Report|Inspect|Review|Manage)\b)",
+    re.IGNORECASE,
 )
 
 
@@ -552,6 +590,28 @@ def _heading_title(line: str) -> str:
     return title.strip(" .:-")
 
 
+def _split_heading_and_inline_body(line: str) -> tuple[str, str]:
+    cleaned = _normalize_text(line)
+    if not cleaned:
+        return "", ""
+    cleaned = INLINE_HEADING_BODY_RE.sub(r"\1; ", cleaned)
+    lower = cleaned.lower()
+    for hint in sorted(SECTION_BLOCK_HINTS, key=len, reverse=True):
+        if lower == hint:
+            return cleaned, ""
+        for separator in (":", ";", " - ", ". "):
+            prefix = f"{hint}{separator}"
+            if lower.startswith(prefix):
+                title = cleaned[: len(hint)]
+                inline_body = cleaned[len(prefix):].strip(" ;:-")
+                return title, inline_body
+        if lower.startswith(f"{hint} "):
+            remainder = cleaned[len(hint):].strip(" ;:-")
+            if remainder and any(marker in remainder.lower() for marker in ACTION_VERB_HINTS):
+                return cleaned[: len(hint)], remainder
+    return _heading_title(cleaned), ""
+
+
 def _section_block_priority(title: str, body: str) -> int:
     lower = f"{title} {body}".lower()
     score = 0
@@ -566,28 +626,204 @@ def _section_block_priority(title: str, body: str) -> int:
     return score
 
 
+def _table_row_kind(text: str) -> str:
+    lower = str(text or "").lower()
+    if lower.startswith(("clin ", "subclin", "slin")):
+        return "clin"
+    if lower.startswith(("task ", "subtask", "performance objective")):
+        return "task"
+    if any(marker in lower for marker in ATTACHMENT_PRICING_MARKERS):
+        return "pricing"
+    if any(marker in lower for marker in ATTACHMENT_ACCEPTANCE_MARKERS):
+        return "acceptance"
+    if any(marker in lower for marker in ATTACHMENT_INCENTIVE_MARKERS):
+        return "remedy"
+    if any(marker in lower for marker in ATTACHMENT_MATRIX_MARKERS):
+        return "matrix"
+    return "table"
+
+
+def _matrix_row_record(raw_line: str, line_index: int) -> dict[str, Any] | None:
+    normalized_row = _normalize_text(raw_line)
+    normalized_row = TABLE_CELL_SPLIT_RE.sub("; ", normalized_row).strip(" ;:-")
+    if len(normalized_row) < 24:
+        return None
+    cells = [cell.strip(" ;:-") for cell in TABLE_CELL_SPLIT_RE.split(_normalize_text(raw_line)) if cell.strip(" ;:-")]
+    return {
+        "line_index": line_index,
+        "kind": _table_row_kind(normalized_row),
+        "label": cells[0] if cells else normalized_row[:80],
+        "text": normalized_row[:420],
+        "cells": cells[:10],
+    }
+
+
+def _table_blocks(row_records: list[dict[str, Any]], max_blocks: int = 8) -> list[dict[str, Any]]:
+    if not row_records:
+        return []
+    blocks: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for row in sorted(row_records, key=lambda item: int(item.get("line_index", 0) or 0)):
+        kind = str(row.get("kind", "table") or "table")
+        line_index = int(row.get("line_index", 0) or 0)
+        if (
+            current is None
+            or kind != str(current.get("kind", "table") or "table")
+            or line_index - int(current.get("last_line_index", line_index) or line_index) > 2
+        ):
+            current = {
+                "kind": kind,
+                "title": f"{kind.replace('_', ' ').title()} table",
+                "rows": [],
+                "last_line_index": line_index,
+            }
+            blocks.append(current)
+        current["rows"].append(str(row.get("text", "") or "").strip())
+        current["last_line_index"] = line_index
+    rendered: list[dict[str, Any]] = []
+    for block in blocks[:max_blocks]:
+        rows = [row for row in (block.get("rows", []) or []) if str(row or "").strip()]
+        if not rows:
+            continue
+        rendered.append(
+            {
+                "kind": str(block.get("kind", "table") or "table"),
+                "title": str(block.get("title", "Table") or "Table"),
+                "row_count": len(rows),
+                "rows": rows[:10],
+            }
+        )
+    return rendered
+
+
+def _section_graph(raw_lines: list[str], max_nodes: int = 24) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+    stack: list[dict[str, Any]] = []
+    for raw_line in raw_lines:
+        if not _is_structure_heading(raw_line):
+            continue
+        title, _ = _split_heading_and_inline_body(raw_line)
+        cleaned_title = _heading_title(title).strip()
+        if not cleaned_title:
+            continue
+        number_match = re.match(r"^\s*(\d+(?:\.\d+){0,3})\b", str(raw_line or "").strip())
+        level = number_match.group(1).count(".") + 1 if number_match else 1
+        while stack and int(stack[-1].get("level", 1) or 1) >= level:
+            stack.pop()
+        parent_title = str(stack[-1].get("title", "") or "").strip() if stack else ""
+        node = {
+            "title": cleaned_title[:180],
+            "level": level,
+            "parent_title": parent_title,
+        }
+        nodes.append(node)
+        stack.append(node)
+        if len(nodes) >= max_nodes:
+            break
+    return nodes
+
+
+def _structure_parse_warnings(text: str, row_records: list[dict[str, Any]], section_blocks: list[dict[str, str]]) -> list[str]:
+    lower = str(text or "").lower()
+    warnings: list[str] = []
+    has_pricing_markers = any(marker in lower for marker in ATTACHMENT_PRICING_MARKERS)
+    has_acceptance_markers = any(marker in lower for marker in ATTACHMENT_ACCEPTANCE_MARKERS)
+    has_remedy_markers = any(marker in lower for marker in ATTACHMENT_INCENTIVE_MARKERS)
+    has_clin_markers = any(marker in lower for marker in ("clin ", "subclin", "slin"))
+    kinds = Counter(str(row.get("kind", "") or "") for row in row_records)
+    if has_pricing_markers and kinds.get("pricing", 0) == 0:
+        warnings.append("pricing_markers_without_structured_rows")
+    if has_acceptance_markers and kinds.get("acceptance", 0) == 0:
+        warnings.append("acceptance_markers_without_structured_rows")
+    if has_remedy_markers and kinds.get("remedy", 0) == 0:
+        warnings.append("remedy_markers_without_structured_rows")
+    if has_clin_markers and kinds.get("clin", 0) == 0:
+        warnings.append("clin_markers_without_structured_rows")
+    if any("scope" in str(block.get("title", "") or "").lower() for block in section_blocks) and not any(
+        "shall" in str(block.get("source_text", "") or "").lower() for block in section_blocks
+    ):
+        warnings.append("scope_sections_without_action_sentences")
+    return _dedupe_strings(warnings)
+
+
+def _compact_section_body(body_lines: list[str], max_chars: int = 680) -> str:
+    candidates: list[tuple[int, str]] = []
+    for raw_line in body_lines:
+        cleaned = _normalize_text(raw_line)
+        if not cleaned or _is_toc_like_line(cleaned):
+            continue
+        lower = cleaned.lower()
+        if lower in ROOT_SCOPE_HEADINGS:
+            continue
+        if ATTACHMENT_TABLE_ROW_RE.match(cleaned):
+            normalized_row = re.sub(r"\s*(?:\||\t| {2,})\s*", "; ", cleaned).strip(" ;:-")
+            candidates.append((8, normalized_row))
+            continue
+        for part in re.split(r"(?<=[.;])\s+|(?<=\))\s+(?=[A-Z])", cleaned):
+            sentence = _normalize_text(part).strip(" ;:-")
+            if len(sentence) < 24:
+                continue
+            lower_sentence = sentence.lower()
+            score = 0
+            if any(marker in lower_sentence for marker in COMPACT_SECTION_PREFERRED_MARKERS):
+                score += 4
+            if any(marker in lower_sentence for marker in ATTACHMENT_MATRIX_MARKERS):
+                score += 2
+            if any(marker in lower_sentence for marker in ATTACHMENT_ACCEPTANCE_MARKERS):
+                score += 2
+            if any(marker in lower_sentence for marker in ATTACHMENT_PRICING_MARKERS):
+                score += 2
+            if any(marker in lower_sentence for marker in ("mission", "purpose", "background")) and not any(
+                verb in lower_sentence for verb in ACTION_VERB_HINTS
+            ):
+                score -= 3
+            if score <= 0:
+                continue
+            candidates.append((score, sentence))
+
+    if not candidates:
+        fallback = _normalize_text(" ".join(body_lines))
+        return fallback[:max_chars]
+
+    selected: list[str] = []
+    seen: set[str] = set()
+    for _, sentence in sorted(candidates, key=lambda item: (-item[0], len(item[1]), item[1])):
+        key = sentence.lower()
+        if key in seen:
+            continue
+        if any(key in existing.lower() or existing.lower() in key for existing in selected):
+            continue
+        seen.add(key)
+        selected.append(sentence)
+        if len("; ".join(selected)) >= max_chars or len(selected) >= 3:
+            break
+    return "; ".join(selected)[:max_chars]
+
+
 def _extract_text_structures(text: str, *, max_sections: int = 12, max_rows: int = 36) -> dict[str, Any]:
     raw_lines = [line.strip() for line in str(text or "").replace("\r", "\n").split("\n") if line.strip()]
     headings: list[str] = []
     section_blocks: list[dict[str, str]] = []
     structured_rows: list[str] = []
+    structured_row_records: list[dict[str, Any]] = []
     seen_sections: set[str] = set()
     seen_rows: set[str] = set()
 
-    for raw_line in raw_lines:
+    for line_index, raw_line in enumerate(raw_lines):
         if (
             ATTACHMENT_TABLE_ROW_RE.match(raw_line)
             or "|" in raw_line
             or "\t" in raw_line
             or re.search(r" {2,}", raw_line)
         ):
-            normalized_row = _normalize_text(raw_line)
-            normalized_row = re.sub(r"\s*(?:\||\t| {2,})\s*", "; ", normalized_row).strip(" ;:-")
-            if len(normalized_row) >= 24:
+            row_record = _matrix_row_record(raw_line, line_index)
+            if row_record is not None:
+                normalized_row = str(row_record.get("text", "") or "")
                 row_key = normalized_row.lower()
                 if row_key not in seen_rows:
                     seen_rows.add(row_key)
                     structured_rows.append(normalized_row[:420])
+                    structured_row_records.append(row_record)
 
     index = 0
     while index < len(raw_lines):
@@ -595,13 +831,13 @@ def _extract_text_structures(text: str, *, max_sections: int = 12, max_rows: int
         if not _is_structure_heading(line):
             index += 1
             continue
-        title = _heading_title(line)
+        title, inline_body = _split_heading_and_inline_body(line)
         lower_title = title.lower()
         headings.append(title)
         if any(skip in lower_title for skip in SECTION_BLOCK_SKIP_HINTS):
             index += 1
             continue
-        body_lines: list[str] = []
+        body_lines: list[str] = [inline_body] if inline_body else []
         lookahead = index + 1
         while lookahead < len(raw_lines):
             candidate = raw_lines[lookahead]
@@ -613,8 +849,12 @@ def _extract_text_structures(text: str, *, max_sections: int = 12, max_rows: int
                 break
             lookahead += 1
         body = _normalize_text(" ".join(body_lines))
+        compact_body = _compact_section_body(body_lines)
+        if lower_title in ROOT_SCOPE_HEADINGS and not compact_body:
+            index = lookahead if lookahead > index else index + 1
+            continue
         if body and _section_block_priority(title, body) >= 4:
-            section_text = _normalize_text(f"{title}; {body}")[:1200]
+            section_text = _normalize_text(f"{title}; {compact_body or body}")[:1200]
             key = section_text.lower()
             if key not in seen_sections:
                 seen_sections.add(key)
@@ -622,15 +862,29 @@ def _extract_text_structures(text: str, *, max_sections: int = 12, max_rows: int
                     {
                         "title": title[:180],
                         "text": section_text,
+                        "source_text": _normalize_text(f"{title}; {body}")[:2200],
                     }
                 )
         index = lookahead if lookahead > index else index + 1
 
     section_blocks.sort(key=lambda item: _section_block_priority(item.get("title", ""), item.get("text", "")), reverse=True)
+    table_blocks = _table_blocks(structured_row_records)
+    matrix_rows = [row for row in structured_row_records if str(row.get("kind", "") or "") in {"clin", "task", "matrix"}]
+    pricing_rows = [row for row in structured_row_records if str(row.get("kind", "") or "") == "pricing"]
+    acceptance_rows = [row for row in structured_row_records if str(row.get("kind", "") or "") == "acceptance"]
+    remedy_rows = [row for row in structured_row_records if str(row.get("kind", "") or "") == "remedy"]
+    parse_warnings = _structure_parse_warnings(text, structured_row_records, section_blocks)
     return {
         "headings": _dedupe_strings(headings)[:24],
         "section_blocks": section_blocks[:max_sections],
         "structured_rows": structured_rows[:max_rows],
+        "table_blocks": table_blocks,
+        "matrix_rows": matrix_rows[:max_rows],
+        "pricing_rows": pricing_rows[:max_rows],
+        "acceptance_rows": acceptance_rows[:max_rows],
+        "remedy_rows": remedy_rows[:max_rows],
+        "section_graph": _section_graph(raw_lines),
+        "parse_warnings": parse_warnings,
     }
 
 

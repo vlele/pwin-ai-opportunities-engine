@@ -1,0 +1,108 @@
+{
+  "cases": [
+    {
+      "name": "attachment_native_scope_package",
+      "solicitation_facts": {
+        "set_aside": "8(a)",
+        "contract_vehicle": "8(a) STARS III GWAC",
+        "contract_type": "Firm Fixed Price",
+        "evaluation_basis": "Best Value (technical approach, past performance, price)",
+        "period_of_performance": "Base year plus two option years",
+        "transition_window": "30-day transition",
+        "funds_status": "Funds are not presently available for this effort.",
+        "staffing_roles": [
+          "Project Manager",
+          "Lead Engineer"
+        ],
+        "attachment_conflicts": [
+          {
+            "field": "due date",
+            "values": ["15 Jul 2026", "22 Jul 2026"],
+            "sources": ["RFQ.pdf [solicitation]", "Amendment 1.pdf [amendment]"]
+          }
+        ]
+      },
+      "attachment_bundle": {
+        "attachments": [
+          {
+            "filename": "RFQ.pdf",
+            "category": "solicitation",
+            "section_blocks": [
+              {
+                "title": "1.3 Scope",
+                "text": "1.3 Scope; The contractor shall provide on-site technical support, submit monthly status reports, and deliver review packages for customer approval.",
+                "source_text": "1.3 Scope The contractor shall provide on-site technical support, submit monthly status reports, and deliver review packages for customer approval."
+              },
+              {
+                "title": "5.0 Deliverables",
+                "text": "5.0 Deliverables; Deliverables include a transition plan, staffing matrix, design package, and corrective-action tracker.",
+                "source_text": "5.0 Deliverables Deliverables include a transition plan, staffing matrix, design package, and corrective-action tracker."
+              },
+              {
+                "title": "Section M",
+                "text": "Section M; Award will be made on a best-value basis considering technical approach, past performance, and price realism.",
+                "source_text": "Section M Award will be made on a best-value basis considering technical approach, past performance, and price realism."
+              }
+            ],
+            "matrix_rows": [
+              {
+                "label": "CLIN 0001",
+                "text": "CLIN 0001; Base support; 12 months; FFP",
+                "cells": ["CLIN 0001", "Base support", "12 months", "FFP"]
+              },
+              {
+                "label": "Project Manager",
+                "text": "Project Manager; 1 FTE; Day shift",
+                "cells": ["Project Manager", "1 FTE", "Day shift"]
+              }
+            ],
+            "pricing_rows": [
+              {
+                "label": "Pricing Table",
+                "text": "Pricing Table; Labor Category; Hours; Rate; Extended Price",
+                "cells": ["Pricing Table", "Labor Category", "Hours", "Rate", "Extended Price"]
+              }
+            ],
+            "acceptance_rows": [
+              {
+                "label": "Acceptance Level",
+                "text": "Acceptance Level; AQL; Corrective action within 5 days",
+                "cells": ["Acceptance Level", "AQL", "Corrective action within 5 days"]
+              }
+            ],
+            "table_blocks": [
+              {
+                "kind": "pricing",
+                "title": "Pricing table",
+                "rows": [
+                  "Pricing Table; Labor Category; Hours; Rate; Extended Price"
+                ]
+              }
+            ],
+            "parse_warnings": []
+          }
+        ]
+      },
+      "attachment_workstreams": [
+        {
+          "title": "On-site execution",
+          "objective": "Provide on-site technical support and sustain monthly reporting and review-package delivery.",
+          "evidence_snippets": [
+            "RFQ.pdf: The contractor shall provide on-site technical support, submit monthly status reports, and deliver review packages for customer approval."
+          ]
+        }
+      ]
+    }
+  ],
+  "contamination_denylists": {
+    "capture_decision.py": [
+      "Engineering Technicians, Except Drafters",
+      "Furnishings Manager",
+      "af form 1199"
+    ],
+    "run_capture_research.py": [
+      "Engineering Technicians, Except Drafters",
+      "Furnishings Manager"
+    ]
+  }
+}
