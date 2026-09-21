@@ -225,12 +225,23 @@ The capture orchestrator is responsible for:
 After it runs:
 
 - inspect its JSON stdout
+- for `NEEDS_CLARIFICATION`, read `clarification_path` and ask the returned questions with their excerpts and decision impact (at most three per batch); do not guess answers
+- record the user's actual answers in the returned JSON template, using `answer_status: "unknown"` for unresolved answers, and rerun the same capture command with `--clarification-answers /path/to/answers.json`
+- for `NEEDS_FORMAL_QA`, request the controlling amendment/document or recommend formal Q&A; a user's preference cannot override official requirements
+- for `TECHNICAL_BLOCKED`, report the technical issue without turning it into a business questionnaire or continuing research
+- these checkpoint statuses have no current capture brief; never substitute an old memo
 - read the fresh `brief_path` it returns
 - answer from that brief
 - if it returns `PARTIAL_CAPTURE_RESEARCH`, say so plainly
 - if it returns `FAILED`, say so plainly and include the failure reason
 
 Do not satisfy capture research by reading an old brief directly unless the orchestrator itself points to that file as the current validated artifact for this run.
+
+Capture now performs a source-linked understanding checkpoint before market research. Use
+`--preflight-only` to stop after that check.
+Read `SKILL_ROOT/references/capture-clarification.md` when answering checkpoint questions,
+resuming capture, retrying technical failures, or reviewing the ten synthetic examples.
+Answers are scoped to the current package/profile and must not silently update the permanent profile.
 
 ## Script Stdout Contract
 
@@ -274,7 +285,7 @@ Critical source rules:
 - For `USAspending`, use documented JSON `POST` requests.
 - For `GovTribe MCP`, use `GOVTRIBE_MCP_API_KEY` directly through the shipped MCP client; do not require `OPENAI_API_KEY` for GovTribe.
 - For `GovTribe MCP` tool selection, query construction, and default returned fields, use `references/govtribe-mcp-tool-guide.md`.
-- Use `OPENAI_API_KEY` only for optional semantic reasoning in the shipped reasoning helpers.
+- Scan semantic reasoning remains optional. Capture requires a working `OPENAI_API_KEY` for its understanding checkpoint; an unavailable model stops capture as `TECHNICAL_BLOCKED`, not as an approved heuristic fallback.
 
 Not in the shipped source contract:
 
@@ -304,6 +315,7 @@ The workspace should maintain these shipped runtime artifacts:
 - `procurement/STARTER_PROFILE.md`
 - `procurement/feedback-events.jsonl`
 - `procurement/capture-requests.jsonl`
+- `procurement/capture-clarifications/<input-fingerprint>/`
 - `procurement/digest-entry-map/YYYY-MM-DD.json`
 - `procurement/opportunities/YYYY-MM-DD.json`
 - `procurement/explanations/YYYY-MM-DD.json`

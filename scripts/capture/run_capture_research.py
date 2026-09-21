@@ -23,6 +23,11 @@ from common.evidence_model import (
     evidence_model_vehicle_signals,
     merge_evidence_models,
 )
+from common.openai_reasoning import assess_capture_strategy
+from common.capture_clarification import (
+    build_packet, checkpoint, confirmed_context, local_attachment_cache, local_input_fingerprint, reviewed_package_quotes,
+)
+from common.contract_structure import extract_contract_structure
 from common.paths import load_json, safe_slug, standard_procurement_paths, today_local_str, utc_now_iso, write_json, write_text
 from common.source_registry import get_enabled_sources
 from common.validation import validate_capture_brief_text
@@ -1487,17 +1492,9 @@ def _attachment_fact_candidates(raw_text: str) -> dict[str, str]:
             factors = _clean_excerpt(evaluation_match.group(1) or "", max_chars=120).strip(" ,.;:")
             facts["evaluation_basis"] = f"Best Value ({factors})" if factors else "Best Value"
 
-    contract_type_patterns = (
-        (r"\bfirm[- ]fixed\s+price\b|\bFFP\b", "Firm Fixed Price"),
-        (r"\btime\s+and\s+materials\b|\bT&M\b", "Time and Materials"),
-        (r"\blabor[- ]hour\b", "Labor Hour"),
-        (r"\bcost[- ]plus[- ]fixed[- ]fee\b|\bCPFF\b", "Cost Plus Fixed Fee"),
-        (r"\bcost[- ]reimbursement\b", "Cost Reimbursement"),
-    )
-    for pattern, label in contract_type_patterns:
-        if re.search(pattern, dense, re.IGNORECASE):
-            facts["contract_type"] = label
-            break
+    structure = extract_contract_structure([{"text": raw_text}])
+    if structure["types"]:
+        facts["contract_type"] = structure["label"]
 
     if not facts.get("set_aside"):
         for line in lines:
@@ -1998,6 +1995,17 @@ def _extract_solicitation_facts(
     facts["transition_window"] = _preferred_attachment_fact(fact_rows, "transition_window")
     if not facts["funds_status"]:
         facts["funds_status"] = _preferred_attachment_fact(fact_rows, "funds_status")
+
+    structure = extract_contract_structure([
+        {"source": item.get("filename") or item.get("url") or "attachment",
+         "text": str(item.get("text_excerpt") or "") + "\n" + str(item.get("structured_text_excerpt") or "")}
+        for item in attachment_bundle.get("attachments", []) if isinstance(item, dict)
+    ])
+    facts["contract_structure"] = structure
+    facts["contract_types"] = structure["types"]
+    facts["contract_type"] = structure["label"]
+    if structure["status"] == "conflict":
+        attachment_conflicts.append({"field": "contract_type", "values": structure["types"], "evidence": structure["evidence"], "resolution": "Unresolved; validate the controlling amendment and line items."})
 
     facts["staffing_roles"] = _attachment_staffing_roles(attachment_bundle)
     facts["attachment_fact_rows"] = fact_rows
@@ -3589,6 +3597,9 @@ def main() -> int:
     parser.add_argument("--notice-id", default="")
     parser.add_argument("--solicitation-number", default="")
     parser.add_argument("--depth", default="full_360")
+    parser.add_argument("--clarification-answers", help="JSON answers bound to the current checkpoint fingerprint")
+    parser.add_argument("--preflight-only", action="store_true", help="Read inputs and assess understanding without market research")
+    parser.add_argument("--retry-clarification", action="store_true", help="Retry a technical checkpoint/extraction failure; does not bypass the gate")
     args = parser.parse_args()
     if not args.entry and not args.file:
         parser.error("Provide --entry for tracked capture or at least one --file for direct local-file capture.")
@@ -3662,7 +3673,9 @@ def main() -> int:
     local_context = load_notice_context(workspace, resolved) if args.entry else _build_direct_local_context(resolved)
     explanation = local_context.get("explanation_record", {})
     opportunity = local_context.get("opportunity_record", {})
-    public_context = fetch_url_excerpt(resolved.get("url", ""))
+    # Tracked capture may retrieve its primary notice before understanding. Direct
+    # local capture must not start website/market enrichment before the gate.
+    public_context = fetch_url_excerpt(resolved.get("url", "")) if args.entry else {"status": "skipped", "text_excerpt": ""}
     notice_excerpt, substantive_notice_excerpt = _best_notice_excerpt(public_context, opportunity, explanation)
     snapshot_resource_links = opportunity.get("resource_links", []) if isinstance(opportunity.get("resource_links"), list) else []
     snapshot_point_of_contact = opportunity.get("point_of_contact", []) if isinstance(opportunity.get("point_of_contact"), list) else []
@@ -3687,7 +3700,13 @@ def main() -> int:
             "errors": [],
         }
     )
-    local_attachment_bundle = load_local_attachments(local_file_paths) if local_file_paths else {
+    try:
+        input_fingerprint = local_input_fingerprint(local_file_paths) if local_file_paths else ""
+    except OSError:
+        input_fingerprint = "unreadable-local-inputs"
+    local_attachment_bundle = (local_attachment_cache(
+        workspace, input_fingerprint, lambda: load_local_attachments(local_file_paths), retry=args.retry_clarification,
+    ) if input_fingerprint != "unreadable-local-inputs" else load_local_attachments(local_file_paths)) if local_file_paths else {
         "status": "skipped",
         "record": {},
         "point_of_contact": [],
@@ -3700,12 +3719,43 @@ def main() -> int:
         "errors": [],
     }
     attachment_bundle = _merge_attachment_bundles(tracked_attachment_bundle, local_attachment_bundle)
+    understanding_packet = build_packet(
+        profile=vendor_profile, resolved=resolved, attachment_bundle=attachment_bundle,
+        notice_text=notice_excerpt if args.entry else args.summary,
+        input_fingerprint=input_fingerprint,
+    )
+    try:
+        clarification_answers = load_json(Path(args.clarification_answers), default={"invalid_answers_file": True}) if args.clarification_answers else None
+    except (OSError, ValueError):
+        clarification_answers = {"invalid_answers_file": True}
+    understanding = checkpoint(workspace, understanding_packet, answers=clarification_answers, retry=args.retry_clarification)
+    if understanding["status"] != "READY" or args.preflight_only:
+        result = {
+            "status": understanding["status"], "request_id": request_id, "capture_mode": capture_mode,
+            "canonical_record_id": canonical_id, "stable_id": resolved.get("report_entry_id", ""),
+            "clarification_path": understanding["review_path"], "evidence_path": understanding["state_path"],
+            "answers_template_path": understanding["next_answers_path"],
+            "questions": understanding["questions_to_ask"], "technical_issues": understanding["technical_issues"],
+            "expanded_public_research_attempted": False, "usaspending_attempted": False,
+            "commercial_intel_attempted": False, "capture_judgment_attempted": False,
+        }
+        append_jsonl(Path(artifacts["request_log_path"]), {**request_log_event, **result})
+        print(json.dumps(result, ensure_ascii=True))
+        return {"READY": 0, "NEEDS_CLARIFICATION": 20, "NEEDS_FORMAL_QA": 21}.get(understanding["status"], 22)
+    clarification_context = confirmed_context(understanding, understanding_packet)
+    if not args.entry and resolved.get("url"):
+        public_context = fetch_url_excerpt(resolved["url"])
+        notice_excerpt, substantive_notice_excerpt = _best_notice_excerpt(public_context, opportunity, explanation)
     attachment_scope_snippets = _attachment_scope_snippets(attachment_bundle)
     attachment_text_pool = _attachment_text_pool(attachment_bundle, max_items=6)
     attachment_context_text = " ".join(attachment_scope_snippets)
     notice_context_text = _clean_excerpt(
         f"{opportunity.get('summary', '')} {notice_excerpt} {attachment_context_text} {' '.join(attachment_text_pool)}",
         max_chars=16000,
+    )
+    research_context_text = _clean_excerpt(
+        reviewed_package_quotes(clarification_context) if "checked_evidence_graph" in clarification_context
+        else f"{reviewed_package_quotes(clarification_context)} {notice_context_text}", max_chars=16000,
     )
     stakeholder_contacts = _dedupe_contacts(
         _contacts_from_point_of_contact(attachment_bundle.get("point_of_contact", [])),
@@ -3727,7 +3777,7 @@ def main() -> int:
             "title": resolved.get("title", ""),
             "url": resolved.get("url", ""),
         },
-        notice_context_text,
+        research_context_text,
         stakeholder_contacts,
     )
     stakeholder_map.extend(
@@ -3741,7 +3791,7 @@ def main() -> int:
     usaspending_result = enrich_from_usaspending(
         usaspending_search_text,
         title=resolved.get("title", ""),
-        summary=notice_context_text,
+        summary=research_context_text,
         buyer=resolved.get("buyer", ""),
     )
     award_signals = _award_history_signals(
@@ -3819,7 +3869,7 @@ def main() -> int:
     commercial_intel = enrich_capture_context(
         enabled_sources=get_enabled_sources(registry),
         resolved=resolved,
-        notice_context_text=notice_context_text,
+        notice_context_text=research_context_text,
         attachment_bundle=attachment_bundle,
         vendor_profile=vendor_profile,
         preferences=preferences,
@@ -3874,6 +3924,18 @@ def main() -> int:
     )
     cross_source_evidence = merge_evidence_models(
         [official_capture_evidence, *(commercial_intel.get("evidence_models", []) or [])]
+    )
+    capture_reasoning_model = assess_capture_strategy(
+        vendor_profile=vendor_profile,
+        resolved=resolved,
+        solicitation_facts=solicitation_facts,
+        solicitation_fact_model=solicitation_fact_model,
+        attachment_bundle=attachment_bundle,
+        attachment_workstreams=attachment_workstreams,
+        evaluator_anxiety_model=evaluator_anxiety_model,
+        public_research=public_research,
+        normalized_evidence=cross_source_evidence,
+        clarification_context=clarification_context,
     )
     merged_incumbent_name = str(
         ((cross_source_evidence.get("incumbent") or {}).get("name") if isinstance(cross_source_evidence, dict) else "")
@@ -3959,6 +4021,8 @@ def main() -> int:
             *attachment_parse_guardrails.get("warnings", []),
             *award_signals.get("evidence_gaps", []),
             *public_research.get("evidence_gaps", []),
+            *[f"Understanding gap: {row['current_interpretation']} Next action: {row['question']}"
+              for row in clarification_context.get("open_gaps", [])],
             *(cross_source_evidence.get("evidence_gaps", []) if isinstance(cross_source_evidence, dict) else []),
             *([item.get("signal", "") for item in attachment_anomalies if isinstance(item, dict)]),
         ]
@@ -4131,7 +4195,7 @@ def main() -> int:
         attachment_workstreams=attachment_workstreams,
         staffing_pricing_signals=staffing_pricing_signals,
         attachment_anomalies=attachment_anomalies,
-        evaluator_anxiety_model=evaluator_anxiety_model,
+        evaluator_anxiety_model=capture_reasoning_model,
     )
     generic_strategy_warnings = _generic_strategy_language_warnings(
         decision_sections,
@@ -4216,6 +4280,7 @@ def main() -> int:
     procurement_timeline = _build_procurement_timeline(solicitation_facts, capture_generated_at)
     evidence = {
         "request_id": request_id,
+        "understanding_checkpoint": clarification_context,
         "generated_at": capture_generated_at,
         "status": status,
         "vendor_name": decision_sections.get("vendor_name", "Vendor"),
@@ -4280,6 +4345,7 @@ def main() -> int:
         "attachment_anomalies": attachment_anomalies,
         "staffing_pricing_signals": staffing_pricing_signals,
         "evaluator_anxiety_model": evaluator_anxiety_model,
+        "capture_reasoning_model": capture_reasoning_model,
         "cross_source_evidence": cross_source_evidence,
         "commercial_intel": {
             "public_source_statuses": public_research.get("source_statuses", []),

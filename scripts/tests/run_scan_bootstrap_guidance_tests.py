@@ -59,8 +59,10 @@ def _write_workspace(
     _write_json(procurement / "source-registry.json", registry)
 
 
-def _run_scan_main(workspace: Path) -> dict:
+def _run_scan_main(workspace: Path, *, now: datetime | None = None) -> dict:
     stdout = StringIO()
+    # These fixture deadlines are fixed; wall-clock time must not expire them.
+    fixture_now = now or datetime(2026, 6, 16, 19, 39, 6, tzinfo=timezone.utc)
     with patch.object(
         sys,
         "argv",
@@ -72,7 +74,7 @@ def _run_scan_main(workspace: Path) -> dict:
             "30-45",
             "--federal-only",
         ],
-    ), redirect_stdout(stdout):
+    ), patch.object(run_scan, "_scan_now_utc", return_value=fixture_now), redirect_stdout(stdout):
         exit_code = run_scan.main()
     assert exit_code == 0, stdout.getvalue()
     return json.loads(stdout.getvalue().strip())
@@ -353,12 +355,8 @@ def main() -> int:
             run_scan,
             "GovTribeMCPCommercialIntelProvider",
             FakeGovTribeExpiredRetrievalProvider,
-        ), patch.object(
-            run_scan,
-            "_scan_now_utc",
-            return_value=datetime(2026, 6, 16, 19, 39, 6, tzinfo=timezone.utc),
         ):
-            payload = _run_scan_main(workspace)
+            payload = _run_scan_main(workspace, now=datetime(2026, 6, 16, 19, 39, 6, tzinfo=timezone.utc))
         assert FakeGovTribeExpiredRetrievalProvider.called is True, payload
         govtribe_retrieval_status = next(
             item

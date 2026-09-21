@@ -1,0 +1,53 @@
+{
+  "scope": "Synthetic transfer and negative controls. Expectations are never passed to the model.",
+  "cases": [
+    {
+      "id": "software_completion",
+      "text": "Issued migration scope: restore the application within four hours after database migration.",
+      "focus": "restore the application within four hours after database migration",
+      "work_patterns": ["migrat"],
+      "forbidden_work_patterns": ["four hours", "restore"],
+      "required_condition_kinds": ["timing"]
+    },
+    {
+      "id": "instrument_completion",
+      "text": "The contractor shall release instruments for use six hours after calibration.",
+      "focus": "release instruments for use six hours after calibration",
+      "work_patterns": ["calibrat"],
+      "forbidden_work_patterns": ["six hours", "release"],
+      "required_condition_kinds": ["timing"]
+    },
+    {
+      "id": "government_prerequisite",
+      "text": "After Government personnel complete excavation, the contractor shall install lighting within three days.",
+      "focus": "the contractor shall install lighting within three days",
+      "work_patterns": ["install.*light|light.*install"],
+      "forbidden_work_patterns": ["excavat"],
+      "required_condition_kinds": ["timing"]
+    },
+    {
+      "id": "historical_work",
+      "text": "The prior contractor completed roof replacement in 2020. The contractor shall inspect the roof annually.",
+      "focus": "The contractor shall inspect the roof annually.",
+      "work_patterns": ["inspect.*roof|roof.*inspect"],
+      "forbidden_work_patterns": ["replac"],
+      "required_condition_kinds": ["timing"]
+    },
+    {
+      "id": "payment_trigger_only",
+      "text": "Payment is due within thirty days after government acceptance.",
+      "focus": "Payment is due within thirty days after government acceptance.",
+      "work_patterns": [],
+      "forbidden_work_patterns": ["."],
+      "required_condition_kinds": []
+    },
+    {
+      "id": "pricing_embedded_work",
+      "text": "CLIN 1: instrument calibration is firm-fixed-price. CLIN 2: equipment packaging is labor-hour.",
+      "focus": "CLIN 1: instrument calibration is firm-fixed-price. CLIN 2: equipment packaging is labor-hour.",
+      "work_patterns": ["calibrat", "packag"],
+      "forbidden_work_patterns": ["fixed.price", "labor.hour"],
+      "required_condition_kinds": ["pricing"]
+    }
+  ]
+}

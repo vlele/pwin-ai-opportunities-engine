@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import io
 import json
 import mimetypes
@@ -28,6 +29,10 @@ try:
     from docx import Document
 except ImportError:  # pragma: no cover - optional dependency
     Document = None
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover - optional dependency
+    OpenAI = None
 from common.runtime import USER_AGENT
 
 
@@ -45,6 +50,20 @@ CATEGORY_PRIORITY = {
     "subcontracting": 7,
     "other": 8,
 }
+ATTACHMENT_VISION_ALLOWED_CATEGORIES = {
+    "statement_of_work",
+    "solicitation",
+    "instructions_evaluation",
+    "amendment",
+    "pricing",
+}
+ATTACHMENT_VISION_MAX_PAGES = max(1, int(os.getenv("PWIN_ATTACHMENT_VISION_MAX_PAGES", "4") or "4"))
+ATTACHMENT_VISION_TIMEOUT_SECONDS = max(30, int(os.getenv("PWIN_ATTACHMENT_VISION_TIMEOUT_SECONDS", "90") or "90"))
+DEFAULT_ATTACHMENT_VISION_MODEL = (
+    os.getenv("PWIN_ATTACHMENT_VISION_MODEL")
+    or os.getenv("OPENAI_MODEL")
+    or "gpt-4.1-mini"
+)
 SNIPPET_KEYWORDS = (
     "scope",
     "objective",
@@ -144,6 +163,17 @@ ATTACHMENT_PRICING_MARKERS = (
     "cost proposal",
     "price proposal",
     "contract line item",
+)
+HARD_PAGE_PRIORITY_MARKERS = (
+    *ATTACHMENT_PRICING_MARKERS,
+    *ATTACHMENT_ACCEPTANCE_MARKERS,
+    *ATTACHMENT_INCENTIVE_MARKERS,
+    "contract line item",
+    "subclin",
+    "slin",
+    "task order",
+    "performance objective",
+    "traceability matrix",
 )
 SECTION_BLOCK_HINTS = (
     "statement of objectives",
@@ -441,6 +471,373 @@ def _extract_pdf_text(data: bytes, max_pages: int = 40) -> str:
     return combined
 
 
+def _openai_client(api_key: str | None = None):
+    if OpenAI is None:
+        return None
+    key = api_key or os.getenv("OPENAI_API_KEY", "").strip()
+    if not key:
+        return None
+    try:
+        return OpenAI(api_key=key)
+    except Exception:
+        return None
+
+
+def _image_data_url(image_bytes: bytes, mime_type: str = "image/png") -> str:
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _call_openai_vision_json(
+    *,
+    system_prompt: str,
+    user_payload: dict[str, Any],
+    image_bytes: bytes,
+    model: str | None = None,
+    timeout_seconds: int = ATTACHMENT_VISION_TIMEOUT_SECONDS,
+) -> dict[str, Any] | None:
+    client = _openai_client()
+    if client is None:
+        return None
+    try:
+        completion = client.with_options(timeout=timeout_seconds).chat.completions.create(
+            model=model or DEFAULT_ATTACHMENT_VISION_MODEL,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": json.dumps(user_payload, ensure_ascii=True)},
+                        {"type": "image_url", "image_url": {"url": _image_data_url(image_bytes)}},
+                    ],
+                },
+            ],
+        )
+    except Exception:
+        return None
+    try:
+        content = completion.choices[0].message.content or "{}"
+        if isinstance(content, list):
+            content = "".join(str(part.get("text", "")) if isinstance(part, dict) else str(part) for part in content)
+        payload = json.loads(str(content))
+        if isinstance(payload, dict):
+            payload["_model_name"] = str(model or DEFAULT_ATTACHMENT_VISION_MODEL)
+            return payload
+    except Exception:
+        return None
+    return None
+
+
+def _pdf_page_records(data: bytes, max_pages: int = 40) -> list[dict[str, Any]]:
+    if fitz is None:
+        return []
+    try:
+        document = fitz.open(stream=data, filetype="pdf")
+    except Exception:
+        return []
+    page_records: list[dict[str, Any]] = []
+    for page_index in range(min(len(document), max_pages)):
+        page = document.load_page(page_index)
+        text = page.get_text("text") or ""
+        lines = [line.strip() for line in _normalize_preserve_lines(text, max_chars=12000).splitlines() if line.strip()]
+        lower_lines = [line.lower() for line in lines]
+        table_like_line_count = sum(
+            1
+            for line in lines
+            if len(line) >= 20 and ("|" in line or "\t" in line or re.search(r" {2,}", line) or ATTACHMENT_TABLE_ROW_RE.match(line))
+        )
+        marker_hits = sum(1 for line in lower_lines if any(marker in line for marker in HARD_PAGE_PRIORITY_MARKERS))
+        char_count = len(_normalize_text(text))
+        image_count = len(page.get_images(full=True))
+        flags: list[str] = []
+        if _page_is_toc_like(text):
+            flags.append("toc_like")
+        if image_count and char_count < 220:
+            flags.append("image_text_sparse")
+        if char_count < 140:
+            flags.append("thin_text")
+        if table_like_line_count >= 3:
+            flags.append("table_layout")
+        if marker_hits >= 2:
+            flags.append("requirement_matrix_markers")
+        page_records.append(
+            {
+                "page_number": page_index + 1,
+                "text": text,
+                "char_count": char_count,
+                "image_count": image_count,
+                "table_like_line_count": table_like_line_count,
+                "marker_hits": marker_hits,
+                "flags": flags,
+            }
+        )
+    return page_records
+
+
+def _select_hard_page_candidates(page_records: list[dict[str, Any]], max_pages: int = ATTACHMENT_VISION_MAX_PAGES) -> list[dict[str, Any]]:
+    ranked: list[tuple[int, int, dict[str, Any]]] = []
+    for record in page_records:
+        flags = {str(flag) for flag in (record.get("flags", []) or []) if str(flag).strip()}
+        if "toc_like" in flags:
+            continue
+        score = 0
+        if "image_text_sparse" in flags:
+            score += 6
+        if "thin_text" in flags:
+            score += 4
+        if "table_layout" in flags:
+            score += 5
+        if "requirement_matrix_markers" in flags:
+            score += 5
+        score += min(int(record.get("marker_hits", 0) or 0), 4)
+        if score <= 0:
+            continue
+        ranked.append((score, int(record.get("page_number", 0) or 0), record))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return [dict(record, hard_page_score=score) for score, _, record in ranked[:max_pages]]
+
+
+def _render_pdf_page_png(data: bytes, page_number: int, *, zoom: float = 1.8) -> bytes | None:
+    if fitz is None:
+        return None
+    try:
+        document = fitz.open(stream=data, filetype="pdf")
+        page = document.load_page(max(0, page_number - 1))
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        return pixmap.tobytes("png")
+    except Exception:
+        return None
+    return None
+
+
+def _normalize_vision_row(value: dict[str, Any], *, page_number: int, row_index: int) -> dict[str, Any] | None:
+    text = _normalize_text(value.get("text") or "")
+    if not text:
+        return None
+    cells = [_normalize_text(cell) for cell in (value.get("cells", []) or []) if _normalize_text(cell)]
+    kind = str(value.get("kind") or "").strip().lower() or _table_row_kind(text)
+    label = _normalize_text(value.get("label") or (cells[0] if cells else text[:80]))
+    return {
+        "line_index": page_number * 1000 + row_index,
+        "page_number": page_number,
+        "kind": kind,
+        "label": label[:120],
+        "text": _normalize_text(f"Page {page_number}; {text}")[:420],
+        "cells": cells[:10],
+        "source_kind": "vision_page",
+    }
+
+
+def _normalize_vision_section_block(value: dict[str, Any], *, page_number: int) -> dict[str, str] | None:
+    title = _heading_title(_normalize_text(value.get("title") or ""))[:180]
+    body = _normalize_text(value.get("text") or value.get("source_text") or "")
+    if not body:
+        return None
+    source_text = _normalize_text(value.get("source_text") or body)
+    section_text = _normalize_text(f"{title}; {body}" if title and title.lower() not in body.lower() else body)[:1200]
+    return {
+        "title": title or f"Page {page_number} requirement block",
+        "text": section_text,
+        "source_text": _normalize_text(f"Page {page_number}: {source_text}")[:2200],
+        "page_number": str(page_number),
+        "source_kind": "vision_page",
+    }
+
+
+def _vision_page_review(
+    *,
+    filename: str,
+    category: str,
+    page_number: int,
+    page_text: str,
+    image_bytes: bytes,
+) -> dict[str, Any] | None:
+    system_prompt = (
+        "You are extracting requirement-bearing solicitation content from a single page image. "
+        "Return JSON only. Keep wording close to the page. Ignore headers, footers, page numbers, and table-of-contents text. "
+        "Do not invent content. Prefer scope, task, CLIN, pricing, staffing, acceptance, remedy, transition, and evaluation details. "
+        "For section_blocks, return short requirement-bearing blocks with title, text, and source_text. "
+        "For table_rows, preserve visible row meaning with kind, label, text, and cells. "
+        "Valid kinds are clin, task, pricing, acceptance, remedy, matrix, or table."
+    )
+    user_payload = {
+        "filename": filename,
+        "category": category,
+        "page_number": page_number,
+        "native_text_excerpt": _normalize_preserve_lines(page_text, max_chars=3000),
+        "required_output": {
+            "section_blocks": [{"title": "string", "text": "string", "source_text": "string"}],
+            "table_rows": [{"kind": "string", "label": "string", "text": "string", "cells": ["string"]}],
+            "parse_warnings": ["string"],
+        },
+    }
+    payload = _call_openai_vision_json(
+        system_prompt=system_prompt,
+        user_payload=user_payload,
+        image_bytes=image_bytes,
+    )
+    if not isinstance(payload, dict):
+        return None
+    page_sections = [
+        block
+        for block in (
+            _normalize_vision_section_block(item, page_number=page_number)
+            for item in (payload.get("section_blocks", []) or [])
+            if isinstance(item, dict)
+        )
+        if block is not None
+    ]
+    page_rows = [
+        row
+        for row in (
+            _normalize_vision_row(item, page_number=page_number, row_index=index)
+            for index, item in enumerate((payload.get("table_rows", []) or []), start=1)
+            if isinstance(item, dict)
+        )
+        if row is not None
+    ]
+    warnings = _dedupe_strings(
+        [_normalize_text(item) for item in (payload.get("parse_warnings", []) or []) if _normalize_text(item)]
+    )[:6]
+    return {
+        "page_number": page_number,
+        "model_name": str(payload.get("_model_name") or DEFAULT_ATTACHMENT_VISION_MODEL),
+        "section_blocks": page_sections[:6],
+        "table_rows": page_rows[:12],
+        "parse_warnings": warnings,
+    }
+
+
+def _render_vision_text_excerpt(pages: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for page in pages:
+        page_number = int(page.get("page_number", 0) or 0)
+        for block in (page.get("section_blocks", []) or []):
+            if not isinstance(block, dict):
+                continue
+            source_text = _normalize_text(block.get("source_text") or block.get("text") or "")
+            if source_text:
+                lines.append(source_text if source_text.lower().startswith(f"page {page_number}:") else f"Page {page_number}: {source_text}")
+        for row in (page.get("table_rows", []) or []):
+            if not isinstance(row, dict):
+                continue
+            text = _normalize_text(row.get("text") or "")
+            if text:
+                lines.append(text)
+    return _normalize_preserve_lines("\n".join(lines), max_chars=20000)
+
+
+def _merge_hard_page_structures(
+    structures: dict[str, Any],
+    vision_pages: list[dict[str, Any]],
+) -> dict[str, Any]:
+    merged = {
+        "headings": list(structures.get("headings", []) or []),
+        "section_blocks": list(structures.get("section_blocks", []) or []),
+        "structured_rows": list(structures.get("structured_rows", []) or []),
+        "table_blocks": list(structures.get("table_blocks", []) or []),
+        "matrix_rows": list(structures.get("matrix_rows", []) or []),
+        "pricing_rows": list(structures.get("pricing_rows", []) or []),
+        "acceptance_rows": list(structures.get("acceptance_rows", []) or []),
+        "remedy_rows": list(structures.get("remedy_rows", []) or []),
+        "section_graph": list(structures.get("section_graph", []) or []),
+        "parse_warnings": list(structures.get("parse_warnings", []) or []),
+    }
+    seen_sections = {
+        _normalize_text(f"{item.get('title', '')} {item.get('source_text', '')}")
+        for item in merged["section_blocks"]
+        if isinstance(item, dict)
+    }
+    seen_rows = {_normalize_text(item) for item in merged["structured_rows"] if isinstance(item, str)}
+    additional_row_records: list[dict[str, Any]] = []
+    for page in vision_pages:
+        for block in (page.get("section_blocks", []) or []):
+            if not isinstance(block, dict):
+                continue
+            title = _normalize_text(block.get("title") or "")
+            if title:
+                merged["headings"].append(title)
+            key = _normalize_text(f"{block.get('title', '')} {block.get('source_text', '')}")
+            if key and key not in seen_sections:
+                seen_sections.add(key)
+                merged["section_blocks"].append(block)
+        for row in (page.get("table_rows", []) or []):
+            if not isinstance(row, dict):
+                continue
+            row_text = _normalize_text(row.get("text") or "")
+            if row_text and row_text not in seen_rows:
+                seen_rows.add(row_text)
+                merged["structured_rows"].append(row_text[:420])
+                additional_row_records.append(row)
+                kind = str(row.get("kind", "table") or "table")
+                if kind in {"clin", "task", "matrix"}:
+                    merged["matrix_rows"].append(row)
+                if kind == "pricing":
+                    merged["pricing_rows"].append(row)
+                if kind == "acceptance":
+                    merged["acceptance_rows"].append(row)
+                if kind == "remedy":
+                    merged["remedy_rows"].append(row)
+        merged["parse_warnings"].extend(page.get("parse_warnings", []) or [])
+    if additional_row_records:
+        merged["table_blocks"].extend(_table_blocks(additional_row_records, max_blocks=8))
+    merged["headings"] = _dedupe_strings(merged["headings"])[:24]
+    merged["section_blocks"].sort(key=lambda item: _section_block_priority(item.get("title", ""), item.get("text", "")), reverse=True)
+    merged["section_blocks"] = merged["section_blocks"][:12]
+    merged["structured_rows"] = _dedupe_strings(merged["structured_rows"])[:36]
+    merged["table_blocks"] = merged["table_blocks"][:8]
+    merged["matrix_rows"] = merged["matrix_rows"][:36]
+    merged["pricing_rows"] = merged["pricing_rows"][:36]
+    merged["acceptance_rows"] = merged["acceptance_rows"][:36]
+    merged["remedy_rows"] = merged["remedy_rows"][:36]
+    merged["parse_warnings"] = _dedupe_strings(merged["parse_warnings"])[:12]
+    return merged
+
+
+def _review_hard_pdf_pages(
+    *,
+    filename: str,
+    category: str,
+    data: bytes,
+) -> dict[str, Any]:
+    if not filename.lower().endswith(".pdf"):
+        return {"status": "skipped_not_pdf", "candidates": [], "pages": []}
+    if category not in ATTACHMENT_VISION_ALLOWED_CATEGORIES:
+        return {"status": "skipped_category", "candidates": [], "pages": []}
+    if fitz is None:
+        return {"status": "skipped_missing_fitz", "candidates": [], "pages": []}
+    page_records = _pdf_page_records(data)
+    candidates = _select_hard_page_candidates(page_records)
+    if not candidates:
+        return {"status": "no_hard_pages", "candidates": [], "pages": []}
+    if _openai_client() is None:
+        return {"status": "skipped_no_openai_client", "candidates": candidates, "pages": []}
+    reviewed_pages: list[dict[str, Any]] = []
+    model_name = ""
+    for candidate in candidates:
+        image_bytes = _render_pdf_page_png(data, int(candidate.get("page_number", 0) or 0))
+        if not image_bytes:
+            continue
+        page_review = _vision_page_review(
+            filename=filename,
+            category=category,
+            page_number=int(candidate.get("page_number", 0) or 0),
+            page_text=str(candidate.get("text", "") or ""),
+            image_bytes=image_bytes,
+        )
+        if not isinstance(page_review, dict):
+            continue
+        model_name = str(page_review.get("model_name") or model_name)
+        reviewed_pages.append(page_review)
+    return {
+        "status": "ok" if reviewed_pages else "error",
+        "model_name": model_name or DEFAULT_ATTACHMENT_VISION_MODEL,
+        "candidates": candidates,
+        "pages": reviewed_pages,
+    }
+
+
 def _extract_docx_text(data: bytes) -> str:
     if Document is None:
         raise RuntimeError("python-docx unavailable")
@@ -451,7 +848,7 @@ def _extract_docx_text(data: bytes) -> str:
             cells = [_normalize_text(cell.text) for cell in row.cells if _normalize_text(cell.text)]
             if not cells:
                 continue
-            values.append(" | ".join(cells[:10]))
+            values.append(" | ".join(cells))
     return "\n".join(values)
 
 
@@ -1014,6 +1411,48 @@ def _download_attachment(
     )
 
 
+def _understanding_input(data: bytes, filename: str, extracted: str, vision_pages: list) -> tuple[str, dict]:
+    """Keep checkpoint input independent of the renderer's bounded excerpts."""
+    limit = 1000000
+    metadata = {"complete": True, "basis": "native_text", "pages_total": None, "pages_extracted": None,
+                "unreadable_pages": [], "limitations": []}
+    text = extracted
+    if filename.lower().endswith(".pdf"):
+        page_limit = 500
+        try:
+            if fitz is not None:
+                with fitz.open(stream=data, filetype="pdf") as doc:
+                    metadata["pages_total"] = len(doc)
+                    pages = [doc.load_page(i).get_text("text") for i in range(min(len(doc), page_limit))]
+            elif PdfReader is not None:
+                doc = PdfReader(io.BytesIO(data))
+                metadata["pages_total"] = len(doc.pages)
+                pages = [page.extract_text() or "" for page in doc.pages[:page_limit]]
+            else:
+                raise RuntimeError("No PDF text extractor is available")
+            metadata["pages_extracted"] = len(pages)
+            metadata["unreadable_pages"] = [i for i, page in enumerate(pages, 1) if len(page.strip()) < 40]
+            metadata["complete"] = len(pages) == metadata["pages_total"] and not metadata["unreadable_pages"]
+            text = "\n\n".join(f"[Page {i}]\n{page}" for i, page in enumerate(pages, 1))
+            metadata["limitations"].append("Native text coverage is not proof of image/table fidelity; sparse pages require review.")
+        except Exception as error:
+            metadata["complete"] = False
+            metadata["limitations"].append(f"Full PDF coverage failed: {type(error).__name__}")
+    elif filename.lower().endswith(".xlsx"):
+        metadata["complete"] = False
+        metadata["limitations"].append("Current workbook extractor samples sheets/rows; full workbook understanding is not established.")
+    vision_text = _render_vision_text_excerpt(vision_pages)
+    if vision_text:
+        text += "\n\n[Vision extracted hard-page evidence]\n" + vision_text
+        # Partial vision recovery is not evidence that every sparse page was read.
+    full = _normalize_preserve_lines(text, max_chars=max(len(text), 1))
+    metadata.update(characters_extracted=len(full), characters_retained=min(len(full), limit))
+    if len(full) > limit:
+        metadata["complete"] = False
+        metadata["limitations"].append("Checkpoint text resource limit exceeded.")
+    return full[:limit], metadata
+
+
 def _attachment_record_from_bytes(
     *,
     url: str,
@@ -1034,6 +1473,25 @@ def _attachment_record_from_bytes(
         text=structured_excerpt,
         data=data,
     )
+    vision_review = _review_hard_pdf_pages(
+        filename=filename,
+        category=category,
+        data=data,
+    )
+    structures = _extract_text_structures(structured_excerpt)
+    vision_pages = vision_review.get("pages", []) if isinstance(vision_review, dict) else []
+    if isinstance(vision_pages, list) and vision_pages:
+        structures = _merge_hard_page_structures(structures, vision_pages)
+        vision_excerpt = _render_vision_text_excerpt(vision_pages)
+        if vision_excerpt:
+            structured_excerpt = _normalize_preserve_lines(
+                "\n\n".join([structured_excerpt, "[Vision extracted hard-page evidence]", vision_excerpt]),
+                max_chars=160000,
+            )
+    understanding_text, understanding_coverage = _understanding_input(data, filename, text, vision_pages)
+    if truncated:
+        understanding_coverage["complete"] = False
+        understanding_coverage["limitations"].append("Source bytes were truncated.")
     record = {
         "url": url,
         "filename": filename,
@@ -1043,13 +1501,40 @@ def _attachment_record_from_bytes(
         "parser_status": parser_status,
         "text_excerpt": structured_excerpt[:18000],
         "structured_text_excerpt": structured_excerpt,
+        "understanding_text": understanding_text,
+        "understanding_coverage": understanding_coverage,
         "category": category,
         **analysis,
     }
-    structures = _extract_text_structures(structured_excerpt)
+    if (
+        isinstance(vision_review, dict)
+        and vision_review.get("status") == "ok"
+        and (vision_review.get("pages") or [])
+    ):
+        record["analysis_flags"] = _dedupe_strings(
+            [
+                *(record.get("analysis_flags", []) or []),
+                "hard_page_review_applied",
+            ]
+        )
+        native_review_required = bool(record.get("review_required"))
+        recovered_structure = bool(structures.get("section_blocks") or structures.get("structured_rows"))
+        if native_review_required and recovered_structure:
+            record["review_required"] = False
+    record["hard_page_candidates"] = vision_review.get("candidates", []) if isinstance(vision_review, dict) else []
+    record["vision_review_status"] = vision_review.get("status", "skipped") if isinstance(vision_review, dict) else "skipped"
+    record["vision_model"] = vision_review.get("model_name", "") if isinstance(vision_review, dict) else ""
+    record["vision_pages"] = vision_pages if isinstance(vision_pages, list) else []
     record["headings"] = structures.get("headings", [])
     record["section_blocks"] = structures.get("section_blocks", [])
     record["structured_rows"] = structures.get("structured_rows", [])
+    record["table_blocks"] = structures.get("table_blocks", [])
+    record["matrix_rows"] = structures.get("matrix_rows", [])
+    record["pricing_rows"] = structures.get("pricing_rows", [])
+    record["acceptance_rows"] = structures.get("acceptance_rows", [])
+    record["remedy_rows"] = structures.get("remedy_rows", [])
+    record["section_graph"] = structures.get("section_graph", [])
+    record["parse_warnings"] = structures.get("parse_warnings", [])
     record["snippets"] = _attachment_snippets(
         "\n".join(
             [
@@ -1085,6 +1570,8 @@ def load_local_attachments(
             continue
         normalized_paths.append(path)
 
+    if len(normalized_paths) > max_attachments:
+        errors.append(f"attachment_limit_exceeded: {len(normalized_paths) - max_attachments} files were not read")
     for path in normalized_paths[:max_attachments]:
         try:
             data = path.read_bytes()

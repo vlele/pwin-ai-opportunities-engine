@@ -487,6 +487,9 @@ def _fit_block(section: dict[str, Any]) -> str:
             "### Past Performance Hits",
             _markdown_list(section.get("past_performance_hits", [])),
             "",
+            "### Checked Component Coverage",
+            _markdown_list(section.get("component_coverage_notes", [])),
+            "",
             "### Proof Points We Can Use",
             _markdown_list(section.get("proof_points", [])),
             "",
@@ -608,8 +611,7 @@ def _win_strategy_block(section: dict[str, Any]) -> str:
 
 
 def _questions_block(section: dict[str, Any]) -> str:
-    return "\n".join(
-        [
+    blocks = [
             "### Questions for Customer / Formal Q&A",
             _markdown_list(section.get("customer", [])),
             "",
@@ -622,7 +624,11 @@ def _questions_block(section: dict[str, Any]) -> str:
             "### Questions Requiring Missing Documents",
             _markdown_list(section.get("missing_documents", [])),
         ]
-    )
+    if section.get("unresolved_precedence"):
+        blocks.extend(["", "### Unresolved Precedence", _markdown_list(section["unresolved_precedence"])])
+    if section.get("formal_qa_evidence"):
+        blocks.extend(["", "### Formal Q&A Source Evidence", _markdown_list(section["formal_qa_evidence"])])
+    return "\n".join(blocks)
 
 
 def _action_items_block(items: list[dict[str, Any]]) -> str:

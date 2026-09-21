@@ -28,7 +28,7 @@ Optional:
 
 - A `GovTribe MCP` API key exposed as `GOVTRIBE_MCP_API_KEY`
 
-Base scan and capture work with `SAM_API_KEY` alone. `OPENAI_API_KEY` enables only the shipped semantic reasoning path. `GovTribe MCP` uses `GOVTRIBE_MCP_API_KEY` directly, is optional, and is disabled by default per workspace.
+Base scan can work without OpenAI reasoning. Capture now requires a working `OPENAI_API_KEY` for its understanding checkpoint before market research. Missing or unavailable reasoning returns `TECHNICAL_BLOCKED`, not an approved heuristic capture. `GovTribe MCP` uses `GOVTRIBE_MCP_API_KEY` directly, is optional, and is disabled by default per workspace.
 
 If your GitHub setup uses HTTPS instead of SSH, swap the clone URLs below to the HTTPS form you normally use.
 
@@ -291,6 +291,11 @@ The digest is where you pick stable IDs for tracked capture.
 
 ## 9. Run Capture Research
 
+Capture may pause as `NEEDS_CLARIFICATION` or `NEEDS_FORMAL_QA` before research. Read
+the returned `clarification_path`, supply actual answers or authoritative documents,
+and resume using `--clarification-answers`. Do not substitute an older memo for a
+paused run. See [checkpoint instructions and examples](../references/capture-clarification.md).
+
 You now have three supported capture paths:
 
 - tracked capture from a digest stable ID such as `A1`
@@ -404,7 +409,7 @@ That feedback is logged to `procurement/feedback-events.jsonl` and applied to fu
 
 1. Clone the repo with your normal authenticated GitHub method.
 2. Export `SAM_API_KEY`.
-3. Export `OPENAI_API_KEY` if you want the shipped reasoning path.
+3. Export `OPENAI_API_KEY` for capture's understanding checkpoint and optional scan reasoning.
 4. Export `GOVTRIBE_MCP_API_KEY` only if you want the optional GovTribe sidecar.
 5. Create a workspace.
 6. Bootstrap it from the company website.

@@ -7,8 +7,12 @@ import time
 from collections import defaultdict
 from typing import Any
 
+from common.capture_fit import build_fit_catalog, validate_fit_assessment
+
 from common.openai_reasoning_types import (
     AlignmentLevel,
+    CaptureReasoningRow,
+    CaptureStrategyReasoningPayload,
     CompetitivePosture,
     ConfidenceLevel,
     CrediblePosture,
@@ -562,6 +566,169 @@ def _coerce_evidence_spans(value: Any) -> list[ReasoningEvidenceSpan]:
     return rows[:4]
 
 
+def _capture_row(
+    category: str,
+    text: Any,
+    evidence_anchor: Any,
+    *,
+    confidence: Any = "medium",
+) -> CaptureReasoningRow:
+    return {
+        "category": str(category or "capture_reasoning").strip() or "capture_reasoning",
+        "text": _clip_text(text, 320),
+        "evidence_anchor": _clip_text(evidence_anchor, 480),
+        "confidence": _coerce_confidence(confidence),
+    }
+
+
+def _coerce_capture_rows(value: Any, fallback: list[CaptureReasoningRow]) -> list[CaptureReasoningRow]:
+    rows: list[CaptureReasoningRow] = []
+    if isinstance(value, list):
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            rows.append(
+                _capture_row(
+                    str(item.get("category") or "capture_reasoning"),
+                    text,
+                    item.get("evidence_anchor") or item.get("anchor") or text,
+                    confidence=item.get("confidence") or "medium",
+                )
+            )
+            rows[-1]["requirement_ids"] = _coerce_string_list(item.get("requirement_ids"))
+            rows[-1]["vendor_evidence_ids"] = _coerce_string_list(item.get("vendor_evidence_ids"))
+    return rows[:6]
+
+
+def _capture_fact_rows(model: dict[str, Any], key: str, *, max_items: int = 6) -> list[CaptureReasoningRow]:
+    rows = model.get(key, []) if isinstance(model, dict) else []
+    if not isinstance(rows, list):
+        return []
+    output: list[CaptureReasoningRow] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text") or row.get("value") or "").strip()
+        if not text:
+            continue
+        output.append(
+            _capture_row(
+                str(row.get("category") or key.replace("_rows", "") or "capture_reasoning"),
+                text,
+                row.get("evidence_anchor") or row.get("source_text") or text,
+                confidence=row.get("confidence") or "medium",
+            )
+        )
+        if len(output) >= max_items:
+            break
+    return output
+
+
+def _capture_workstream_rows(
+    attachment_workstreams: list[dict[str, Any]] | Any,
+    *,
+    max_items: int = 6,
+) -> list[CaptureReasoningRow]:
+    if not isinstance(attachment_workstreams, list):
+        return []
+    rows: list[CaptureReasoningRow] = []
+    for item in attachment_workstreams:
+        if not isinstance(item, dict):
+            continue
+        objective = str(item.get("objective") or "").strip()
+        title = str(item.get("title") or "").strip()
+        if not objective and not title:
+            continue
+        text = objective
+        if title and objective and title.lower() not in objective.lower():
+            text = f"{title}: {objective}"
+        elif title and not objective:
+            text = title
+        anchor = ""
+        snippets = item.get("evidence_snippets", [])
+        if isinstance(snippets, list):
+            for snippet in snippets:
+                if str(snippet or "").strip():
+                    anchor = str(snippet).strip()
+                    break
+        rows.append(_capture_row("attachment_workstream", text, anchor or text, confidence="high"))
+        if len(rows) >= max_items:
+            break
+    return rows
+
+
+def _capture_attachment_source_rows(
+    attachment_bundle: dict[str, Any] | Any,
+    *,
+    max_section_rows: int = 6,
+    max_table_rows: int = 6,
+) -> dict[str, list[CaptureReasoningRow]]:
+    if not isinstance(attachment_bundle, dict):
+        return {"section_block_rows": [], "table_row_rows": []}
+    attachments = attachment_bundle.get("attachments", [])
+    if not isinstance(attachments, list):
+        return {"section_block_rows": [], "table_row_rows": []}
+    section_rows: list[CaptureReasoningRow] = []
+    table_rows: list[CaptureReasoningRow] = []
+    for item in attachments:
+        if not isinstance(item, dict):
+            continue
+        filename = str(item.get("filename") or "attachment").strip() or "attachment"
+        for block in (item.get("section_blocks", []) or []):
+            if not isinstance(block, dict):
+                continue
+            title = str(block.get("title") or "").strip()
+            text = str(block.get("text") or "").strip()
+            source_text = str(block.get("source_text") or text).strip()
+            if not text or not source_text:
+                continue
+            rendered = text if filename.lower() in text.lower() else f"{filename}: {text}"
+            section_rows.append(
+                _capture_row(
+                    "attachment_section_block",
+                    rendered,
+                    source_text if filename.lower() in source_text.lower() else f"{filename}: {source_text}",
+                    confidence="high",
+                )
+            )
+            if len(section_rows) >= max_section_rows:
+                break
+        row_lists = [
+            ("matrix_rows", "attachment_matrix_row"),
+            ("pricing_rows", "attachment_pricing_row"),
+            ("acceptance_rows", "attachment_acceptance_row"),
+            ("remedy_rows", "attachment_remedy_row"),
+        ]
+        for key, category in row_lists:
+            for row in (item.get(key, []) or []):
+                if not isinstance(row, dict):
+                    continue
+                text = str(row.get("text") or "").strip()
+                if not text:
+                    continue
+                table_rows.append(
+                    _capture_row(
+                        category,
+                        text if filename.lower() in text.lower() else f"{filename}: {text}",
+                        text if filename.lower() in text.lower() else f"{filename}: {text}",
+                        confidence="high",
+                    )
+                )
+                if len(table_rows) >= max_table_rows:
+                    break
+            if len(table_rows) >= max_table_rows:
+                break
+        if len(section_rows) >= max_section_rows and len(table_rows) >= max_table_rows:
+            break
+    return {
+        "section_block_rows": section_rows[:max_section_rows],
+        "table_row_rows": table_rows[:max_table_rows],
+    }
+
+
 def _empty_semantic_entities() -> SemanticResolvedEntities:
     return {
         "semantic_positive_facets": [],
@@ -788,7 +955,7 @@ def _heuristic_fit_assessment(
     score_delta = len(_dedupe_strings(positive_hits)) - len(_dedupe_strings(negative_hits))
     if score_delta >= 2:
         fit_assessment: FitAssessment = "strong_fit"
-    elif score_delta >= 0:
+    elif score_delta > 0:
         fit_assessment = "adjacent_fit"
     elif negative_hits and not positive_hits:
         fit_assessment = "misleading_keyword_match"
@@ -969,6 +1136,131 @@ def _sanitize_vendor_profile(vendor_profile: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _heuristic_capture_strategy(
+    *,
+    vendor_profile: dict[str, Any],
+    resolved: dict[str, Any],
+    solicitation_facts: dict[str, Any],
+    solicitation_fact_model: dict[str, Any],
+    attachment_workstreams: list[dict[str, Any]],
+    evaluator_anxiety_model: dict[str, Any],
+    public_research: dict[str, Any],
+    normalized_evidence: dict[str, Any],
+) -> CaptureStrategyReasoningPayload:
+    evaluator_anxiety_rows = _capture_fact_rows(evaluator_anxiety_model, "evaluator_anxiety_rows")
+    pain_point_rows = _coerce_capture_rows(
+        evaluator_anxiety_model.get("reasoned_pain_point_rows"),
+        _capture_workstream_rows(attachment_workstreams, max_items=4),
+    )
+    win_theme_rows = _coerce_capture_rows(
+        evaluator_anxiety_model.get("reasoned_win_theme_rows"),
+        _capture_fact_rows(solicitation_fact_model, "workstream_fact_rows", max_items=4),
+    )
+    differentiator_rows = _coerce_capture_rows(
+        evaluator_anxiety_model.get("reasoned_differentiator_rows"),
+        _capture_fact_rows(solicitation_fact_model, "deliverable_fact_rows", max_items=4),
+    )
+    proof_requirement_rows = _coerce_capture_rows(
+        evaluator_anxiety_model.get("proof_requirement_rows"),
+        _capture_fact_rows(solicitation_fact_model, "pricing_fact_rows", max_items=4)
+        or _capture_fact_rows(solicitation_fact_model, "access_fact_rows", max_items=4),
+    )
+    normalized_incumbent = normalized_evidence.get("incumbent", {}) if isinstance(normalized_evidence, dict) else {}
+    public_gap = (
+        "Public mission, budget, and forecast anchors remain thin in this run, so strategy should stay tied to package evidence."
+        if float(public_research.get("requirement_relevant_ratio", 0.0) or 0.0) < 0.25
+        else ""
+    )
+    incumbent_gap = (
+        "Incumbent and recompete posture still need confirmation from official attachments or award records."
+        if not str(normalized_incumbent.get("name") or "").strip()
+        else ""
+    )
+    reasoned_pain_points = _coerce_string_list(evaluator_anxiety_model.get("reasoned_pain_points"))
+    reasoned_hot_buttons = (
+        _coerce_string_list(evaluator_anxiety_model.get("reasoned_hot_buttons"))
+        or reasoned_pain_points[:]
+        or _dedupe_strings(str(row.get("text") or "").strip() for row in evaluator_anxiety_rows if isinstance(row, dict))
+    )
+    reasoned_win_themes = _coerce_string_list(evaluator_anxiety_model.get("reasoned_win_themes"))
+    reasoned_differentiators = _coerce_string_list(evaluator_anxiety_model.get("reasoned_differentiators"))
+    proof_requirements = _coerce_string_list(evaluator_anxiety_model.get("proof_requirements"))
+    pricing_posture = _coerce_string_list(evaluator_anxiety_model.get("pricing_posture"))
+    risk_implications = _dedupe_strings(
+        _coerce_string_list(evaluator_anxiety_model.get("risk_implications"))
+        + ([public_gap] if public_gap else [])
+        + ([incumbent_gap] if incumbent_gap else [])
+    )
+    central_pain_point = str(evaluator_anxiety_model.get("central_pain_point") or "").strip()
+    if not central_pain_point:
+        central_pain_point = (
+            reasoned_pain_points[0]
+            if reasoned_pain_points
+            else f'Requirement-specific pain point remains thin for "{resolved.get("title") or "this opportunity"}" until more scope evidence is recovered.'
+        )
+    reasoning_summary = str(evaluator_anxiety_model.get("reasoning_summary") or "").strip()
+    if not reasoning_summary:
+        reasoning_summary = (
+            " ".join(reasoned_pain_points[:2])
+            if reasoned_pain_points
+            else "Attachment-native evidence is still too thin to build a stronger heuristic capture judgment."
+        )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "reasoning_source": "heuristic_fallback",
+        "model_name": "",
+        "central_pain_point": central_pain_point,
+        "reasoning_summary": reasoning_summary,
+        "reasoned_pain_points": reasoned_pain_points,
+        "reasoned_hot_buttons": reasoned_hot_buttons,
+        "reasoned_win_themes": reasoned_win_themes,
+        "reasoned_differentiators": reasoned_differentiators,
+        "proof_requirements": proof_requirements,
+        "pricing_posture": pricing_posture,
+        "risk_implications": risk_implications,
+        "evaluator_anxiety_rows": evaluator_anxiety_rows,
+        "reasoned_pain_point_rows": pain_point_rows,
+        "reasoned_hot_button_rows": _coerce_capture_rows(
+            evaluator_anxiety_model.get("reasoned_hot_button_rows"),
+            evaluator_anxiety_rows or pain_point_rows,
+        ),
+        "reasoned_win_theme_rows": win_theme_rows,
+        "reasoned_differentiator_rows": differentiator_rows,
+        "proof_requirement_rows": proof_requirement_rows,
+    }
+
+
+def _coerce_capture_reasoning_payload(
+    value: dict[str, Any] | None,
+    fallback: CaptureStrategyReasoningPayload,
+) -> CaptureStrategyReasoningPayload:
+    if not isinstance(value, dict):
+        value = {"reasoning_source": "unavailable", "risk_implications": ["Model assessment unavailable; company advantages and fit remain unverified."]}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "reasoning_source": str(value.get("reasoning_source") or "openai_model").strip() or "openai_model",
+        "model_name": str(value.get("model_name") or fallback.get("model_name") or DEFAULT_REASONING_MODEL).strip(),
+        "central_pain_point": str(value.get("central_pain_point") or fallback.get("central_pain_point") or "").strip(),
+        "reasoning_summary": str(value.get("reasoning_summary") or fallback.get("reasoning_summary") or "").strip(),
+        "reasoned_pain_points": _coerce_string_list(value.get("reasoned_pain_points")) or fallback.get("reasoned_pain_points", []),
+        "reasoned_hot_buttons": _coerce_string_list(value.get("reasoned_hot_buttons")) or fallback.get("reasoned_hot_buttons", []),
+        "reasoned_win_themes": _coerce_string_list(value.get("reasoned_win_themes")),
+        "reasoned_differentiators": _coerce_string_list(value.get("reasoned_differentiators")),
+        "proof_requirements": _coerce_string_list(value.get("proof_requirements")) or fallback.get("proof_requirements", []),
+        "pricing_posture": _coerce_string_list(value.get("pricing_posture")) or fallback.get("pricing_posture", []),
+        "risk_implications": _coerce_string_list(value.get("risk_implications")) or fallback.get("risk_implications", []),
+        "evaluator_anxiety_rows": _coerce_capture_rows(value.get("evaluator_anxiety_rows"), fallback.get("evaluator_anxiety_rows", [])),
+        "reasoned_pain_point_rows": _coerce_capture_rows(value.get("reasoned_pain_point_rows"), fallback.get("reasoned_pain_point_rows", [])),
+        "reasoned_hot_button_rows": _coerce_capture_rows(
+            value.get("reasoned_hot_button_rows"),
+            fallback.get("reasoned_hot_button_rows", []),
+        ),
+        "reasoned_win_theme_rows": _coerce_capture_rows(value.get("reasoned_win_theme_rows"), fallback.get("reasoned_win_theme_rows", [])),
+        "reasoned_differentiator_rows": _coerce_capture_rows(value.get("reasoned_differentiator_rows"), fallback.get("reasoned_differentiator_rows", [])),
+        "proof_requirement_rows": _coerce_capture_rows(value.get("proof_requirement_rows"), fallback.get("proof_requirement_rows", [])),
+    }
+
+
 def _openai_client(api_key: str | None = None):
     if OpenAI is None:
         return None
@@ -987,6 +1279,8 @@ def _call_openai_json(
     user_payload: dict[str, Any],
     model: str | None,
     timeout_seconds: int,
+    response_schema: dict[str, Any] | None = None,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any] | None:
     client = _openai_client()
     if client is None:
@@ -994,9 +1288,14 @@ def _call_openai_json(
     effective_timeout = max(int(timeout_seconds or 0), DEFAULT_REASONING_TIMEOUT_SECONDS)
     try:
         message = json.dumps(user_payload, ensure_ascii=True)
-        completion = client.with_options(timeout=effective_timeout).chat.completions.create(
+        options = {"timeout": effective_timeout}
+        if response_schema is not None:
+            # The understanding pipeline owns its bounded contract correction.
+            options["max_retries"] = 0
+        completion = client.with_options(**options).chat.completions.create(
             model=model or DEFAULT_REASONING_MODEL,
-            response_format={"type": "json_object"},
+            **({"reasoning_effort": reasoning_effort} if reasoning_effort is not None else {}),
+            response_format={"type": "json_schema", "json_schema": response_schema} if response_schema is not None else {"type": "json_object"},
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": message},
@@ -1094,6 +1393,162 @@ def _coerce_semantic_feedback_payload(value: dict[str, Any] | None, fallback: Se
         "resolved_entities": resolved_entities,
         "reasoning_summary": str(value.get("reasoning_summary") or fallback.get("reasoning_summary") or "").strip(),
     }
+
+
+def assess_capture_strategy(
+    *,
+    vendor_profile: dict[str, Any],
+    resolved: dict[str, Any],
+    solicitation_facts: dict[str, Any],
+    solicitation_fact_model: dict[str, Any],
+    attachment_bundle: dict[str, Any] | None = None,
+    attachment_workstreams: list[dict[str, Any]],
+    evaluator_anxiety_model: dict[str, Any],
+    public_research: dict[str, Any],
+    normalized_evidence: dict[str, Any],
+    model: str | None = None,
+    timeout_seconds: int = 45,
+    clarification_context: dict[str, Any] | None = None,
+) -> CaptureStrategyReasoningPayload:
+    heuristic = _heuristic_capture_strategy(
+        vendor_profile=vendor_profile,
+        resolved=resolved,
+        solicitation_facts=solicitation_facts,
+        solicitation_fact_model=solicitation_fact_model,
+        attachment_workstreams=attachment_workstreams,
+        evaluator_anxiety_model=evaluator_anxiety_model,
+        public_research=public_research,
+        normalized_evidence=normalized_evidence,
+    )
+    attachment_source_rows = _capture_attachment_source_rows(attachment_bundle or {}, max_section_rows=6, max_table_rows=6)
+    fit_catalog = build_fit_catalog(vendor_profile, attachment_workstreams, clarification_context=clarification_context)
+    user_payload = {
+        "vendor_profile": _sanitize_vendor_profile(vendor_profile),
+        "understanding_checkpoint": clarification_context or {},
+        "fit_evidence_catalog": fit_catalog,
+        "opportunity": {
+            "title": resolved.get("title"),
+            "buyer": resolved.get("buyer"),
+            "solicitation_number": resolved.get("solicitation_number"),
+            "notice_id": resolved.get("notice_id"),
+            "url": resolved.get("url"),
+        },
+        "solicitation_facts": {
+            "set_aside": solicitation_facts.get("set_aside"),
+            "contract_vehicle": solicitation_facts.get("contract_vehicle"),
+            "contract_type": solicitation_facts.get("contract_type"),
+            "evaluation_basis": solicitation_facts.get("evaluation_basis"),
+            "transition_window": solicitation_facts.get("transition_window"),
+            "period_of_performance": solicitation_facts.get("period_of_performance"),
+            "funds_status": solicitation_facts.get("funds_status"),
+            "staffing_roles": _coerce_string_list(solicitation_facts.get("staffing_roles"))[:8],
+            "quoted_facts": _coerce_string_list(solicitation_facts.get("quoted_facts"))[:8],
+        },
+        "attachment_workstreams": [
+            {
+                "title": str(item.get("title") or "").strip(),
+                "objective": _clip_text(item.get("objective"), 360),
+                "evidence_snippets": _coerce_string_list(item.get("evidence_snippets"))[:2],
+            }
+            for item in attachment_workstreams[:8]
+            if isinstance(item, dict)
+        ],
+        "attachment_source_rows": {
+            "section_block_rows": attachment_source_rows.get("section_block_rows", []),
+            "table_row_rows": attachment_source_rows.get("table_row_rows", []),
+            "hard_page_review": [
+                {
+                    "filename": str(item.get("filename") or "").strip(),
+                    "vision_review_status": str(item.get("vision_review_status") or "").strip(),
+                    "hard_page_candidates": item.get("hard_page_candidates", [])[:4] if isinstance(item, dict) else [],
+                }
+                for item in ((attachment_bundle or {}).get("attachments", []) or [])[:4]
+                if isinstance(item, dict)
+            ],
+        },
+        "fact_model_rows": {
+            "workstream_fact_rows": _capture_fact_rows(solicitation_fact_model, "workstream_fact_rows", max_items=6),
+            "deliverable_fact_rows": _capture_fact_rows(solicitation_fact_model, "deliverable_fact_rows", max_items=6),
+            "staffing_fact_rows": _capture_fact_rows(solicitation_fact_model, "staffing_fact_rows", max_items=5),
+            "access_fact_rows": _capture_fact_rows(solicitation_fact_model, "access_fact_rows", max_items=5),
+            "pricing_fact_rows": _capture_fact_rows(solicitation_fact_model, "pricing_fact_rows", max_items=5),
+            "evaluation_fact_rows": _capture_fact_rows(solicitation_fact_model, "evaluation_fact_rows", max_items=4),
+            "conflict_rows": _capture_fact_rows(solicitation_fact_model, "conflict_rows", max_items=4),
+        },
+        "public_research": {
+            "mission_context_signals": _coerce_string_list(public_research.get("mission_context_signals"))[:4],
+            "budget_document_signals": _coerce_string_list(public_research.get("budget_document_signals"))[:4],
+            "acquisition_forecast_signals": _coerce_string_list(public_research.get("acquisition_forecast_signals"))[:4],
+            "oversight_signals": _coerce_string_list(public_research.get("oversight_signals"))[:4],
+            "leadership_priority_signals": _coerce_string_list(public_research.get("leadership_priority_signals"))[:4],
+            "evidence_gaps": _coerce_string_list(public_research.get("evidence_gaps"))[:4],
+            "category_anchor_counts": public_research.get("category_anchor_counts", {}),
+            "requirement_relevant_ratio": float(public_research.get("requirement_relevant_ratio", 0.0) or 0.0),
+        },
+        "cross_source_evidence": {
+            "incumbent": normalized_evidence.get("incumbent", {}),
+            "vehicle": normalized_evidence.get("vehicle", {}),
+            "contract_value_or_ceiling": normalized_evidence.get("contract_value_or_ceiling", {}),
+            "recompete_clues": normalized_evidence.get("recompete_clues", []),
+            "related_procurements": normalized_evidence.get("related_procurements", []),
+            "teaming_posture": normalized_evidence.get("teaming_posture", {}),
+            "next_questions": normalized_evidence.get("next_questions", []),
+        },
+        "heuristic_capture_strategy": heuristic,
+    }
+    system_prompt = (
+        "You are a senior Federal GovCon capture manager and proposal strategist. "
+        "Interpret noisy evidence blocks from a solicitation package the way an experienced capture manager would. "
+        "Do not reward formatting, headings, or boilerplate. Focus on what the buyer is likely worried about, "
+        "what would make the vendor credible, and what proof the team would need to win. "
+        "If evidence is thin, be shorter and more explicit, not more specific. "
+        "Use only evidence in the payload. Do not invent customer priorities, funding, incumbent facts, or compliance gates. "
+        "Honor the package-scoped understanding checkpoint. Its answers clarify reported work, not independent verification. "
+        "When fit_evidence_catalog.assessment_mode is checked_component_graph, its requirement IDs and claim/component decisions are authoritative for this run. "
+        "Code projects fit and past-performance coverage from those checked decisions; do not reclassify them or transfer credit to another requirement. "
+        "A direct task match may still have partial coverage. Preserve missing qualifications and the exact supported scope in every company theme and differentiator. "
+        "A partial component match is not a claim of complete qualification, and a proposed proof artifact does not close a missing component. "
+        "Do not revert to an ambiguous profile interpretation that an answer explicitly corrected. "
+        "Answers cannot override solicitation clauses, create unprovided past performance, or turn an unknown into a fact. "
+        "Every hot button, win theme, differentiator, and proof requirement must cite an extracted attachment block, table row, or promoted solicitation fact from the current package. "
+        "Hot buttons should describe evaluator anxiety or what the buyer likely cares about. "
+        "Win themes should describe what the proposal must emphasize to be credible. "
+        "Do not copy raw solicitation clauses, section titles, or administrative text such as 'The Contractor shall' or 'The Government will'. "
+        "Prefer concise capture-manager phrasing over clause echoes. "
+        "If you cannot produce a strong row from current-package evidence, return an empty array for that row set rather than a generic or literal filler line. "
+        "Return JSON only with these fields: "
+        "reasoning_source, model_name, central_pain_point, reasoning_summary, reasoned_pain_points, reasoned_hot_buttons, "
+        "reasoned_win_themes, reasoned_differentiators, proof_requirements, pricing_posture, risk_implications, "
+        "evaluator_anxiety_rows, reasoned_pain_point_rows, reasoned_hot_button_rows, reasoned_win_theme_rows, "
+        "reasoned_differentiator_rows, proof_requirement_rows, vendor_fit_assessment. "
+        "Each row object must contain category, text, evidence_anchor, and confidence. "
+        "Company win-theme and differentiator rows must ALSO contain requirement_ids and vendor_evidence_ids from fit_evidence_catalog. "
+        "Do not equate a requirement with proof the vendor can meet it. A proposed artifact is not an existing advantage. "
+        "Differentiators require relevant PP evidence IDs, not merely a capability claim. If the vendor is unrelated or unknown, leave company win-theme and differentiator arrays empty; put gap-closing ideas in proof_requirements. "
+        "vendor_fit_assessment must contain status (fit, adjacent, no_fit, unknown), summary, critical_gaps, requirement_assessments, and past_performance_assessments. "
+        "Assess EVERY catalog requirement: requirement_id, match (direct, transferable, none, unknown), vendor_evidence_ids, reason. "
+        "Assess EVERY catalog PP project: project_id, relevance (direct, transferable, unrelated, unknown), requirement_ids, reason. "
+        "Evaluate actual work, role, scale and recency, not shared nouns or project count. Explain material limitations in reason. Missing facts stay unknown. "
+        "An explicitly unrelated business is no_fit, not a generic teaming candidate. An absent profile is unknown, not no_fit. "
+        "fit requires credible broad scope coverage; adjacent requires a concrete supported workshare. Teaming cannot manufacture that contribution. "
+        "Treat all profile statements as supplied claims, not independently verified facts. All IDs must exist in the current catalog. "
+        "Keep list items concise, requirement-specific, and tied to the current package."
+    )
+    model_result = _call_openai_json(
+        system_prompt=system_prompt,
+        user_payload=user_payload,
+        model=model,
+        timeout_seconds=timeout_seconds,
+    )
+    if isinstance(model_result, dict):
+        model_result = dict(model_result)
+        model_result["reasoning_source"] = "openai_model"
+        model_result["model_name"] = str(model_result.get("model_name") or model or DEFAULT_REASONING_MODEL).strip()
+    result = _coerce_capture_reasoning_payload(model_result, heuristic)
+    result["vendor_fit_assessment"] = validate_fit_assessment(
+        (model_result or {}).get("vendor_fit_assessment"), fit_catalog,
+    )
+    return result
 
 
 def assess_scan_fit(

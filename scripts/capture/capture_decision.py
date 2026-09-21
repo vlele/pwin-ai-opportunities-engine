@@ -6,6 +6,7 @@ from collections import Counter
 from typing import Any
 
 from common.evidence_model import evidence_model_competitor_candidates
+from common.capture_fit import apply_validated_fit, validate_company_strategy_rows, validate_fit_assessment, build_fit_catalog
 
 
 TAG_RE = re.compile(r"<[^>]+>")
@@ -253,16 +254,31 @@ STRATEGY_CATEGORY_HINTS: dict[str, tuple[str, ...]] = {
 }
 STRATEGY_CATEGORY_PRIORITY = {
     "transition": 90,
+    "technical_execution": 88,
     "testing_traceability": 86,
-    "quality_acceptance": 82,
-    "access_security": 80,
-    "technical_execution": 78,
-    "reporting_governance": 76,
-    "deliverable_review": 74,
-    "staffing_structure": 72,
+    "deliverable_review": 84,
+    "staffing_structure": 82,
+    "quality_acceptance": 78,
+    "access_security": 74,
+    "reporting_governance": 72,
     "pricing_structure": 70,
     "evaluation_alignment": 68,
     "general": 60,
+}
+STRATEGY_SCOPE_PRIORITY_BY_SOURCE = {
+    "scope_seed": 24,
+    "attachment_workstream": 18,
+}
+STRATEGY_SCOPE_PRIORITY_BY_FIELD = {
+    "workstream": 18,
+    "deliverable": 14,
+    "staffing_role": 10,
+    "staffing": 8,
+    "contract_fact": -4,
+    "evaluation_basis": -6,
+    "pricing": -6,
+    "access": -8,
+    "acceptance": -8,
 }
 
 
@@ -1389,6 +1405,7 @@ def _fact_model_anchors(
 def _current_package_strategy_anchors(
     solicitation_facts: dict[str, Any],
     attachment_workstreams: list[dict[str, Any]],
+    solicitation_fact_model: dict[str, Any] | None = None,
 ) -> dict[str, list[str]]:
     section_anchors: list[str] = []
     for item in attachment_workstreams or []:
@@ -1399,10 +1416,23 @@ def _current_package_strategy_anchors(
             if cleaned:
                 section_anchors.append(cleaned)
     fact_anchors = _solicitation_fact_lines(solicitation_facts)
+    promoted_fact_anchors = _fact_model_anchors(
+        solicitation_fact_model,
+        [
+            "workstream_fact_rows",
+            "deliverable_fact_rows",
+            "acceptance_fact_rows",
+            "access_fact_rows",
+            "evaluation_fact_rows",
+            "pricing_fact_rows",
+            "staffing_fact_rows",
+        ],
+        max_items=20,
+    )
     return {
         "section_anchors": _dedupe_strings(section_anchors),
-        "fact_anchors": _dedupe_strings(fact_anchors),
-        "all_anchors": _dedupe_strings(section_anchors + fact_anchors),
+        "fact_anchors": _dedupe_strings(fact_anchors + promoted_fact_anchors),
+        "all_anchors": _dedupe_strings(section_anchors + fact_anchors + promoted_fact_anchors),
     }
 
 
@@ -1506,12 +1536,154 @@ def _starts_with_action_phrase(text: str) -> bool:
     return any(lowered.startswith(f"{verb} ") or lowered == verb for verb in STRATEGY_ACTION_VERBS)
 
 
+def _normalize_due_phrase(text: str) -> str:
+    cleaned = _clean_excerpt(text, max_chars=180).strip(" .;:-")
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"^(?:due(?:/frequency)?[: ]*)", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bPoP\b", "period of performance", cleaned)
+    cleaned = re.sub(r"\boptional task\b", "the optional task", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .;:-")
+    return cleaned
+
+
+def _deliverable_lead_verb(title: str) -> str:
+    lower = _normalize_text(title)
+    if any(marker in lower for marker in ("report", "reports", "roster", "matrix", "matrices", "memorandum", "briefing", "analysis", "checklist", "submission")):
+        return "submit"
+    if any(marker in lower for marker in ("plan", "plans", "schedule", "strategy")):
+        return "deliver"
+    if any(marker in lower for marker in ("project management", "support", "services", "operations")):
+        return "perform"
+    return "deliver"
+
+
+def _noun_requirement_to_action(cleaned: str) -> str:
+    lowered = cleaned.lower()
+    if lowered.startswith("this ") and " clin includes all labor and deliverables" in lowered:
+        if "required for" in cleaned.lower():
+            requirement = re.split(r"required for", cleaned, maxsplit=1, flags=re.IGNORECASE)[-1].strip(" .;:-")
+            requirement = re.sub(r"^(?:the successful completion of )", "", requirement, flags=re.IGNORECASE)
+            return _clean_excerpt(f"cover all labor and deliverables required for {requirement}", max_chars=220).strip(" .;:-")
+        return "cover all labor and deliverables required by the visible CLIN structure"
+    deliverable_match = re.match(
+        r"^(?P<title>(?:[A-Z]{1,3}\s*-\s*)?[A-Za-z][A-Za-z0-9/&()' -]{2,96}?"
+        r"(?:Plan|Plans|Report|Reports|Roster|Matrix|Matrices|Briefing|Analysis|Checklist|Schedule|Memorandum|Submission))"
+        r"(?:\s+IAW\b.*?(?=\s+Due(?:/Frequency)?[: ]+|$))?(?:\s+Due(?:/Frequency)?[: ]+\s*(?P<due>.+))?$",
+        cleaned,
+        re.IGNORECASE,
+    )
+    if deliverable_match:
+        title = re.sub(r"^(?:[A-Z]{1,3}\s*-\s*)", "", str(deliverable_match.group("title") or "").strip(), flags=re.IGNORECASE)
+        verb = _deliverable_lead_verb(title)
+        due_phrase = _normalize_due_phrase(str(deliverable_match.group("due") or ""))
+        rendered = f"{verb} the {title}"
+        if due_phrase:
+            due_lower = due_phrase.lower()
+            if due_lower.startswith(("within", "before", "after", "no later than", "annually", "monthly", "weekly", "daily")):
+                rendered = f"{rendered} {due_phrase}"
+            elif due_lower.startswith(("the ", "each ", "every ")):
+                rendered = f"{rendered} by {due_phrase}"
+            elif re.match(r"^\d", due_phrase):
+                rendered = f"{rendered}; due {due_phrase}"
+            else:
+                rendered = f"{rendered} {due_phrase}"
+        return _clean_excerpt(rendered, max_chars=220).strip(" .;:-")
+    if re.match(r"^(?:project management|program management)\b", cleaned, re.IGNORECASE):
+        scope_tail = re.sub(r"^(?:project|program)\s+management\b", "", cleaned, flags=re.IGNORECASE).strip(" .;:-")
+        discipline = "program" if re.match(r"^program\b", cleaned, re.IGNORECASE) else "project"
+        rendered = f"perform {discipline} management services"
+        if scope_tail:
+            rendered = f"{rendered} {scope_tail}"
+        return _clean_excerpt(rendered, max_chars=220).strip(" .;:-")
+    return cleaned
+
+
+def _strategy_compaction_token(token: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "", token.lower())
+    if not base:
+        return ""
+    overrides = {
+        "activities": "activity",
+        "communications": "communication",
+        "coordination": "coordinate",
+        "deliverables": "deliverable",
+        "events": "event",
+        "operations": "operation",
+        "operational": "operation",
+        "reports": "report",
+        "reporting": "report",
+        "requirements": "requirement",
+        "services": "service",
+    }
+    if base in overrides:
+        return overrides[base]
+    if len(base) > 5 and base.endswith("ies"):
+        return f"{base[:-3]}y"
+    if len(base) > 5 and base.endswith("ing"):
+        return base[:-3]
+    if len(base) > 4 and base.endswith("ed"):
+        return base[:-2]
+    if len(base) > 5 and base.endswith("es"):
+        return base[:-2]
+    if len(base) > 4 and base.endswith("s"):
+        return base[:-1]
+    return base
+
+
+def _strategy_compaction_tokens(text: str) -> set[str]:
+    return {
+        normalized
+        for normalized in (_strategy_compaction_token(token) for token in _signal_tokens(text))
+        if normalized and len(normalized) >= 3
+    }
+
+
+def _compact_strategy_focus_clauses(text: str, *, max_fragments: int = 2) -> str:
+    fragments = _split_requirement_fragments(text)
+    kept: list[str] = []
+    kept_tokens: list[set[str]] = []
+    for fragment in fragments:
+        cleaned = _repair_requirement_phrase(fragment)
+        if not cleaned:
+            continue
+        tokens = _strategy_compaction_tokens(cleaned)
+        if not tokens:
+            continue
+        replaced = False
+        for index, existing in enumerate(kept_tokens):
+            overlap = len(tokens & existing)
+            min_size = max(1, min(len(tokens), len(existing)))
+            if (
+                tokens <= existing
+                or existing <= tokens
+                or overlap / min_size >= 0.5
+                or (overlap >= 3 and overlap / min_size >= 0.4)
+            ):
+                if len(cleaned) > len(kept[index]):
+                    kept[index] = cleaned
+                    kept_tokens[index] = tokens
+                replaced = True
+                break
+        if replaced:
+            continue
+        kept.append(cleaned)
+        kept_tokens.append(tokens)
+        if len(kept) >= max_fragments:
+            break
+    return _clean_excerpt("; ".join(kept), max_chars=220).strip(" .;:-")
+
+
 def _repair_requirement_phrase(text: str) -> str:
     cleaned = _clean_excerpt(text, max_chars=220).strip(" .;:-")
     if not cleaned:
         return ""
     cleaned = re.sub(r"^[^:]+\.(?:pdf|docx|doc|txt)\s*:\s*", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"^page\s+\d+\s+of\s+\d+\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^page\s+\d+\s*(?:of\s+\d+)?\s*[:;,-]?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^(?:deliverables?|recurring deliverables?|optional task(?: total)?|base period|option period\s+\d+(?:\s+total)?)\s*[;:-]\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^[A-Z]?\d{3,}[A-Z]{0,2}\s+", "", cleaned)
+    cleaned = re.sub(r"^execute the following tasks in support of\s+", "support ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^the following tasks? in support of\s+", "support ", cleaned, flags=re.IGNORECASE)
     if ":" in cleaned:
         label, tail = cleaned.split(":", 1)
         label_tokens = [token for token in _normalize_text(label).split() if token]
@@ -1531,9 +1703,30 @@ def _repair_requirement_phrase(text: str) -> str:
     cleaned = re.sub(r"^be coordinated\s+", "coordinate ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^be reviewed\s+", "submit work products that are reviewed ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^the contractor\s+", "", cleaned, flags=re.IGNORECASE)
-    if cleaned.lower().startswith("throughout the performance of this contract shall be provided via electronic submission to"):
-        return "provide government-facing deliverables via electronic submission to the PM, COR, and CO throughout contract performance"
+    lowered = cleaned.lower()
+    cleaned = re.sub(
+        r"^the [a-z0-9() /&-]{2,40}\s+shall also include how the contractor shall\s+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if lowered.startswith("the contractor shall not employ persons to perform under this contract if such employee is deemed or identified as a potential threat"):
+        return "screen personnel so no employee poses a health, safety, security, or operational-risk concern"
+    if lowered.startswith("all deliverables will be reviewed for "):
+        review_basis = re.sub(r"^all deliverables will be reviewed for\s+", "", cleaned, flags=re.IGNORECASE).strip(" .;:-")
+        if review_basis:
+            return f"deliver work that passes review for {review_basis}"
+    cleaned = _noun_requirement_to_action(cleaned)
+    lowered = cleaned.lower()
+    for verb in STRATEGY_ACTION_VERBS:
+        if lowered.startswith(f"{verb} "):
+            cleaned = f"{verb}{cleaned[len(verb):]}"
+            break
     return _clean_excerpt(cleaned, max_chars=220).strip(" .;:-")
+
+
+def _strategy_focus_is_action(focus: str) -> bool:
+    return _starts_with_action_phrase(_repair_requirement_phrase(focus))
 
 
 def _is_generic_requirement_fragment(fragment: str) -> bool:
@@ -1550,6 +1743,11 @@ def _is_generic_requirement_fragment(fragment: str) -> bool:
             "authorized nor permitted",
             "contract or order for continuing software maintenance",
             "other x upon government acceptance of deliverables",
+            "government will inspect and evaluate",
+            "perform a a s in accordance with the requirements of this task order pws",
+            "perform a as in accordance with the requirements of this task order pws",
+            "each review shall provide insight into staffing progress risks",
+            "all deliverables will be reviewed for timeliness accuracy format",
         )
     ):
         return True
@@ -1680,24 +1878,36 @@ def _best_strategy_focus(text: str, anchor: str, field: str) -> tuple[str, str, 
                 break
     if secondary:
         focus = _clean_excerpt(f"{focus}; {secondary}", max_chars=220).strip(" .;:-")
+    focus = _compact_strategy_focus_clauses(focus, max_fragments=2) or focus
     return category, focus, scored[0][0]
 
 
 def _render_hot_button_text(category: str, focus: str) -> str:
     if not focus:
         return ""
+    action_focus = _strategy_focus_is_action(focus)
     if category == "transition":
-        return f"The package requires the team to {focus}, so transition sequencing and early coordination will be a real evaluator concern."
+        if action_focus:
+            return f"The package requires the team to {focus}, so transition sequencing and early coordination will be a real evaluator concern."
+        return f"The package makes {focus} a day-one transition obligation, so sequencing and early coordination will be a real evaluator concern."
     if category == "testing_traceability":
-        return f"The package requires the team to {focus}, so traceability, test evidence, and defect discipline are likely to matter more than generic QA claims."
+        if action_focus:
+            return f"The package requires the team to {focus}, so traceability, test evidence, and defect discipline are likely to matter more than generic QA claims."
+        return f"The package makes {focus} central to execution, so traceability, test evidence, and defect discipline are likely to matter more than generic QA claims."
     if category == "quality_acceptance":
         if "returned" in focus.lower() and "package" in focus.lower():
             return f"The package ties returned packages and turnaround pressure to {focus}, so QA/QC accuracy, acceptance readiness, and rework avoidance are likely to be visible in evaluation."
-        return f"The package requires the team to {focus}, so QA/QC accuracy, acceptance readiness, and rework avoidance are likely to be visible in evaluation."
+        if action_focus:
+            return f"The package requires the team to {focus}, so QA/QC accuracy, acceptance readiness, and rework avoidance are likely to be visible in evaluation."
+        return f"The package makes {focus} visible in execution, so QA/QC accuracy, acceptance readiness, and rework avoidance are likely to be visible in evaluation."
     if category == "access_security":
-        return f"The package requires the team to {focus}, so access and security readiness become day-one gates rather than back-office tasks."
+        if action_focus:
+            return f"The package requires the team to {focus}, so access and security readiness become day-one gates rather than back-office tasks."
+        return f"The package makes {focus} a startup gate, so access and security readiness become day-one tasks rather than back-office chores."
     if category == "reporting_governance":
-        return f"The package requires the team to {focus}, so reporting cadence, government review visibility, and issue escalation will need to look controlled."
+        if action_focus:
+            return f"The package requires the team to {focus}, so reporting cadence, government review visibility, and issue escalation will need to look controlled."
+        return f"The package makes {focus} part of the operating rhythm, so reporting cadence, government review visibility, and issue escalation will need to look controlled."
     if category == "staffing_structure":
         return f"The solicitation exposes {focus}, so the buyer is likely to scrutinize coverage of named roles and option labor for realism."
     if category == "pricing_structure":
@@ -1705,11 +1915,15 @@ def _render_hot_button_text(category: str, focus: str) -> str:
     if category == "technical_execution":
         if "outage" in focus.lower():
             return f"The package puts outage response on the critical path through {focus}, so the buyer is likely to care whether the team has done this specific technical work before."
-        return f"The package requires the team to {focus}, so the buyer is likely to care whether the team has done this specific technical work before."
+        if action_focus:
+            return f"The package requires the team to {focus}, so the buyer is likely to care whether the team has done this specific technical work before."
+        return f"The package makes {focus} a visible technical workstream, so the buyer is likely to care whether the team has done this specific work before."
     if category == "deliverable_review":
         if "returned" in focus.lower() and "package" in focus.lower():
             return f"The package ties returned packages and turnaround pressure to {focus}, so review quality, routing discipline, and rework control will matter."
-        return f"The package requires the team to {focus}, so deliverable ownership, review routing, and approval quality will matter, not just labor capacity."
+        if action_focus:
+            return f"The package requires the team to {focus}, so deliverable ownership, review routing, and approval quality will matter, not just labor capacity."
+        return f"The package makes {focus} part of the deliverable flow, so review routing and approval quality will matter, not just labor capacity."
     if category == "evaluation_alignment":
         return f"The package makes {focus} explicit, so proposal structure will need to map tightly to the named factors."
     return f"The package requires the team to {focus}, so the proposal has to look operational rather than generic."
@@ -1718,18 +1932,29 @@ def _render_hot_button_text(category: str, focus: str) -> str:
 def _render_win_theme_text(category: str, focus: str) -> str:
     if not focus:
         return ""
+    action_focus = _strategy_focus_is_action(focus)
     if category == "transition":
-        return f"Show a transition approach that can {focus} without disrupting the operating rhythm already visible in the package."
+        if action_focus:
+            return f"Show a transition approach that will {focus} without disrupting the operating rhythm already visible in the package."
+        return f"Show a transition approach built around {focus} without disrupting the operating rhythm already visible in the package."
     if category == "testing_traceability":
-        return f"Lead with evidence that the team can {focus} and keep traceability from approved requirements through test artifacts and issue closure."
+        if action_focus:
+            return f"Lead with evidence that the team can {focus} and keep traceability from approved requirements through test artifacts and issue closure."
+        return f"Lead with evidence tied to {focus} and keep traceability from approved requirements through test artifacts and issue closure."
     if category == "quality_acceptance":
         if "returned" in focus.lower() and "package" in focus.lower():
-            return f"Show the QA/QC control loop that reduces returned packages while the team executes {focus} and protects turnaround commitments."
+            if action_focus:
+                return f"Show the QA/QC control loop that reduces returned packages, supports the team's effort to {focus}, and protects turnaround commitments."
+            return f"Show the QA/QC control loop that reduces returned packages while the team addresses {focus} and protects turnaround commitments."
+        if action_focus:
+            return f"Show the QA/QC control loop for how the team will {focus}, including acceptance checks, defect escalation, and corrective-action closure."
         return f"Show the QA/QC control loop for {focus}, including acceptance checks, defect escalation, and corrective-action closure."
     if category == "access_security":
         return f"Prove startup readiness for {focus}, including who clears the security and access gates before execution starts."
     if category == "reporting_governance":
-        return f"Show who owns {focus}, what reporting cadence the government sees, and how issues are surfaced before they become surprises."
+        if action_focus:
+            return f"Show the ownership, reporting cadence, and review path for how the team will {focus}."
+        return f"Show the ownership, reporting cadence, and review path around {focus}."
     if category == "staffing_structure":
         return f"Tie the staffing plan directly to {focus} so the execution story looks fully covered rather than generically staffed."
     if category == "pricing_structure":
@@ -1737,10 +1962,14 @@ def _render_win_theme_text(category: str, focus: str) -> str:
     if category == "technical_execution":
         if "outage" in focus.lower():
             return f"Lead with an outage response plan showing how the team will {focus} without slowing the technical workstream."
-        return f"Lead with proof that the team can {focus} and deliver the technical workstream without slowing program decisions."
+        if action_focus:
+            return f"Lead with proof that the team can {focus} and deliver the technical workstream without slowing program decisions."
+        return f"Lead with proof tied to {focus} and deliver the technical workstream without slowing program decisions."
     if category == "deliverable_review":
         if "returned" in focus.lower() and "package" in focus.lower():
-            return f"Show the review workflow that reduces returned packages while the team executes {focus} and protects turnaround commitments."
+            if action_focus:
+                return f"Show the review workflow that reduces returned packages, supports the team's effort to {focus}, and protects turnaround commitments."
+            return f"Show the review workflow that reduces returned packages while the team addresses {focus} and protects turnaround commitments."
         return f"Show how the team will {focus} with review-ready packages, clear approval routing, and minimal rework."
     if category == "evaluation_alignment":
         return f"Map the proposal directly to {focus} instead of relying on broad corporate capability language."
@@ -1750,22 +1979,31 @@ def _render_win_theme_text(category: str, focus: str) -> str:
 def _render_differentiator_text(category: str, focus: str) -> str:
     if not focus:
         return ""
+    action_focus = _strategy_focus_is_action(focus)
     if category == "transition":
-        return f"A transition artifact that proves the team can {focus}, with named milestones and customer coordination points."
+        if action_focus:
+            return f"A transition artifact that proves the team can {focus}, with named milestones and customer coordination points."
+        return f"A transition artifact tied to {focus}, with named milestones and customer coordination points."
     if category == "testing_traceability":
-        return f"A sample RTM, requirements-evaluation, or test-evidence package that proves the team can {focus}."
+        if action_focus:
+            return f"A sample RTM, requirements-evaluation, or test-evidence package that proves the team can {focus}."
+        return f"A sample RTM, requirements-evaluation, or test-evidence package tied directly to {focus}."
     if category == "quality_acceptance":
         return f"A QCP or acceptance-control loop that proves the team can {focus} without avoidable rework."
     if category == "access_security":
         return f"A startup-readiness package that proves the team can {focus} before controlled work begins."
     if category == "reporting_governance":
-        return f"A government-facing reporting matrix that proves the team can {focus} with clear owner and review gates."
+        if action_focus:
+            return f"A government-facing reporting matrix that proves the team can {focus} with clear owner and review gates."
+        return f"A government-facing reporting matrix tied to {focus}, with clear owner and review gates."
     if category == "staffing_structure":
         return f"A named labor-mix matrix that proves the team can cover {focus} with the proposed roles and option structure."
     if category == "pricing_structure":
         return f"CLIN-level pricing traceability that proves the team can cover {focus} without buying in."
     if category == "technical_execution":
-        return f"Past performance or sample artifacts that prove the team can {focus} in an equivalent technical environment."
+        if action_focus:
+            return f"Past performance or sample artifacts that prove the team can {focus} in an equivalent technical environment."
+        return f"Past performance or sample artifacts tied to {focus} in an equivalent technical environment."
     if category == "deliverable_review":
         return f"A deliverable-routing workflow that proves the team can {focus} with controlled review and approval."
     if category == "evaluation_alignment":
@@ -1776,22 +2014,33 @@ def _render_differentiator_text(category: str, focus: str) -> str:
 def _render_proof_requirement_text(category: str, focus: str) -> str:
     if not focus:
         return ""
+    action_focus = _strategy_focus_is_action(focus)
     if category == "transition":
-        return f"Bring a first-30-day transition plan showing how the team will {focus}."
+        if action_focus:
+            return f"Bring a first-30-day transition plan showing how the team will {focus}."
+        return f"Bring a first-30-day transition plan tied to {focus}."
     if category == "testing_traceability":
-        return f"Bring one sample traceability or test artifact showing how the team will {focus}."
+        if action_focus:
+            return f"Bring one sample traceability or test artifact showing how the team will {focus}."
+        return f"Bring one sample traceability or test artifact tied to {focus}."
     if category == "quality_acceptance":
         return f"Bring one QA/QC artifact showing how the team will {focus} and close findings."
     if category == "access_security":
-        return f"Bring one startup-readiness artifact showing how the team will {focus} before execution starts."
+        if action_focus:
+            return f"Bring one startup-readiness artifact showing how the team will {focus} before execution starts."
+        return f"Bring one startup-readiness artifact tied to {focus} before execution starts."
     if category == "reporting_governance":
-        return f"Bring one reporting or submission matrix showing how the team will {focus}."
+        if action_focus:
+            return f"Bring one reporting or submission matrix showing how the team will {focus}."
+        return f"Bring one reporting or submission matrix tied to {focus}."
     if category == "staffing_structure":
         return f"Bring one staffing matrix showing how the team will cover {focus}."
     if category == "pricing_structure":
         return f"Bring one CLIN or pricing trace showing how the team will price {focus}."
     if category == "technical_execution":
-        return f"Bring one sample technical artifact showing how the team will {focus}."
+        if action_focus:
+            return f"Bring one sample technical artifact showing how the team will {focus}."
+        return f"Bring one sample technical artifact tied to {focus}."
     if category == "deliverable_review":
         return f"Bring one deliverable-routing artifact showing how the team will {focus}."
     if category == "evaluation_alignment":
@@ -1906,7 +2155,15 @@ def _render_specific_strategy_rows(
             continue
         seen_text.add(normalized)
         seen_categories[category] = seen_categories.get(category, 0) + 1
-        rendered.append({"text": str(row.get("text") or ""), "evidence_anchor": str(row.get("evidence_anchor") or "")})
+        rendered.append(
+            {
+                "text": str(row.get("text") or ""),
+                "evidence_anchor": str(row.get("evidence_anchor") or ""),
+                "category": category,
+                "field": str(row.get("field") or ""),
+                "source_kind": str(row.get("source_kind") or ""),
+            }
+        )
         if len(rendered) >= max_items:
             break
     return rendered
@@ -2059,11 +2316,319 @@ def _anchor_strategy_lines(
             break
     if rows:
         return rows
+    if not fallback:
+        return []
+    return [{"text": fallback, "evidence_anchor": ""}]
+
+
+def _retain_rows_with_current_package_evidence(
+    rows: list[dict[str, str]],
+    anchors: list[str],
+    *,
+    fallback: str = "",
+    max_items: int = 6,
+    min_overlap: int = 2,
+) -> list[dict[str, str]]:
+    retained: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text") or "").strip()
+        anchor = str(row.get("evidence_anchor") or "").strip()
+        if not text or not anchor:
+            continue
+        matched_anchor = _best_strategy_anchor(anchor, anchors, min_overlap=min_overlap) or _best_strategy_anchor(
+            text,
+            anchors,
+            min_overlap=min_overlap,
+        )
+        if not matched_anchor:
+            continue
+        retained.append({"text": text, "evidence_anchor": matched_anchor})
+        if len(retained) >= max_items:
+            break
+    if retained:
+        return retained
+    if fallback:
+        return [{"text": fallback, "evidence_anchor": ""}]
+    return []
+
+
+def _strategy_confidence_rank(value: str) -> int:
+    return {"low": 1, "medium": 2, "high": 3}.get(str(value or "").strip().lower(), 0)
+
+
+def _strategy_row_starts_like_raw_clause(text: str) -> bool:
+    lowered = _normalize_text(text)
+    if not lowered:
+        return True
+    return any(
+        lowered.startswith(prefix)
+        for prefix in (
+            "the contractor shall",
+            "contractor shall",
+            "the government shall",
+            "government shall",
+            "the government will",
+            "government will",
+            "page ",
+            "section ",
+            "option item ",
+            "deliverable ",
+        )
+    )
+
+
+def _strategy_row_is_too_literal(text: str, anchor: str) -> bool:
+    normalized_text = _normalize_text(text)
+    normalized_anchor = _normalize_text(anchor)
+    if not normalized_text or not normalized_anchor:
+        return True
+    if normalized_text in normalized_anchor and len(normalized_text) >= 72:
+        return True
+    text_tokens = {token for token in _signal_tokens(text) if len(token) >= 4}
+    anchor_tokens = {token for token in _signal_tokens(anchor) if len(token) >= 4}
+    if not text_tokens or not anchor_tokens:
+        return False
+    overlap_ratio = len(text_tokens & anchor_tokens) / max(1, len(text_tokens))
+    return overlap_ratio >= 0.9 and len(text_tokens) >= 10
+
+
+def _normalized_anchor_values(anchors: list[str] | None) -> set[str]:
+    return {
+        _normalize_text(anchor)
+        for anchor in (anchors or [])
+        if isinstance(anchor, str) and _normalize_text(anchor)
+    }
+
+
+def _strategy_scope_anchor_rank(
+    anchor: str,
+    primary_scope_anchors: list[str] | None,
+    secondary_control_anchors: list[str] | None,
+) -> int:
+    normalized_anchor = _normalize_text(anchor)
+    if not normalized_anchor:
+        return 0
+    primary = _normalized_anchor_values(primary_scope_anchors)
+    secondary = _normalized_anchor_values(secondary_control_anchors)
+    if normalized_anchor in primary:
+        return 3
+    if normalized_anchor in secondary:
+        return 1
+    return 2
+
+
+def _strategy_row_selection_score(
+    *,
+    text: str,
+    anchor: str,
+    category: str = "",
+    field: str = "",
+    source_kind: str = "",
+    primary_scope_anchors: list[str] | None = None,
+    secondary_control_anchors: list[str] | None = None,
+) -> int:
+    score = _strategy_scope_anchor_rank(anchor, primary_scope_anchors, secondary_control_anchors) * 100
+    normalized_category = _normalize_text(category).replace(" ", "_")
+    normalized_field = _normalize_text(field).replace(" ", "_")
+    normalized_source_kind = _normalize_text(source_kind).replace(" ", "_")
+    score += STRATEGY_SCOPE_PRIORITY_BY_SOURCE.get(normalized_source_kind, 0)
+    score += STRATEGY_SCOPE_PRIORITY_BY_FIELD.get(normalized_field, 0)
+    if any(marker in normalized_category for marker in ("technical", "deliverable", "transition", "staffing", "testing")):
+        score += 8
+    if any(marker in normalized_category for marker in ("access", "security", "quality", "acceptance", "reporting", "evaluation", "pricing")):
+        score -= 6
+    if any(marker in _normalize_text(text) for marker in ("scope", "task", "workstream", "design", "engineering", "implementation", "restoration", "deliverable")):
+        score += 4
+    return score
+
+
+def _prioritize_strategy_rows(
+    rows: list[dict[str, Any]],
+    *,
+    max_items: int,
+    primary_scope_anchors: list[str] | None = None,
+    secondary_control_anchors: list[str] | None = None,
+) -> list[dict[str, str]]:
+    ranked_rows: list[tuple[int, int, str, dict[str, str]]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text") or "").strip()
+        anchor = str(row.get("evidence_anchor") or "").strip()
+        if not text or not anchor:
+            continue
+        normalized_text = _normalize_text(text)
+        if not normalized_text or normalized_text in seen:
+            continue
+        seen.add(normalized_text)
+        priority = _strategy_row_selection_score(
+            text=text,
+            anchor=anchor,
+            category=str(row.get("category") or ""),
+            field=str(row.get("field") or ""),
+            source_kind=str(row.get("source_kind") or ""),
+            primary_scope_anchors=primary_scope_anchors,
+            secondary_control_anchors=secondary_control_anchors,
+        )
+        ranked_rows.append(
+            (
+                priority,
+                len(text),
+                normalized_text,
+                {
+                    "text": text,
+                    "evidence_anchor": anchor,
+                },
+            )
+        )
+    ordered = sorted(ranked_rows, key=lambda item: (-item[0], item[1], item[2]))
+    return [row for _, _, _, row in ordered[:max_items]]
+
+
+def _retain_reasoning_rows_with_current_package_evidence(
+    rows: list[dict[str, Any]],
+    anchors: list[str],
+    *,
+    fallback: str = "",
+    max_items: int = 6,
+    min_overlap: int = 2,
+    min_confidence: str = "medium",
+    primary_scope_anchors: list[str] | None = None,
+    secondary_control_anchors: list[str] | None = None,
+) -> list[dict[str, str]]:
+    retained: list[dict[str, Any]] = []
+    threshold = _strategy_confidence_rank(min_confidence)
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        text = _clean_excerpt(row.get("text") or "", max_chars=320).strip()
+        anchor = _clean_excerpt(row.get("evidence_anchor") or row.get("anchor") or "", max_chars=480).strip()
+        confidence = str(row.get("confidence") or "medium").strip().lower()
+        if not text or not anchor:
+            continue
+        if _strategy_confidence_rank(confidence) < threshold:
+            continue
+        if _strategy_row_starts_like_raw_clause(text):
+            continue
+        if _looks_like_scope_dump(text, anchor) or _strategy_row_is_too_literal(text, anchor):
+            continue
+        matched_anchor = _best_strategy_anchor(anchor, anchors, min_overlap=min_overlap) or _best_strategy_anchor(
+            text,
+            anchors,
+            min_overlap=min_overlap,
+        )
+        if not matched_anchor:
+            continue
+        retained.append(
+            {
+                "text": text,
+                "evidence_anchor": matched_anchor,
+                "category": str(row.get("category") or "").strip(),
+                "field": str(row.get("field") or "").strip(),
+                "source_kind": str(row.get("source_kind") or "").strip(),
+            }
+        )
+    prioritized = _prioritize_strategy_rows(
+        retained,
+        max_items=max_items,
+        primary_scope_anchors=primary_scope_anchors,
+        secondary_control_anchors=secondary_control_anchors,
+    )
+    if prioritized:
+        return prioritized
+    if fallback:
+        return [{"text": fallback, "evidence_anchor": ""}]
+    return []
+
+
+def _validated_reasoning_strategy_rows(
+    *,
+    row_candidates: list[dict[str, Any]],
+    text_candidates: list[str],
+    anchors: list[str],
+    fallback: str,
+    max_items: int,
+    min_overlap: int,
+    min_confidence: str = "medium",
+    primary_scope_anchors: list[str] | None = None,
+    secondary_control_anchors: list[str] | None = None,
+) -> list[dict[str, str]]:
+    rows = _prune_generic_strategy_rows(
+        _retain_reasoning_rows_with_current_package_evidence(
+            row_candidates,
+            anchors,
+            fallback="",
+            max_items=max_items,
+            min_overlap=min_overlap,
+            min_confidence=min_confidence,
+            primary_scope_anchors=primary_scope_anchors,
+            secondary_control_anchors=secondary_control_anchors,
+        )
+    )
+    if rows:
+        return rows[:max_items]
+    text_rows = _prune_generic_strategy_rows(
+        _anchor_strategy_lines(
+            text_candidates,
+            anchors,
+            fallback="",
+            max_items=max_items,
+            min_overlap=min_overlap,
+        )
+    )
+    text_rows = _prioritize_strategy_rows(
+        text_rows,
+        max_items=max_items,
+        primary_scope_anchors=primary_scope_anchors,
+        secondary_control_anchors=secondary_control_anchors,
+    )
+    if text_rows:
+        return text_rows[:max_items]
     return [{"text": fallback, "evidence_anchor": ""}]
 
 
 def _strategy_row_texts(rows: list[dict[str, str]]) -> list[str]:
     return _dedupe_strings([str(item.get("text") or "").strip() for item in rows if isinstance(item, dict)])
+
+
+def _strategy_seed_rows(
+    rows: list[dict[str, Any]],
+    *,
+    source_kind: str,
+) -> list[dict[str, str]]:
+    seeded: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text") or "").strip()
+        anchor = str(row.get("evidence_anchor") or "").strip()
+        if not text or not anchor:
+            continue
+        seeded.append(
+            {
+                "text": text,
+                "evidence_anchor": anchor,
+                "category": str(row.get("category") or "").strip(),
+                "field": str(row.get("field") or "").strip(),
+                "source_kind": source_kind,
+                "confidence": "high",
+            }
+        )
+    return seeded
+
+
+def _filter_rows_to_anchor_group(rows: list[dict[str, Any]], anchors: list[str] | None) -> list[dict[str, Any]]:
+    preferred = _normalized_anchor_values(anchors)
+    if not preferred:
+        return []
+    return [
+        row
+        for row in rows
+        if isinstance(row, dict) and _normalize_text(str(row.get("evidence_anchor") or "").strip()) in preferred
+    ]
 
 
 def _prune_generic_strategy_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -2896,7 +3461,7 @@ def _capability_fit(
         _phrase_hits(notice_text, negative_keywords, max_items=5)
         + _phrase_hits(notice_text, fit_guidance.get("negative_terms", []), max_items=4)
     )[:6]
-    past_performance_hits = _phrase_hits(notice_text, past_performance, max_items=4)
+    past_performance_hits: list[str] = []  # Only validated semantic mappings may establish relevance.
     naics_match = bool(set(profile_naics) & set(opportunity_naics))
     fit_weighting = _profile_fit_weighting(
         profile,
@@ -3090,6 +3655,18 @@ def _partner_analysis(
     }
 
 
+def _enforce_partner_fit_boundary(partner_analysis: dict, fit: dict) -> dict:
+    if fit.get("status") not in {"no_fit", "unknown"}:
+        return partner_analysis
+    return {**partner_analysis,
+            "recommended_posture": "No-bid" if fit["status"] == "no_fit" else "Monitor only",
+            "unqualified_market_signals": {"candidates": partner_analysis.get("best_partner_candidates", []),
+                                           "rationale": partner_analysis.get("partner_rationale", [])},
+            "best_partner_candidates": [],
+            "partner_rationale": ["No supported company contribution is established; market signals alone do not justify teaming."],
+            "partner_outreach_action_items": ["Establish a supported company contribution before approaching potential primes."]}
+
+
 def _score_and_recommendation(
     opportunity: dict[str, Any],
     customer_priorities: dict[str, Any],
@@ -3131,18 +3708,11 @@ def _score_and_recommendation(
         0,
         15,
     )
-    past_perf_fit = _clamp(
-        2
-        + (6 if len(capability_fit.get("past_performance_inventory", [])) >= 3 else 4 if capability_fit.get("past_performance_inventory") else 0)
-        + min(4, len(capability_fit.get("past_performance_hits", []))),
-        0,
-        15,
-    )
-    past_perf_fit = _clamp(
-        past_perf_fit + int(capability_fit.get("past_performance_adjustment", 0) or 0),
-        0,
-        15,
-    )
+    fit_assessment = capability_fit.get("vendor_fit_assessment", {})
+    fit_status = fit_assessment.get("status", "unknown")
+    past_perf_fit = _clamp(int(fit_assessment.get("past_performance_score", 0)), 0, 15)
+    requirement_fit = _clamp(int(fit_assessment.get("capability_score", 0)), 0, 15)
+    customer_alignment = requirement_fit
     funding_confidence = {"High": 9, "Medium": 6, "Low": 3}.get(str(funding_analysis.get("funding_confidence", "Low")), 3)
     vehicle_access = 8 if vehicle_access_ok and set_aside_access_ok else 5 if vehicle_access_ok or set_aside_access_ok else 2
     vehicle_access = _clamp(
@@ -3190,7 +3760,7 @@ def _score_and_recommendation(
     elif not set_aside_access_ok:
         access_rationale = "Driven mainly by socioeconomic eligibility because no pre-existing vehicle gate is clearly visible."
     else:
-        access_rationale = "No pre-existing vehicle gate or socioeconomic barrier is visible in current evidence."
+        access_rationale = "Visible access gates are satisfied by supplied profile claims, or no gate was identified; verify eligibility before bidding."
     if qualification_gap_count:
         access_rationale = f"{access_rationale} Mandatory qualifications are tracked separately and still need proof."
 
@@ -3252,7 +3822,11 @@ def _score_and_recommendation(
     ]
     total = sum(item["score"] for item in breakdown)
 
-    if not competitive_gate_open:
+    if fit_status == "no_fit":
+        recommendation = "No-bid"
+    elif fit_status == "unknown":
+        recommendation = "Monitor only"
+    elif not competitive_gate_open:
         recommendation = "Monitor only"
     elif (
         partner_analysis.get("recommended_posture") == "Team, do not prime"
@@ -3260,7 +3834,9 @@ def _score_and_recommendation(
         and float(days_until_due) <= 7
     ):
         recommendation = "Team, do not prime"
-    elif vehicle_access <= 3 and partner_leverage >= 5:
+    elif vehicle_access <= 3 and fit_assessment.get("supported_workshare"):
+        recommendation = "Team, do not prime"
+    elif fit_status == "adjacent":
         recommendation = "Team, do not prime"
     elif total >= 80:
         recommendation = "Pursue"
@@ -3272,6 +3848,7 @@ def _score_and_recommendation(
         recommendation = "No-bid"
 
     rationale: list[str] = []
+    rationale.append(str(fit_assessment.get("summary") or "Vendor fit is unverified; obtain profile evidence before recommending pursuit."))
     rationale.extend(gate_reasons)
     if capability_fit.get("capability_hits"):
         rationale.append(f"Capability overlap surfaced in the public package: {', '.join(capability_fit.get('capability_hits', [])[:4])}.")
@@ -3336,13 +3913,32 @@ def _win_strategy(
     staffing_roles = _string_list(solicitation_facts.get("staffing_roles", []), max_items=8)
     attachment_text = " ".join(workstream_lines + staffing_notes + pricing_notes + evaluation_notes).lower()
     solicitation_fact_model = solicitation_fact_model if isinstance(solicitation_fact_model, dict) else {}
-    strategy_anchors = _current_package_strategy_anchors(solicitation_facts, attachment_workstreams)
+    strategy_anchors = _current_package_strategy_anchors(
+        solicitation_facts,
+        attachment_workstreams,
+        solicitation_fact_model,
+    )
     section_anchors = _dedupe_strings(
         strategy_anchors.get("section_anchors", [])
         + _fact_model_anchors(
             solicitation_fact_model,
             ["workstream_fact_rows", "deliverable_fact_rows", "acceptance_fact_rows", "pricing_fact_rows"],
             max_items=14,
+        )
+    )
+    primary_scope_anchors = _dedupe_strings(
+        strategy_anchors.get("section_anchors", [])
+        + _fact_model_anchors(
+            solicitation_fact_model,
+            ["workstream_fact_rows", "deliverable_fact_rows", "staffing_fact_rows"],
+            max_items=18,
+        )
+    )
+    secondary_control_anchors = _dedupe_strings(
+        _fact_model_anchors(
+            solicitation_fact_model,
+            ["acceptance_fact_rows", "access_fact_rows", "evaluation_fact_rows", "pricing_fact_rows", "contract_fact_rows"],
+            max_items=18,
         )
     )
     fact_anchors = _dedupe_strings(
@@ -3432,6 +4028,42 @@ def _win_strategy(
         for item in attachment_anomalies or []
         if isinstance(item, dict) and str(item.get("signal") or "").strip()
     ]
+    model_hot_button_row_candidates = [
+        item
+        for item in (
+            list(strategic_reasoning.get("reasoned_hot_button_rows", []) or [])
+            + list(strategic_reasoning.get("evaluator_anxiety_rows", []) or [])
+            + list(strategic_reasoning.get("reasoned_pain_point_rows", []) or [])
+        )
+        if isinstance(item, dict)
+    ]
+    model_win_theme_row_candidates = [
+        item for item in list(strategic_reasoning.get("reasoned_win_theme_rows", []) or []) if isinstance(item, dict)
+    ]
+    model_differentiator_row_candidates = [
+        item for item in list(strategic_reasoning.get("reasoned_differentiator_rows", []) or []) if isinstance(item, dict)
+    ]
+    model_hot_button_text_candidates = _string_list(
+        strategic_reasoning.get("reasoned_hot_buttons", []),
+        max_items=8,
+    ) or _string_list(strategic_reasoning.get("reasoned_pain_points", []), max_items=8)
+    model_win_theme_text_candidates = _string_list(strategic_reasoning.get("reasoned_win_themes", []), max_items=8)
+    preferred_hot_button_row_candidates = _strategy_seed_rows(
+        _filter_rows_to_anchor_group(
+            specific_hot_button_rows + workstream_capture_implication_rows[:2],
+            primary_scope_anchors,
+        ),
+        source_kind="scope_seed",
+    )
+    preferred_win_theme_row_candidates = _strategy_seed_rows(
+        _filter_rows_to_anchor_group(
+            specific_win_theme_rows,
+            primary_scope_anchors,
+        ),
+        source_kind="scope_seed",
+    )
+    blended_hot_button_row_candidates = model_hot_button_row_candidates
+    blended_win_theme_row_candidates = model_win_theme_row_candidates
     hot_buttons = _dedupe_strings(
         _strategy_row_texts(specific_hot_button_rows)
         + _strategy_row_texts(workstream_capture_implication_rows[:2])
@@ -3624,52 +4256,71 @@ def _win_strategy(
         reasoning_win_theme_rows = [{"text": NO_REASONED_THEME_EVIDENCE, "evidence_anchor": ""}]
         proof_requirement_rows = [{"text": NO_PROOF_REQUIREMENT_EVIDENCE, "evidence_anchor": ""}]
     else:
-        hot_button_rows = _prune_generic_strategy_rows(_anchor_strategy_lines(
-            hot_buttons,
-            section_anchors or current_package_anchors,
+        hot_button_rows = _validated_reasoning_strategy_rows(
+            row_candidates=blended_hot_button_row_candidates,
+            text_candidates=model_hot_button_text_candidates,
+            anchors=current_package_anchors,
             fallback=NO_HOT_BUTTON_EVIDENCE,
             max_items=4 if attachment_native_ready else 6,
             min_overlap=1 if attachment_native_ready else 2,
-        ))
-        win_theme_rows = _prune_generic_strategy_rows(_anchor_strategy_lines(
-            win_themes,
-            section_anchors or current_package_anchors,
+            primary_scope_anchors=primary_scope_anchors,
+            secondary_control_anchors=secondary_control_anchors,
+        )
+        win_theme_rows = _validated_reasoning_strategy_rows(
+            row_candidates=blended_win_theme_row_candidates,
+            text_candidates=model_win_theme_text_candidates,
+            anchors=current_package_anchors,
             fallback=NO_WIN_THEME_EVIDENCE,
             max_items=3 if attachment_native_ready else 6,
             min_overlap=1 if attachment_native_ready else 2,
-        ))
-        if attachment_native_ready and win_theme_rows and str(win_theme_rows[0].get("text") or "").strip() == NO_WIN_THEME_EVIDENCE:
-            win_theme_rows = _prune_generic_strategy_rows(_anchor_strategy_lines(
-                main_win_theme_candidates,
-                section_anchors or current_package_anchors,
-                fallback=NO_WIN_THEME_EVIDENCE,
-                max_items=3,
-                min_overlap=1,
-            ))
-        discriminator_rows = _prune_generic_strategy_rows(_anchor_strategy_lines(
-            discriminators,
+            primary_scope_anchors=primary_scope_anchors,
+            secondary_control_anchors=secondary_control_anchors,
+        )
+        fit_assessment = strategic_reasoning.get("vendor_fit_assessment", {})
+        discriminator_rows = validate_company_strategy_rows(model_differentiator_row_candidates, fit_assessment, require_project=True)
+        if not discriminator_rows:
+            discriminator_rows = [{"text": NO_DIFFERENTIATOR_EVIDENCE, "evidence_anchor": ""}]
+        if "vendor_fit_assessment" in strategic_reasoning:
+            win_theme_rows = validate_company_strategy_rows(model_win_theme_row_candidates, fit_assessment)
+            if not win_theme_rows:
+                win_theme_rows = [{"text": NO_WIN_THEME_EVIDENCE, "evidence_anchor": ""}]
+        primary_win_theme_texts = {
+            _normalize_text(str(row.get("text") or ""))
+            for row in win_theme_rows
+            if isinstance(row, dict) and str(row.get("text") or "").strip() and str(row.get("text") or "").strip() != NO_WIN_THEME_EVIDENCE
+        }
+        extra_reasoning_rows = _retain_reasoning_rows_with_current_package_evidence(
+            model_win_theme_row_candidates + model_differentiator_row_candidates,
             current_package_anchors,
-            fallback=NO_DIFFERENTIATOR_EVIDENCE,
-            max_items=4 if attachment_native_ready else 6,
-            min_overlap=1 if attachment_native_ready and section_anchors else 2,
-        ))
-        reasoning_win_theme_rows = _prune_generic_strategy_rows(
-            specific_win_theme_rows
-            or _fact_model_rows(strategic_reasoning, "reasoned_win_theme_rows", max_items=4 if attachment_native_ready else 6)
-            or _anchor_strategy_lines(
-                _string_list(strategic_reasoning.get("reasoned_win_themes", []), max_items=8),
-                section_anchors or current_package_anchors,
-                fallback=NO_REASONED_THEME_EVIDENCE,
+            fallback="",
+            max_items=6,
+            min_overlap=1 if attachment_native_ready else 2,
+            primary_scope_anchors=primary_scope_anchors,
+            secondary_control_anchors=secondary_control_anchors,
+        )
+        reasoning_win_theme_rows = [
+            row
+            for row in _prune_generic_strategy_rows(extra_reasoning_rows)
+            if _normalize_text(str(row.get("text") or "")) not in primary_win_theme_texts
+        ][: 4 if attachment_native_ready else 6]
+        if not reasoning_win_theme_rows:
+            reasoning_win_theme_rows = [{"text": NO_REASONED_THEME_EVIDENCE, "evidence_anchor": ""}]
+        if "vendor_fit_assessment" in strategic_reasoning:
+            reasoning_win_theme_rows = validate_company_strategy_rows(
+                model_win_theme_row_candidates + model_differentiator_row_candidates, fit_assessment,
+            ) or [{"text": NO_REASONED_THEME_EVIDENCE, "evidence_anchor": ""}]
+        proof_requirement_rows = _prune_generic_strategy_rows(
+            _retain_rows_with_current_package_evidence(
+                specific_proof_requirement_rows
+                or _fact_model_rows(strategic_reasoning, "proof_requirement_rows", max_items=4 if attachment_native_ready else 6),
+                current_package_anchors,
+                fallback="",
                 max_items=4 if attachment_native_ready else 6,
                 min_overlap=1 if attachment_native_ready else 2,
             )
-        )
-        proof_requirement_rows = _prune_generic_strategy_rows(
-            specific_proof_requirement_rows
-            or _fact_model_rows(strategic_reasoning, "proof_requirement_rows", max_items=4 if attachment_native_ready else 6)
             or _anchor_strategy_lines(
                 _string_list(strategic_reasoning.get("proof_requirements", []), max_items=8),
-                section_anchors or current_package_anchors,
+                current_package_anchors,
                 fallback=NO_PROOF_REQUIREMENT_EVIDENCE,
                 max_items=4 if attachment_native_ready else 6,
                 min_overlap=1 if attachment_native_ready else 2,
@@ -3686,7 +4337,7 @@ def _win_strategy(
         "reasoning_based_pain_points": _string_list(strategic_reasoning.get("reasoned_pain_points", []), max_items=6),
         "evaluator_anxiety_rows": _fact_model_rows(strategic_reasoning, "evaluator_anxiety_rows", max_items=6),
         "reasoning_based_win_themes": reasoning_based_win_themes,
-        "reasoning_based_differentiators": _string_list(strategic_reasoning.get("reasoned_differentiators", []), max_items=8),
+        "reasoning_based_differentiators": _strategy_row_texts(discriminator_rows),
         "reasoning_based_proof_requirements": reasoning_based_proof_requirements,
         "reasoning_based_risk_implications": _string_list(strategic_reasoning.get("risk_implications", []), max_items=6),
         "strategy_evidence_strength": "strong" if strong_requirement_evidence else "thin",
@@ -3946,6 +4597,8 @@ def build_capture_decision_sections(
         contract_type = str(normalized_vehicle.get("contract_type") or "").strip()
     if str(solicitation_facts.get("contract_type") or "").strip():
         contract_type = str(solicitation_facts.get("contract_type") or "").strip()
+    if "contract_structure" in solicitation_facts:
+        contract_type = str(solicitation_facts["contract_structure"].get("label") or "Not explicit in current evidence")
     if str(solicitation_facts.get("evaluation_basis") or "").strip():
         award_basis = str(solicitation_facts.get("evaluation_basis") or "").strip()
     set_aside_statement, set_aside_access_ok = _set_aside_access(set_aside_text, _profile_set_asides(vendor_profile))
@@ -4070,6 +4723,11 @@ def build_capture_decision_sections(
         capability_fit.get("proof_points", [])
         + _string_list(strategic_reasoning.get("reasoned_differentiators", []), max_items=6)
     )
+    fit_assessment = strategic_reasoning.get("vendor_fit_assessment")
+    if not isinstance(fit_assessment, dict):
+        fit_assessment = validate_fit_assessment(None, build_fit_catalog(vendor_profile, attachment_workstreams))
+    strategic_reasoning["vendor_fit_assessment"] = fit_assessment
+    capability_fit = apply_validated_fit(capability_fit, fit_assessment)
     partner_analysis = _partner_analysis(
         vendor_profile,
         capability_fit,
@@ -4096,6 +4754,7 @@ def build_capture_decision_sections(
         partner_analysis.get("partner_risks", [])
         + _string_list(normalized_teaming.get("risks"), max_items=4)
     )
+    partner_analysis = _enforce_partner_fit_boundary(partner_analysis, fit_assessment)
     competitive_gate_open, gate_reasons = _competitive_gate(opportunity, notice_text)
     recommendation = _score_and_recommendation(
         opportunity,
@@ -4554,6 +5213,7 @@ def build_capture_decision_sections(
             "proof_points": capability_fit.get("proof_points", []),
             "past_performance_inventory": capability_fit.get("past_performance_inventory", []),
             "past_performance_hits": capability_fit.get("past_performance_hits", []),
+            "component_coverage_notes": capability_fit.get("component_coverage_notes", []),
             "missing_proof": capability_fit.get("missing_proof", []),
             "qualification_gates": capability_fit.get("qualification_gates", []),
             "credibility_requirements": capability_fit.get("credibility_requirements", []),

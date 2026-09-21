@@ -133,9 +133,10 @@ or <code>Claude Code</code></li>
 <li>A <code>GovTribe MCP</code> API key exposed as
 <code>GOVTRIBE_MCP_API_KEY</code></li>
 </ul>
-<p>Base scan and capture work with <code>SAM_API_KEY</code> alone.
-<code>OPENAI_API_KEY</code> enables only the shipped semantic reasoning
-path. <code>GovTribe MCP</code> uses <code>GOVTRIBE_MCP_API_KEY</code>
+<p>Base scan can work without OpenAI reasoning. Capture requires a working
+<code>OPENAI_API_KEY</code> for its understanding checkpoint before market
+research. An unavailable model returns <code>TECHNICAL_BLOCKED</code>.
+<code>GovTribe MCP</code> uses <code>GOVTRIBE_MCP_API_KEY</code>
 directly, is optional, and is disabled by default per workspace.</p>
 <p>If your GitHub setup uses HTTPS instead of SSH, swap the clone URLs
 below to the HTTPS form you normally use.</p>
@@ -364,6 +365,11 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb19-1"><a href=
 <pre class="text"><code>/pwin-show-digest workspace path $PWD and date latest</code></pre>
 <p>The digest is where you pick stable IDs for tracked capture.</p>
 <h2 id="run-capture-research">9. Run Capture Research</h2>
+<p>Capture may pause as <code>NEEDS_CLARIFICATION</code> or
+<code>NEEDS_FORMAL_QA</code>. Read the returned clarification file and resume
+with actual answers or authoritative documents. See
+<a href="../references/capture-clarification.md">checkpoint instructions</a>.
+Do not substitute an older memo for a paused run.</p>
 <p>You now have three supported capture paths:</p>
 <ul>
 <li>tracked capture from a digest stable ID such as <code>A1</code></li>
@@ -467,8 +473,8 @@ rerun.</li>
 <ol type="1">
 <li>Clone the repo with your normal authenticated GitHub method.</li>
 <li>Export <code>SAM_API_KEY</code>.</li>
-<li>Export <code>OPENAI_API_KEY</code> if you want the shipped reasoning
-path.</li>
+<li>Export <code>OPENAI_API_KEY</code> for capture's understanding checkpoint
+and optional scan reasoning.</li>
 <li>Export <code>GOVTRIBE_MCP_API_KEY</code> only if you want the
 optional GovTribe sidecar.</li>
 <li>Create a workspace.</li>

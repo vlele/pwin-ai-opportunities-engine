@@ -1,0 +1,35 @@
+{
+  "H03": {
+    "claims": [
+      {"quote": "Our own employees delivered refrigerated specimens", "form": "performed_task", "execution": "affirmative_actual"}
+    ],
+    "tasks": [
+      {"claim_quote": "delivered refrigerated specimens", "requirement_quote": "Deliver refrigerated specimens", "relationship": "same_task", "coverage_allowed": ["partial"], "work_pattern": "deliver", "work_states": ["matched"]}
+    ]
+  },
+  "H06": {
+    "claims": [
+      {"quote": "using multibeam sonar", "form": "performed_task", "execution": "affirmative_actual"}
+    ],
+    "records": [
+      {"quote": "60-day", "status": "superseded", "record_kind": "requirement"},
+      {"quote": "Issued amendment 02 supersedes", "status": "current", "record_kind": "precedence_rule"}
+    ]
+  },
+  "H07": {
+    "claims": [
+      {"quote": "install passenger information displays", "form": "performed_task", "execution": "affirmative_actual"},
+      {"quote": "provide on-call software repairs", "form": "performed_task", "execution": "affirmative_actual"}
+    ],
+    "tasks": [
+      {"claim_quote": "install passenger information displays", "requirement_quote": "CLIN 1", "relationship": "same_task", "coverage_allowed": ["complete", "partial"], "work_pattern": "install", "work_states": ["matched", "partial"]},
+      {"claim_quote": "provide on-call software repairs", "requirement_quote": "CLIN 2", "relationship": "same_task", "coverage_allowed": ["complete", "partial"], "work_pattern": "repair", "work_states": ["matched", "partial"]}
+    ],
+    "no_positive_tasks": [{"requirement_quote": "CLIN 3", "work_pattern": "replacement|parts"}],
+    "pricing": [
+      {"requirement_quote": "CLIN 1", "pricing_pattern": "firm.fixed.price|FFP"},
+      {"requirement_quote": "CLIN 2", "pricing_pattern": "labor.hour|\\bLH\\b"},
+      {"requirement_quote": "CLIN 3", "pricing_pattern": "time.and.materials|T&M"}
+    ]
+  }
+}

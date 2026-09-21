@@ -1,0 +1,112 @@
+[
+  {
+    "id": "ambiguous_acronym",
+    "documents": ["The contractor shall implement RMA workflows and train the operations team. No expansion of RMA is supplied."],
+    "profile": {"core_competencies": ["Returns processing software"], "past_performance_highlights": ["Implemented return merchandise authorization workflows for a distributor."]},
+    "kind": "requirement_meaning",
+    "interpretation": "RMA might describe returns processing or a different business workflow; the package does not define it.",
+    "question": "Do you have a glossary or scope attachment defining RMA for this procurement?",
+    "impact": "An incorrect expansion would change both requirement interpretation and the relevant past-performance search.",
+    "options": ["Provide the package definition", "Definition not available"],
+    "expected_status": "NEEDS_CLARIFICATION"
+  },
+  {
+    "id": "migration_is_not_one_capability",
+    "documents": ["Migrate case records while preserving retention rules, metadata and disposition history."],
+    "profile": {"past_performance_highlights": ["Completed enterprise migration for a regional operator."]},
+    "kind": "vendor_experience",
+    "interpretation": "The project does not say whether migration included records semantics or only hosting infrastructure.",
+    "question": "Did this project migrate records and retention metadata, move infrastructure only, or cover some other scope?",
+    "impact": "Only the work actually performed can support a direct records-migration proof point.",
+    "options": ["Records and retention metadata", "Infrastructure only", "Unknown"],
+    "expected_status": "NEEDS_CLARIFICATION"
+  },
+  {
+    "id": "prime_vs_actual_workshare",
+    "documents": ["Relevant experience must demonstrate independent verification of financial interfaces."],
+    "profile": {"past_performance_highlights": ["Supported a financial-system verification contract led by another firm."]},
+    "kind": "vendor_role",
+    "interpretation": "Participation does not establish that this company performed independent verification.",
+    "question": "Which verification tasks did your company perform itself, rather than the prime or another subcontractor?",
+    "impact": "The prime's contract scope cannot be credited as this company's delivered work.",
+    "options": ["Performed verification directly; describe tasks", "Administrative support only", "Unknown"],
+    "expected_status": "NEEDS_CLARIFICATION"
+  },
+  {
+    "id": "similar_company_names",
+    "documents": ["The contractor shall maintain industrial refrigeration controls."],
+    "profile": {"company_name": "Example Delta", "past_performance_highlights": ["An award announcement credits Example Delta Group with refrigeration maintenance; relationship to our legal entity is not stated."]},
+    "kind": "company_identity",
+    "interpretation": "The announcement may refer to a separate legal entity or affiliate.",
+    "question": "Is the awardee the same legal entity as your company, an affiliate, or an unrelated business? Please provide the entity identifier or relationship.",
+    "impact": "Name similarity alone cannot establish ownership or permitted use of past performance.",
+    "options": ["Same legal entity; provide identifier", "Affiliate; describe relationship", "Unrelated or unknown"],
+    "expected_status": "NEEDS_CLARIFICATION"
+  },
+  {
+    "id": "scale_and_coverage",
+    "documents": ["Provide continuous dispatch at twelve facilities with a two-hour incident response requirement."],
+    "profile": {"past_performance_highlights": ["Delivered facilities dispatch services."]},
+    "kind": "vendor_scale",
+    "interpretation": "The project omits facility count, operating hours and response commitments.",
+    "question": "How many facilities and shifts did this project cover, and what incident-response commitment did your team meet?",
+    "impact": "A daytime single-site project may be adjacent experience, not proof of round-the-clock multi-site delivery.",
+    "options": ["Provide coverage and response details", "Details unknown"],
+    "expected_status": "NEEDS_CLARIFICATION"
+  },
+  {
+    "id": "recency_without_dates",
+    "documents": ["Submit relevant projects completed within the five years preceding the proposal due date."],
+    "profile": {"past_performance_highlights": ["Completed a comparable laboratory equipment maintenance contract; completion date not provided."]},
+    "kind": "vendor_recency",
+    "interpretation": "Scope may match, but eligibility under the stated recency window cannot be established.",
+    "question": "What was this project's completion date, or is it still ongoing?",
+    "impact": "Without dates the project cannot be represented as satisfying the evaluation's recency condition.",
+    "options": ["Provide dates", "Dates unknown"],
+    "expected_status": "NEEDS_CLARIFICATION"
+  },
+  {
+    "id": "certification_scope",
+    "documents": ["The performing organization must hold the required quality certification covering calibration services."],
+    "profile": {"certifications": ["Quality certification held within the corporate group; holder and scope unspecified."]},
+    "kind": "vendor_eligibility",
+    "interpretation": "A group-level certification claim does not establish coverage of the performing entity or service.",
+    "question": "Which legal entity holds the certificate, and does its current scope cover calibration services?",
+    "impact": "Entity and scope affect whether the proposed performer satisfies the stated qualification.",
+    "options": ["Provide certificate holder and scope", "Only an affiliate holds it", "Unknown"],
+    "expected_status": "NEEDS_CLARIFICATION"
+  },
+  {
+    "id": "vehicle_access_vs_partner_claim",
+    "documents": ["Only holders of the named multiple-award vehicle may submit prime task-order proposals."],
+    "profile": {"contract_vehicles": ["Access through a business partner; current agreement and holder identity not supplied."]},
+    "kind": "vendor_eligibility",
+    "interpretation": "Partner access is not direct prime eligibility or an executed teaming agreement.",
+    "question": "Does your legal entity hold the vehicle, or would a confirmed vehicle-holder partner submit as prime?",
+    "impact": "This changes the feasible prime/subcontractor posture, not the customer's vehicle requirement.",
+    "options": ["Direct holder; provide award reference", "Partner would prime; identify arrangement", "Access unknown"],
+    "expected_status": "NEEDS_CLARIFICATION"
+  },
+  {
+    "id": "unresolved_official_conflict",
+    "documents": ["The RFQ requires on-site service five days per week.", "The attached PWS allows fully remote service. No amendment precedence is provided."],
+    "profile": {"core_competencies": ["Remote equipment diagnostics"]},
+    "kind": "document_conflict",
+    "interpretation": "The RFQ and PWS conflict on place of performance; precedence is unresolved.",
+    "question": "Which place-of-performance requirement governs? Obtain an authoritative amendment or formal contracting-officer Q&A response.",
+    "impact": "Staffing, travel cost and eligibility assumptions depend on the controlling requirement.",
+    "options": ["Provide controlling amendment or Q&A", "Unresolved; submit formal Q&A"],
+    "expected_status": "NEEDS_FORMAL_QA"
+  },
+  {
+    "id": "mixed_pricing_scope_mapping",
+    "documents": ["Delivery uses fixed-price and labor-hour line items. The referenced line-item allocation attachment is not included."],
+    "profile": {"past_performance_highlights": ["Delivered fixed-price equipment installation."]},
+    "kind": "requirement_meaning",
+    "interpretation": "Both pricing types are known; the missing allocation prevents mapping work and pricing risk to each line item.",
+    "question": "Can you supply the referenced line-item allocation attachment? If unavailable, the allocation needs formal Q&A rather than an assumption.",
+    "impact": "The capture must preserve mixed pricing and avoid treating all labor risk as fixed price.",
+    "options": ["Provide the attachment", "Attachment unavailable"],
+    "expected_status": "NEEDS_CLARIFICATION"
+  }
+]
