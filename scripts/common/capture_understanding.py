@@ -695,7 +695,7 @@ def analyze_packet(packet: dict, answers: list, previous: dict, *, call: Callabl
             stages.append(audit)
             if raw is None:
                 audit["error"] = "provider_or_json_unavailable"
-                raise ValueError(f"{stage}: provider unavailable or invalid JSON; no automatic provider retry.")
+                raise ValueError(f"{stage}: provider unavailable after bounded transport retries or invalid JSON; no semantic retry.")
             try:
                 result = validate(raw)
                 audit["valid"] = True

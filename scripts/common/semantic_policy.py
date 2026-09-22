@@ -62,9 +62,18 @@ This rule applies to inference FROM A DENIAL. Independently affirmative, clearly
 different supplied work can still be unrelated; never turn unrelated performed work
 into missing by speculating about other undisclosed projects. Do not borrow that
 different work to label an isolated denial's unmentioned conditions unrelated.
+You MUST respect the Comparator's right to label an affirmative claim as unrelated
+independently. If a vendor supplies an unrelated affirmative claim (e.g., photography),
+do NOT demand it be marked contradicted just because a sibling negative statement
+(e.g., denying lab work) exists in the same graph. An unrelated claim is unrelated;
+do not force contradiction across isolated claims.
 """
 
 MISSING_INFORMATION_POLICY = """ABSENCE IS NOT AMBIGUITY:
+If the text explicitly states that references, project descriptions, or histories
+'have not been supplied', 'are missing', or 'are omitted', you
+MUST NOT generate clarification questions asking what those missing references describe.
+Acknowledge the data gap as a missing condition and output NO question about that gap.
 Do not generate clarification questions regarding information, references, or profiles
 that are explicitly stated as 'missing', 'not supplied', 'omitted', or 'not provided'.
 Clarification questions are ONLY for resolving ambiguous or vague text that actually
@@ -120,6 +129,14 @@ An unresolved conflict is NOT a blanket audit bypass or permission to pursue.
 """
 
 FIT_BOUNDARY_POLICY = """CORE WORK VERSUS UNPROVEN CONDITIONS:
+Distinguish between 'Ambiguous Requirements' and 'Missing Vendor Proof'. If a vendor
+provides a vague capability or prospective statement (e.g., 'we will plan a schedule'),
+this means the required performed-work condition is missing or unproven. Do NOT label
+a condition as ambiguous simply because the vendor failed to provide specific proof.
+Reserve ambiguous ONLY for when the provided text explicitly creates multiple
+conflicting interpretations of performed work. This rule governs vendor component
+findings, not the independent official-conflict channel: preserve contradictory
+package terms and their formal Q&A even when vendor proof is merely missing.
 Compare the vendor's reported action with the package's explicitly stated core work
 before judging timing, qualifications, acceptance or other constraints. If the same
 core work is supported but a specific constraint is not mentioned, score the WORK
@@ -144,6 +161,29 @@ package occurrence and its provenance. Use [] only when the package has no such 
 These objects are quoted context, not new government duties and not verified vendor
 performance. A separate reported claim may cite the same passage, but does not replace
 this context object. A reference-evaluation rule remains a requirement, not a reference.
+"""
+
+
+STANDALONE_CRITERION_POLICY = """STANDALONE CRITERIA ARE ASSESSABLE, NOT CORE WORK:
+A current requirement in the evaluation/eligibility area, or a standalone
+qualification requirement, may be compared without a work component. For a job
+marked comparison_kind=standalone_criterion, assess the exact criterion against the
+isolated claim. A criterion typed context is assessable in this mode; it is not
+automatically not_applicable. Preserve its component type and exact source text.
+Credit only the criterion actually established by this claim's own evidence. A
+performed-work experience criterion requires affirmative self-reported work;
+qualification credit requires the corresponding qualification assertion. Missing
+proof remains missing; ambiguous existing work remains ambiguous. A general offer,
+unknown performer, acronym overlap or sibling claim cannot establish this criterion.
+Government credit-assignment rules are not contractor tasks. Explain whether the
+supplied evidence satisfies the stated rule without inventing a duty to perform it.
+The code-owned criterion fit_label/met_components describe criterion satisfaction.
+Its operational relationship and coverage remain not_applicable and matched_work
+stays empty. This does NOT mean the criterion was skipped or its evidence is absent.
+Never transfer a matched experience criterion into proof of another operational task.
+Ordinary metadata, precedence rules and pricing terms remain non-experience context.
+Auditors check criterion entailment and source fidelity separately from operational
+performance; still reject unsupported criterion credit or borrowed evidence.
 """
 
 

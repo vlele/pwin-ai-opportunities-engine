@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import random
 import re
 import time
 from collections import defaultdict
@@ -29,9 +31,15 @@ from common.openai_reasoning_types import (
 )
 
 try:
-    from openai import OpenAI
+    from openai import OpenAI, APIConnectionError, APITimeoutError
+    TRANSPORT_ERRORS = (APIConnectionError, APITimeoutError)
 except Exception:  # pragma: no cover - optional dependency
     OpenAI = None  # type: ignore[assignment]
+    TRANSPORT_ERRORS = ()
+
+
+TRANSPORT_MAX_RETRIES = 3
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_REASONING_MODEL = os.getenv("PWIN_REASONING_MODEL") or os.getenv("OPENAI_MODEL") or "gpt-5.4-mini"
@@ -1273,6 +1281,22 @@ def _openai_client(api_key: str | None = None):
         return None
 
 
+def _create_with_transport_retries(create, **request):
+    """Retry only transport failures, never semantic, schema or quota failures."""
+    for attempt in range(TRANSPORT_MAX_RETRIES + 1):
+        try:
+            return create(**request)
+        except TRANSPORT_ERRORS as error:
+            if attempt == TRANSPORT_MAX_RETRIES:
+                logger.warning("OpenAI transport exhausted after %d attempts: %s",
+                               attempt + 1, type(error).__name__)
+                raise
+            delay = 2 ** attempt + random.uniform(0, 0.25)
+            logger.warning("OpenAI transport retry %d/%d in %.2fs: %s",
+                           attempt + 1, TRANSPORT_MAX_RETRIES, delay, type(error).__name__)
+            time.sleep(delay)
+
+
 def _call_openai_json(
     *,
     system_prompt: str,
@@ -1288,11 +1312,9 @@ def _call_openai_json(
     effective_timeout = max(int(timeout_seconds or 0), DEFAULT_REASONING_TIMEOUT_SECONDS)
     try:
         message = json.dumps(user_payload, ensure_ascii=True)
-        options = {"timeout": effective_timeout}
-        if response_schema is not None:
-            # The understanding pipeline owns its bounded contract correction.
-            options["max_retries"] = 0
-        completion = client.with_options(**options).chat.completions.create(
+        # One transport retry owner; no multiplicative SDK or semantic retries.
+        create = client.with_options(timeout=effective_timeout, max_retries=0).chat.completions.create
+        completion = _create_with_transport_retries(create,
             model=model or DEFAULT_REASONING_MODEL,
             **({"reasoning_effort": reasoning_effort} if reasoning_effort is not None else {}),
             response_format={"type": "json_schema", "json_schema": response_schema} if response_schema is not None else {"type": "json_object"},
