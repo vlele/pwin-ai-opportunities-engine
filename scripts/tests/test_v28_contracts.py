@@ -59,7 +59,7 @@ class CriteriaRoutingTests(unittest.TestCase):
         self.assertEqual(job["comparison_kind"], "standalone_criterion")
         self.assertIn("matched", c.component_response_schema(job)["properties"]["status"]["enum"])
         self.assertIn("unrelated", c.component_response_schema(job)["properties"]["status"]["enum"])
-        raw = {**finding, **{k: job[k] for k in ("pair_id", "component_id", "component_text", "component_kind")}}
+        raw = {**finding, **{k: job[k] for k in ("pair_id", "component_id", "component_kind")}}
         result = c.validate_component_response(raw, job, spans)
         self.assertEqual(result["status"], "matched")
 

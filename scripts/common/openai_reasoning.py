@@ -1282,19 +1282,9 @@ def _openai_client(api_key: str | None = None):
 
 
 def _create_with_transport_retries(create, **request):
-    """Retry only transport failures, never semantic, schema or quota failures."""
-    for attempt in range(TRANSPORT_MAX_RETRIES + 1):
-        try:
-            return create(**request)
-        except TRANSPORT_ERRORS as error:
-            if attempt == TRANSPORT_MAX_RETRIES:
-                logger.warning("OpenAI transport exhausted after %d attempts: %s",
-                               attempt + 1, type(error).__name__)
-                raise
-            delay = 2 ** attempt + random.uniform(0, 0.25)
-            logger.warning("OpenAI transport retry %d/%d in %.2fs: %s",
-                           attempt + 1, TRANSPORT_MAX_RETRIES, delay, type(error).__name__)
-            time.sleep(delay)
+    """Retry network/throttling failures, never semantic, schema or quota failures."""
+    from common.model_transport import create_with_retries
+    return create_with_retries(create, request=request, max_retries=TRANSPORT_MAX_RETRIES)
 
 
 def _call_openai_json(

@@ -195,7 +195,7 @@ class ClaimEvidenceTests(unittest.TestCase):
                 return audit
             if "component_job" in payload:
                 job = payload["component_job"]
-                return {**{k: job[k] for k in ("pair_id", "component_id", "component_text", "component_kind")},
+                return {**{k: job[k] for k in ("pair_id", "component_id", "component_kind")},
                         "status": "matched", "reason": "Claimed match.", "supported_scope": job["component_text"],
                         "evidence": job["claimed"]["evidence"]}
             if "source_coverage" in payload:
@@ -204,10 +204,11 @@ class ClaimEvidenceTests(unittest.TestCase):
                                           "record_kind": "requirement", "logic": "all", "supersedes": [],
                                           "focus": [{"ref": "D1:0", "quote": spans["D1:0"]["text"]}],
                                           "components": [{"kind": "work", "text": "Maintain refrigeration", "evidence": [{"ref": "D1:0", "quote": spans["D1:0"]["text"]}]}],
-                                          "evidence": [{"ref": "D1:0", "quote": spans["D1:0"]["text"]}]}],
+                                          "evidence": [{"ref": k, "quote": v['text']} for k, v in spans.items()
+                                                       if v['kind'] == 'package']} ] if 'D1:0' in spans else [],
                         "claims": [{"form": "performed_task", "meaning": "Unsupported performed tasks.", "attribution": "self",
                                     "execution": "affirmative_actual", "unresolved_dimensions": [],
-                                    "evidence": [{"ref": "V1:0", "quote": spans["V1:0"]["text"]}]}],
+                                    "evidence": [{"ref": "V1:0", "quote": spans["V1:0"]["text"]}]}] if 'V1:0' in spans else [],
                         "questions": [], "resolved_question_ids": [], "quoted_vendor_context": []}
             spans = payload["spans"]
             return {"complete": True, "facts": [{"area": "scope", "statement": "Maintain refrigeration equipment.", "refs": list(spans)}],
@@ -215,10 +216,11 @@ class ClaimEvidenceTests(unittest.TestCase):
                                  for sid in dict.fromkeys(span["source_id"] for span in spans.values())]}
 
         with tempfile.TemporaryDirectory() as folder:
-            result = gate.checkpoint(Path(folder), packet(), analyze=lambda p, a, prev: u.analyze_packet(p, a, prev, call=model))
+            from tests.evidence_wire_fixture import selection_provider
+            result = gate.checkpoint(Path(folder), packet(), analyze=lambda p, a, prev: u.analyze_packet(p, a, prev, call=selection_provider(model)))
             self.assertEqual(result["status"], "TECHNICAL_BLOCKED")
             self.assertEqual(result["understanding_audit"]["failure_kind"], "semantic_support")
-            self.assertEqual(len(calls), 10)
+            self.assertFalse(any('component_job' in c for c in calls))
             self.assertEqual(sum(any(t["id"] == "C0" for t in c.get("targets", [])) for c in calls), 1)
             self.assertFalse(result["questions"])
             self.assertIn("Claim exceeds", Path(result["review_path"]).read_text())

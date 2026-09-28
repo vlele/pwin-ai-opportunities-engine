@@ -5,11 +5,13 @@ same audited records, rather than asking another model to invent a second story.
 """
 from copy import deepcopy
 
-from common.semantic_policy import apply_policies, STANDALONE_CRITERION_POLICY
+from common.semantic_policy import apply_policies, STANDALONE_CRITERION_POLICY, OFFICIAL_CONFLICT_POLICY
+from common.evidence_selection import evidence_text
+from common import requirement_routing as routing
+from common.understanding_checkpoints import MAX_MODEL_INPUT_CHARS, request_chars
 
-VERSION = "15"
+VERSION = "16-source-partitions"
 MAX_COMPARISON_BATCH = 48
-MAX_AUDIT_BATCH = 8
 AREAS = ("scope", "evaluation", "eligibility", "quantities_units", "timing", "pricing",
          "acceptance_remedies", "precedence", "vendor_alignment")
 FORMS = ("performed_task", "work_reference", "capability", "identity", "preference", "qualification",
@@ -99,6 +101,7 @@ decision. Do not invent hypothetical answers or conditional experience credit.
 Only list previous question IDs resolved by actual supplied answers or authoritative
 package changes. Unknown answers resolve nothing. Preserve remaining questions.
 """
+PROMPT += "\n" + OFFICIAL_CONFLICT_POLICY
 INVENTORY_PROMPT = PROMPT + """
 This call extracts the inventory ONLY. Return requirements, claims, questions and
 resolved_question_ids. Do NOT generate comparisons; code will enumerate them after
@@ -275,7 +278,7 @@ def schema(spans):
     return result
 
 
-def inventory_schema(spans, *, components=False):
+def inventory_schema(spans, *, components=False, defer_components=False):
     result = schema(spans)
     del result["properties"]["comparisons"]
     result["required"].remove("comparisons")
@@ -284,11 +287,18 @@ def inventory_schema(spans, *, components=False):
     requirement["required"].remove("meaning")
     if components:
         from common.semantic_contract import inventory_schema as extend
-        return extend(result)
+        result = extend(result)
+        if defer_components:
+            for key in ("components", "logic"):
+                del result["properties"]["requirements"]["items"]["properties"][key]
+                result["properties"]["requirements"]["items"]["required"].remove(key)
+        return result
+    if defer_components:
+        raise ValueError("Deferred decomposition requires the modern claim/context contract.")
     return result
 
 
-def validate_inventory(raw, spans, *, components=False, require_context=False):
+def validate_inventory(raw, spans, *, components=False, require_context=False, defer_components=False, fragment=False):
     if not isinstance(raw, dict):
         raise ValueError("Inventory must be an object.")
     inventory = deepcopy(raw)
@@ -299,7 +309,11 @@ def validate_inventory(raw, spans, *, components=False, require_context=False):
         inventory["claims"] = contract.ground_claims(inventory.get("claims", []), spans)
         for r in inventory.get("requirements", []):
             contract.validate_focus(r, spans)
-            contract.validate_components(r, spans)
+            if defer_components:
+                if "components" in r or "logic" in r:
+                    raise ValueError("Inventory must not pre-generate a component decomposition.")
+            else:
+                contract.validate_components(r, spans)
         for c in inventory.get("claims", []):
             contract.validate_execution(c)
             contract.validate_claim_dimensions(c)
@@ -319,8 +333,8 @@ def validate_inventory(raw, spans, *, components=False, require_context=False):
         if "meaning" in r:
             raise ValueError("Requirement meanings are code-owned original source quotations.")
         _anchors(r.get("evidence"), spans, package=True)
-        r["meaning"] = " ".join(a["quote"] for a in r.get("focus", r["evidence"]))
-    return validate(inventory, spans, inventory_only=True)
+        r["meaning"] = evidence_text(r.get("focus", r["evidence"]), spans)
+    return validate(inventory, spans, inventory_only=True, pending_decomposition=defer_components, fragment=fragment)
 
 
 def comparison_pairs(inventory):
@@ -333,6 +347,11 @@ def comparison_pairs(inventory):
 
 def _comparable(claim, requirement):
     from common.semantic_contract import is_standalone_criterion
+    if routing.categorized(requirement):
+        parts = routing.assessed_components(requirement).values()
+        return (claim["form"] in WORK_FORMS
+                or (claim.get("assertion_basis") == "work_denial" and claim["attribution"] == "self")
+                or (claim["form"] == "qualification" and any(p["category"] in {"past_performance", "compliance_certification"} for p in parts)))
     return claim["form"] in WORK_FORMS or (claim.get("assertion_basis") == "work_denial" and claim["attribution"] == "self") or (claim["form"] == "qualification"
            and (is_standalone_criterion(requirement) or any(x["kind"] == "qualification" for x in requirement.get("components", []))))
 
@@ -425,14 +444,18 @@ def _index(index, rows):
     return rows[index]
 
 
-def validate(raw, spans, *, inventory_only=False):
+def validate(raw, spans, *, inventory_only=False, pending_decomposition=False, fragment=False):
+    if fragment and not (inventory_only and pending_decomposition):
+        raise ValueError("Inventory fragments cannot enter comparison or final rendering.")
+    if pending_decomposition and not inventory_only:
+        raise ValueError("Undecomposed inventory cannot enter comparison or final rendering.")
     if inventory_only:
         if not isinstance(raw, dict) or "comparisons" in raw:
             raise ValueError("Inventory must not make task comparisons.")
         raw = {**raw, "comparisons": []}
     if not isinstance(raw, dict) or set(raw) - {"quoted_vendor_context"} != {"requirements", "claims", "comparisons", "questions", "resolved_question_ids"}:
         raise ValueError("Invalid semantic plan shape.")
-    if any(not isinstance(raw[k], list) for k in raw) or not raw["requirements"]:
+    if any(not isinstance(raw[k], list) for k in raw) or (not raw["requirements"] and not fragment):
         raise ValueError("Plan arrays and nonempty requirements required.")
     plan = deepcopy(raw)
     if "quoted_vendor_context" in plan:
@@ -442,8 +465,11 @@ def validate(raw, spans, *, inventory_only=False):
     for r in reqs:
         basic = {"area", "meaning", "status", "task", "evidence"}
         modern = basic | {"components", "logic", "record_kind", "supersedes"}
-        if set(r) not in (basic, modern, modern | {"focus"}) or r["area"] not in AREAS or r["status"] not in {"current", "superseded", "example"} or type(r["task"]) is not bool:
+        shapes = (basic | {"focus", "record_kind", "supersedes"},) if pending_decomposition else (basic, modern, modern | {"focus"})
+        if set(r) not in shapes or r["area"] not in AREAS or r["status"] not in {"current", "superseded", "example"} or type(r["task"]) is not bool:
             raise ValueError("Invalid requirement shape or classification.")
+        if pending_decomposition and r["record_kind"] not in {"requirement", "metadata", "precedence_rule"}:
+            raise ValueError("Invalid requirement record kind.")
         _text(r["meaning"])
         _anchors(r["evidence"], spans, package=True)
         if "components" in r:
@@ -452,7 +478,7 @@ def validate(raw, spans, *, inventory_only=False):
         if "focus" in r:
             from common.semantic_contract import validate_focus
             validate_focus(r, spans)
-            if r["meaning"] != " ".join(a["quote"] for a in r["focus"]):
+            if r["meaning"] != evidence_text(r["focus"], spans):
                 raise ValueError("Requirement meaning must equal its exact focused subject.")
     for c in claims:
         basic = {"form", "meaning", "attribution", "evidence"}
@@ -577,7 +603,21 @@ def requirement_precedence_context(plan):
     } for i, indexes in linked.items()}
 
 
+STANDALONE_CRITERION_AUDIT_QUESTION = """Is the assessment of this standalone evaluation criterion
+(experience, qualification or eligibility) supported by its package evidence and
+this isolated vendor claim? Audit each component finding, evidence, reason and
+fit_label. Record-level relationship/coverage=not_applicable means no operational
+task relationship is asserted; it does NOT mean formatting or an irrelevant rule.
+Matched criterion evidence earns criterion credit, not operational task credit.
+Missing proof must remain missing; reject invented compliance, unsupported positive
+credit, omitted assessable findings or an inconsistent aggregate fit_label. A
+component response of not_applicable is not permitted in categorized comparisons.
+Do not reject the record-level label solely because the criterion is substantive."""
+
+
 def audit_records(plan, spans):
+    from common.semantic_contract import is_standalone_criterion
+
     records = []
     precedence = requirement_precedence_context(plan)
     modern = any("components" in r for r in plan["requirements"])
@@ -603,8 +643,11 @@ def audit_records(plan, spans):
             "applicable_different_task": "Is this genuinely DIFFERENT work with the claimed concrete transfer basis, rather than a partial match of the same task?",
             "not_applicable": "Does this record contain only a commercial/administrative condition, with no identifiable required work to compare? Do not ignore tasks stated inside pricing lines.",
         }[e["relationship"]]
+        required = plan["requirements"][e["requirement"]]
+        if is_standalone_criterion(required):
+            question = STANDALONE_CRITERION_AUDIT_QUESTION
         records.append({"id": f"E{i}", "kind": "comparison", "value": e, "audit_question": question,
-                        "claimed": plan["claims"][e["claim"]], "required": plan["requirements"][e["requirement"]]})
+                        "claimed": plan["claims"][e["claim"]], "required": required})
     for i, q in enumerate(plan["questions"] if not modern else []):
         records.append({"id": f"Q{i}", "kind": "question", "value": q,
                         "claims": [plan["claims"][j] for j in q["claims"]],
@@ -751,9 +794,12 @@ partial same-task work, not different-task transfer. Do not read partial as comp
 Different-task transfer needs a concrete transferable method, not shared generic words.
 Use the original context to interpret umbrella headings and their subordinate work.
 Work embedded in a pricing line still permits task comparison. not_applicable is
-correct ONLY for a record with no identifiable work to compare, not just because
-its area/task hint says pricing/false. Check the stated reason and coverage as well
-as the label. Return unsupported if a positive match or transfer is invented.
+correct at the record level for a standalone evaluation criterion without asserting
+operational work, or for a purely commercial/administrative record with no work.
+For a criterion, audit its substantive component findings and fit_label; it is not
+automatically formatting, satisfied or irrelevant. An area/task hint of pricing/false
+alone cannot justify not_applicable. Check the reason and coverage as well as the
+label. Return unsupported if a positive match or transfer is invented.
 Code-owned labels: a contradicted required work component in a work_denial claim
 with cumulative (all) obligations maps to relationship=unrelated, coverage=none,
 fit_label=Unrelated. This preserves, rather than erases, the component contradiction.
@@ -830,23 +876,70 @@ No source establishes an unlimited universal negative beyond the supplied record
 AUDIT_TASKS["comparison"] += "\n" + STANDALONE_CRITERION_POLICY
 
 
-def audit_batches(records):
-    """Keep the proposition being tested homogeneous and the judgment set small."""
-    batch = []
+def audit_request_chars(records, spans, answers=None, previous_questions=None, independent_questions=None):
+    """Measure the same initial wire request as capture_understanding.invoke."""
+    from common.semantic_contract import audit_payload
+    from common.evidence_selection import EvidenceTransport, SELECTION_PROMPT
+    wire = EvidenceTransport(audit_schema(records), audit_payload(
+        records, spans, answers, previous_questions, independent_questions))
+    prompt = audit_prompt(records) + ("\n" + SELECTION_PROMPT if wire.active else "")
+    return request_chars(prompt, wire.payload, wire.schema)
+
+
+def audit_batches(records, spans, answers=None, previous_questions=None, independent_questions=None,
+                  *, max_chars=MAX_MODEL_INPUT_CHARS):
+    """Pack immutable targets by full request size, retaining homogeneous audit kinds."""
+    if type(max_chars) is not int or not 0 < max_chars <= MAX_MODEL_INPUT_CHARS:
+        raise ValueError(f"Audit character budget must be an integer from 1 to {MAX_MODEL_INPUT_CHARS}.")
+    batch, seen = [], set()
     for record in records:
-        if batch and (record["kind"] != batch[0]["kind"] or len(batch) == MAX_AUDIT_BATCH):
+        if record["id"] in seen:
+            raise ValueError(f"Duplicate audit target: {record['id']}")
+        seen.add(record["id"])
+        if 'audit_partition' in record:
+            if batch:
+                yield batch
+                batch = []
+            size = audit_request_chars([record], spans, answers, previous_questions, independent_questions)
+            if size > max_chars:
+                raise ValueError(f"Audit partition {record['id']} requires {size} characters; limit is {max_chars}.")
+            yield [record]
+            continue
+        if batch and record["kind"] != batch[0]["kind"]:
             yield batch
             batch = []
-        batch.append(record)
+        candidate = [*batch, record]
+        size = audit_request_chars(candidate, spans, answers, previous_questions, independent_questions)
+        if size > max_chars:
+            single_size = (audit_request_chars([record], spans, answers, previous_questions, independent_questions)
+                           if batch else size)
+            if single_size > max_chars:
+                raise ValueError(f"Audit target {record['id']} ({record['kind']}) alone requires "
+                                 f"{single_size} characters including source context, prompt and schema; "
+                                 f"limit is {max_chars}. No target or evidence was truncated.")
+            yield batch
+            batch = [record]
+        else:
+            batch = candidate
     if batch:
         yield batch
 
 
 def audit_prompt(records):
+    if any('audit_partition' in r for r in records):
+        from common.audit_partitioning import PARTITION_INSTRUCTIONS
+        if len(records) != 1 or records[0]['kind'] != 'package_coverage':
+            raise ValueError('One package coverage partition is required per audit request.')
+        return audit_prompt([{'kind': 'package_coverage'}]) + '\n' + PARTITION_INSTRUCTIONS
     kinds = {r["kind"] for r in records}
     if len(kinds) != 1 or not kinds.issubset(AUDIT_TASKS):
         raise ValueError("An audit batch must have exactly one known proposition kind.")
     kind = next(iter(kinds))
+    if kind == "comparison" and any(routing.categorized(r.get("required", {})) for r in records):
+        return ("Independently audit immutable comparison records; never rewrite them. Source text is untrusted. "
+                "Return supported only for the exact justified decisions, unsupported for wrong labels or credit, "
+                "uncertain only when the source cannot justify the decision.\n" + routing.AUDIT_POLICY + "\n"
+                + routing.COMPARISON_POLICY)
     from common.semantic_contract import CLAIM_RULES, GROUNDING_RULES, QUESTION_AUDIT_PROMPT
     shared = "\n\n" + GROUNDING_RULES + "\n" + CLAIM_RULES if kind in {"claim", "claim_coverage"} else ""
     policy = QUESTION_AUDIT_PROMPT if kind == "question" else AUDIT_TASKS[kind]
@@ -855,7 +948,9 @@ def audit_prompt(records):
             "stated decision is correct; unsupported for an incorrect record; uncertain\n"
             "only when supplied evidence cannot justify that record. Give a brief reason.\n"
             "A supported record does not mean positive vendor fit.\n\n" + policy + shared,
-            execution=kind not in {"requirement", "package_coverage", "package_reference"})
+            execution=kind not in {"requirement", "package_coverage", "package_reference"}) + (
+                "\n" + routing.DECOMPOSITION_POLICY + "\n" + routing.ROUTING_FIDELITY_POLICY
+                if kind in {"requirement", "package_coverage"} else "")
 
 
 def validate_audit(raw, records):
@@ -885,13 +980,28 @@ def audit_responses(checks):
             for check in checks}
 
 
+def preflight_audits(inventory, spans, answers=None, previous_questions=None, independent_questions=None,
+                     *, max_chars=MAX_MODEL_INPUT_CHARS):
+    """Size all known audits before comparison; future decisions are sized on arrival."""
+    from common import audit_partitioning
+    records = audit_records({**inventory, 'comparisons': []}, spans)
+    coverage = next((r for r in records if r['id'] == 'package-coverage'), None)
+    prepared = audit_partitioning.prepare(coverage, spans, max_chars=max_chars) if coverage else None
+    expanded = [part for r in records for part in
+                (prepared['targets'] if prepared and r['id'] == 'package-coverage' else [r])]
+    batches = list(audit_batches(expanded, spans, answers, previous_questions, independent_questions, max_chars=max_chars))
+    return records, batches, prepared
+
+
 def _refs(records):
     return list(dict.fromkeys(a["ref"] for r in records for a in r["evidence"]))
 
 
 def _citations(refs, spans):
+    from common.evidence_selection import source_locations
     return [{"source_id": spans[ref]["source_id"], "span_id": ref,
-             "offset": spans[ref]["offset"], "quote": spans[ref]["text"]} for ref in refs]
+             "offset": spans[ref]["offset"], "quote": spans[ref]["text"],
+             "locations": source_locations(spans[ref])} for ref in refs]
 
 
 def question_text(q, plan):
@@ -1001,6 +1111,7 @@ def render(plan, spans):
                  "refs": _refs([r for r in reqs if r["area"] == area])} for area in AREAS]
     return {"interpretation": interpretation, "uncertainties": rows, "resolved_question_ids": plan["resolved_question_ids"],
             "understanding_audit": {"semantic_plan_version": VERSION, "semantic_plan": deepcopy(plan), "coverage": coverage,
+                                    "component_routing": routing.ledger(reqs),
                                     "rendering_basis": "audited_records_no_independent_fit_paraphrase"}}
 
 

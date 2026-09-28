@@ -186,14 +186,15 @@ def pipeline_model(*, reject_required=False, fail_claim=False, fail_after_invent
                                      for key in payload["requirements"]}}
         if "component_job" in payload:
             job = payload["component_job"]
-            return {**{k: job[k] for k in ("pair_id", "component_id", "component_text", "component_kind")},
+            return {**{k: job[k] for k in ("pair_id", "component_id", "component_kind")},
                     "status": "ambiguous", "reason": "Existing duties are unclear.", "supported_scope": "",
                     "evidence": job["claimed"]["evidence"]}
         return {"complete": True, "facts": [{"area": "scope", "statement": "Inspect cooling units.", "refs": ["D1:0"]}],
                 "coverage": [{"source_id": "D1", "finding": "Scope reviewed.", "refs": ["D1:0"]}]}
 
     packet = {"technical_issues": [], "sources": {r["source_id"]: r for r in spans.values()}}
-    return model, calls, packet
+    from tests.evidence_wire_fixture import selection_provider
+    return selection_provider(model), calls, packet
 
 
 class QuestionPipelineTests(unittest.TestCase):

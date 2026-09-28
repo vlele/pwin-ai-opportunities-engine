@@ -27,6 +27,30 @@ Unrelated work does not need a rescue questionnaire. Missing history is unknown,
 inability. An understandable self-report is unverified, not necessarily ambiguous.
 Technical failures are not business questions for the user.
 
+## Warm Resume and Provider Errors
+
+For a failed local-file run, repeat the original command with
+`--resume-understanding`. This requires the unchanged package, profile, model,
+settings, semantic runtime and intact attachment cache. It never refreshes the
+PDF/vision extraction and fails closed if there is no matching failed checkpoint.
+Each content-addressed stage receipt is revalidated before reuse; an unsupported
+semantic verdict is not retried until it becomes favorable. Do not combine this
+flag with new answers, tracked capture, or `--retry-clarification` (which can
+refresh attachments).
+
+Provider diagnostics preserve redacted JSON error bodies, error codes, request
+IDs and Retry-After headers. Transient network failures and recognized throttling
+can retry up to three times. The server's delay is a minimum, not a suggestion:
+seconds, HTTP dates and retry-after-ms are supported. A requested delay exceeding
+the remaining 300-second wait budget is recorded and deferred, never shortened.
+Quota, billing, authentication, schema and individually oversized-request errors
+are not retried. Semantic rejection is not a transport failure.
+
+Updating semantic runtime code invalidates its receipts by design. A transport-only
+continuation of an older frozen run must keep that semantic runtime unchanged and
+record the external transport adapter's identity separately. Do not rename old
+receipt keys or disable identity checks to make a changed pipeline reuse results.
+
 ## Source-Linked Pipeline
 
 Production orchestration is in `common/capture_understanding.py`; representation,
@@ -37,7 +61,12 @@ contracts and projection are in `common/semantic_plan.py` and
    channel. Check whether each question is warranted, not whether its answer is true.
    Keep source-valid questions available if a later stage fails.
 2. Extract package facts in contiguous batches. Retain coverage and the raw ledger.
-3. Build an inventory from **all original source spans**, not ledger paraphrases.
+3. Map **every extracted ledger fact** in bounded package-only batches, using the
+   original cited spans for evidence, not the ledger's paraphrases as quotations.
+   Map private vendor assertions separately, retaining weak capability statements
+   without awarding performed-work credit. Code retains every fact's original
+   references in `fact_provenance`, separately from selected evidence. Independent
+   handoff auditing must approve semantic retention; ID accounting alone is not a pass.
    Preserve current/superseded/example package facts, distinct vendor claim types,
    and material questions. Each requirement's `focus` identifies its exact subject;
    `evidence` preserves surrounding context. Package wording is assembled from the
@@ -58,8 +87,12 @@ contracts and projection are in `common/semantic_plan.py` and
    actor attribution: government prerequisites, historical work and pure payment/date
    events are not new contractor duties. Work components are stably ordered first
    before assigning component IDs; sorting cannot invent an omitted activity.
-5. Compare each component in a separate model call. The response schema locks
-   `pair_id`, `component_id`, `component_text` and `component_kind` to that target.
+5. Preflight and execute source-fidelity, claim-coverage and full-package coverage
+   audits before vendor comparisons. Full-source coverage still sees original text
+   that the ledger omitted. Any unsupported/uncertain verdict blocks comparisons.
+   Then compare each eligible component in a separate model call. The response schema
+   locks `pair_id`, `component_id` and `component_kind` to that target; component text
+   remains unchanged input data rather than a source-dependent schema literal.
    Code rechecks identity during assembly and computes partial coverage from met
    and missing components; the model cannot replace that with an overall fit label.
    This trades additional model calls for smaller, isolated decisions. It does not
@@ -68,7 +101,7 @@ contracts and projection are in `common/semantic_plan.py` and
    and explicitly linked negative/uncertainty context. Reading a surrounding span
    cannot expand a citation past that declared boundary. Selection does not prove
    semantic support; the independent auditor still judges each reason.
-6. Audit immutable records in homogeneous batches. Requirement fidelity and package
+6. Audit immutable records in homogeneous batches. The earlier requirement fidelity and package
    completeness receive package-only sources. Vendor-inventory completeness receives
    vendor/answer sources only. Comparisons receive both sides. The auditor cannot
    rewrite claims or omit targets. Modern assertion audits do not re-audit question
@@ -274,6 +307,11 @@ Add new documents with additional `--file` arguments. Changed package/profile in
 require a fresh interpretation; stale answers fail. `--retry-clarification` retries
 technical failures, not unresolved meaning or official conflicts.
 
+After a technical failure, an unchanged retry restores the original model inputs
+and revalidates saved stage responses before continuing. Retained questions do not
+prevent completion of that technical reassessment; they still block research when
+unanswered. Answer changes start a new assessment rather than reusing old judgments.
+
 ## Settings, Limits and Audit
 
 `PWIN_UNDERSTANDING_MODEL` defaults to the shared model.
@@ -289,7 +327,39 @@ coverage, the semantic plan and every verdict. These contain private package/pro
 data: **do not commit live audit directories**. Fingerprints include inputs, file
 content, model settings and checkpoint code. Answers never rewrite permanent profiles.
 
+### Audit Storage Is Not Model Context
+
+The accumulated extraction ledger is retained in full for audit and divided into
+bounded ledger-to-inventory mapping requests with original source spans. It is not
+sent as one unbounded request. The former 160,000-character ledger/context check
+has been removed. Empty extraction,
+invalid citations and incomplete batch coverage still fail. A separate 32 MiB ledger
+storage safety limit protects local resources without treating normal long-package
+evidence as context overflow. Failure output retains facts and source coverage.
+
+Each validated model response is atomically persisted under `stage-checkpoints/`.
+Receipt identity includes the full package/profile, answers, stage, prompt, actual
+payload, schema, model settings, provider endpoint identity and common-code/runtime
+fingerprint. Reading a receipt checks integrity, then reruns evidence retrieval and
+the current stage validator. A corrupt/invalid receipt stops execution instead of
+silently paying for a new answer. Negative audit verdicts remain negative on restart.
+Validated contract corrections are also retained; this is resumption, not resampling.
+Legacy run outputs are not automatically trusted or imported as stage receipts.
+
+The per-request character safety check includes the prompt, source payload, and
+structured-output schema. It is not a model-token measurement. An oversized request
+blocks with its measured size and never truncates evidence. Inventory mapping is
+ledger-batched, decomposition is parent-scoped, and full-source coverage uses
+accounted partitions with source dependencies. Indivisible oversized contexts fail
+instead of dropping sources. Receipt caching and complete reference accounting do
+not establish semantic accuracy.
+
 ## Release Evidence
+
+Current component categorization, comparison filtering and proposal-checklist
+handoff are described in [component-routing.md](component-routing.md). The new
+`missing`/`unrelated` boundary applies to categorized production components;
+historical unclassified fixtures are not a production fallback.
 
 - `python3 -m unittest discover -s scripts/tests -p 'test_*.py'`: offline contracts.
 - `scripts/tests/run_semantic_classification_benchmark.py`: frozen full-checkpoint repeats.

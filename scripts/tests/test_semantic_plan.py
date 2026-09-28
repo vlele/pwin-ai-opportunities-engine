@@ -33,11 +33,11 @@ class SemanticPlanTests(unittest.TestCase):
     def test_audit_batches_do_not_mix_different_propositions(self):
         spans, plan = fixture()
         records = s.audit_records(plan, spans)
-        batches = list(s.audit_batches(records))
+        batches = list(s.audit_batches(records, spans))
         self.assertEqual([r["id"] for b in batches for r in b], [r["id"] for r in records])
         for batch in batches:
             self.assertEqual(len({r["kind"] for r in batch}), 1)
-            self.assertLessEqual(len(batch), s.MAX_AUDIT_BATCH)
+            self.assertLessEqual(s.audit_request_chars(batch, spans), s.MAX_MODEL_INPUT_CHARS)
             self.assertIn(batch[0]["kind"], s.audit_prompt(batch))
 
     def test_audit_does_not_silently_drop_a_late_negative_batch(self):

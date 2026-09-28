@@ -73,7 +73,7 @@ class ComponentBindingTests(unittest.TestCase):
 
     def response(self, job, finding):
         return {"pair_id": job["pair_id"], "component_id": job["component_id"],
-                "component_text": job["component_text"], "component_kind": job["component_kind"],
+                "component_kind": job["component_kind"],
                 "supported_scope": "Install panels" if finding["status"] == "matched" else "", **deepcopy(finding)}
 
     def test_each_call_has_one_named_component_not_a_sibling_array(self):
@@ -85,7 +85,8 @@ class ComponentBindingTests(unittest.TestCase):
             self.assertNotIn("components", job)
             self.assertNotIn("required", job)
             schema = c.component_response_schema(job)
-            for field in ("pair_id", "component_id", "component_text", "component_kind"):
+            self.assertNotIn("component_text", schema["properties"])
+            for field in ("pair_id", "component_id", "component_kind"):
                 self.assertEqual(schema["properties"][field]["enum"], [job[field]])
 
     def test_wrong_pair_id_component_id_text_and_kind_are_rejected(self):

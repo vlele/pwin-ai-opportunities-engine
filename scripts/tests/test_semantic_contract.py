@@ -278,7 +278,8 @@ class SemanticContractTests(unittest.TestCase):
             if "targets" in payload:
                 return {"checks": {t["id"]: {"verdict": "supported", "reason": "A genuine existing reference is unclear."} for t in payload["targets"]}}
             return None
-        raw = analyze_packet(packet, [], {}, call=provider)
+        from tests.evidence_wire_fixture import selection_provider
+        raw = analyze_packet(packet, [], {}, call=selection_provider(provider))
         self.assertTrue(raw["pipeline_errors"])
         state = validate_assessment(raw, packet)
         self.assertEqual(state["status"], "TECHNICAL_BLOCKED")

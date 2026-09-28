@@ -38,18 +38,19 @@ def main():
         plan = s.validate(case["plan"], case["spans"])
         targets = s.audit_records(plan, case["spans"])
         requests = []
-        for batch in s.audit_batches(targets):
+        batches = list(s.audit_batches(targets, case["spans"]))
+        for batch in batches:
             requests.append({"model": args.model, "reasoning_effort": args.effort,
                              "messages": [{"role": "system", "content": s.audit_prompt(batch)},
                                           {"role": "user", "content": json.dumps(audit_payload(batch, case["spans"]))}],
                              "response_format": {"type": "json_schema", "json_schema": {"name": "semantic_plan_audit", "schema": s.audit_schema(batch), "strict": True}}})
-        frozen.append((case, targets, requests))
+        frozen.append((case, targets, batches, requests))
     save(args.output / "plan.json", {"model": args.model, "effort": args.effort, "repeats": args.repeats,
                                      "implementation_sha256": hashlib.sha256(Path(s.__file__).read_bytes()).hexdigest(),
                                      "fixture_sha256": hashlib.sha256((args.output / "fixtures.json").read_bytes()).hexdigest(),
                                      "note": "No expected decisions in model payload; homogeneous bounded audit batches, no automatic retry."})
 
-    def run(case, targets, requests, repeat):
+    def run(case, targets, batches, requests, repeat):
         folder = args.output / f"{case['id']}-r{repeat}"
         save(folder / "requests.json", requests)
         result = {"case": case["id"], "repeat": repeat, "expected_accept": case["expected_accept"]}
@@ -58,7 +59,7 @@ def main():
             if client is None:
                 raise ValueError("No provider client")
             checks, usage, models = {}, Counter(), Counter()
-            for index, (batch, request) in enumerate(zip(s.audit_batches(targets), requests), 1):
+            for index, (batch, request) in enumerate(zip(batches, requests), 1):
                 response = client.with_options(max_retries=0, timeout=120).chat.completions.create(**request)
                 save(folder / f"response-{index}.json", response.model_dump())
                 checked = s.validate_audit(json.loads(response.choices[0].message.content), batch)
@@ -77,7 +78,7 @@ def main():
 
     results = []
     with ThreadPoolExecutor(max_workers=args.concurrency) as pool:
-        jobs = [pool.submit(run, c, t, r, repeat) for c, t, r in frozen for repeat in range(1, args.repeats + 1)]
+        jobs = [pool.submit(run, c, t, b, r, repeat) for c, t, b, r in frozen for repeat in range(1, args.repeats + 1)]
         for job in as_completed(jobs):
             result = job.result()
             results.append(result)

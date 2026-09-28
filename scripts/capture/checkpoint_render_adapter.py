@@ -7,6 +7,7 @@ from copy import deepcopy
 import re
 
 from common.capture_understanding import build_spans
+from common import requirement_routing as routing
 
 
 def _normalized(text):
@@ -46,6 +47,8 @@ def _component_notes(graph, spans, issues):
             package_cites = _citations(requirement['evidence'], spans, package=True)
             parts = []
             for index, component in enumerate(requirement['components']):
+                if routing.categorized(requirement) and routing.route(component, requirement['status']) != 'vendor_comparison':
+                    continue
                 finding = edge['component_findings'][f'K{index}']
                 _citations(component['evidence'], spans, package=True)
                 if finding.get('evidence'):
@@ -141,6 +144,7 @@ def build_checkpoint_render_context(state, packet):
         'formal_qa_items': _formal_questions(state, audit, conflicts, spans, issues),
         'unresolved_precedence': conflicts,
         'component_coverage_notes': _component_notes(graph, spans, issues) if graph else [],
+        **(routing.checklists(graph['requirements'], spans) if graph else {}),
         'validation_issues': issues,
     }
 
@@ -150,6 +154,8 @@ def apply_checkpoint_render_context(evidence, state, packet):
     result = deepcopy(evidence)
     context = build_checkpoint_render_context(state, packet)
     result['checkpoint_render_context'] = context
+    for key in ('proposal_formatting_submission_checklist', 'contract_terms_checklist', 'requirement_applicability_notes'):
+        result[key] = context.get(key, [])
     result.setdefault('capability_fit_analysis', {})['component_coverage_notes'] = context['component_coverage_notes']
     questions = result.setdefault('questions_to_ask', {})
     formal = context['formal_qa_items']

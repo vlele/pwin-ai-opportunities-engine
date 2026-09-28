@@ -26,6 +26,7 @@ from common.evidence_model import (
 from common.openai_reasoning import assess_capture_strategy
 from common.capture_clarification import (
     build_packet, checkpoint, confirmed_context, local_attachment_cache, local_input_fingerprint, reviewed_package_quotes,
+    resume_checkpoint,
 )
 from common.contract_structure import extract_contract_structure
 from common.paths import load_json, safe_slug, standard_procurement_paths, today_local_str, utc_now_iso, write_json, write_text
@@ -3596,13 +3597,19 @@ def main() -> int:
     parser.add_argument("--url", default="")
     parser.add_argument("--notice-id", default="")
     parser.add_argument("--solicitation-number", default="")
-    parser.add_argument("--depth", default="full_360")
+    parser.add_argument("--depth", choices=("preliminary", "full_360"), default="full_360",
+                        help="preliminary: early pursuit assessment plus reference appendix; full_360: legacy strict readiness gate")
     parser.add_argument("--clarification-answers", help="JSON answers bound to the current checkpoint fingerprint")
     parser.add_argument("--preflight-only", action="store_true", help="Read inputs and assess understanding without market research")
     parser.add_argument("--retry-clarification", action="store_true", help="Retry a technical checkpoint/extraction failure; does not bypass the gate")
+    parser.add_argument("--resume-understanding", action="store_true", help="Resume a failed local-file checkpoint without refreshing attachments or invalidating matching stage receipts")
     args = parser.parse_args()
     if not args.entry and not args.file:
         parser.error("Provide --entry for tracked capture or at least one --file for direct local-file capture.")
+    if args.depth == "preliminary" and (args.clarification_answers or args.preflight_only or args.retry_clarification or args.resume_understanding):
+        parser.error("Legacy clarification/resume flags require --depth full_360; preliminary uses separate stage receipts.")
+    if args.resume_understanding and (args.entry or not args.file or args.retry_clarification or args.clarification_answers):
+        parser.error("--resume-understanding requires unchanged local --file inputs, without --entry, --retry-clarification or new answers.")
 
     workspace = Path(args.workspace)
     bundle_root = Path(__file__).resolve().parents[2]
@@ -3647,7 +3654,7 @@ def main() -> int:
         "entry": entry_value,
         "entry_resolution_mode": resolved.get("entry_resolution_mode", "unresolved"),
         "capture_mode": capture_mode,
-        "request_depth": "full_360_capture_brief",
+        "request_depth": args.depth + "_capture_brief",
         "status": "logged",
         "resolved": {
             "report_entry_id": resolved.get("report_entry_id", ""),
@@ -3704,8 +3711,16 @@ def main() -> int:
         input_fingerprint = local_input_fingerprint(local_file_paths) if local_file_paths else ""
     except OSError:
         input_fingerprint = "unreadable-local-inputs"
+    if args.resume_understanding and input_fingerprint == "unreadable-local-inputs":
+        parser.error("Warm resume inputs are unreadable; no extraction was started.")
+    if args.resume_understanding:
+        try:
+            local_attachment_cache(workspace, input_fingerprint, lambda: None, require_cached=True)
+        except ValueError as error:
+            parser.error(str(error))
     local_attachment_bundle = (local_attachment_cache(
         workspace, input_fingerprint, lambda: load_local_attachments(local_file_paths), retry=args.retry_clarification,
+        require_cached=args.resume_understanding,
     ) if input_fingerprint != "unreadable-local-inputs" else load_local_attachments(local_file_paths)) if local_file_paths else {
         "status": "skipped",
         "record": {},
@@ -3724,11 +3739,20 @@ def main() -> int:
         notice_text=notice_excerpt if args.entry else args.summary,
         input_fingerprint=input_fingerprint,
     )
+    if args.depth == "preliminary":
+        from common.preliminary_capture import run as run_preliminary
+        result = run_preliminary(workspace, understanding_packet, artifacts, request_id=request_id)
+        result.update(capture_mode=capture_mode, canonical_record_id=canonical_id,
+                      stable_id=resolved.get("report_entry_id", ""))
+        append_jsonl(Path(artifacts["request_log_path"]), {**request_log_event, **result})
+        print(json.dumps(result, ensure_ascii=True))
+        return {"PRELIMINARY_ASSESSMENT": 0, "PARTIAL_PRELIMINARY_ASSESSMENT": 10}.get(result["status"], 22)
     try:
         clarification_answers = load_json(Path(args.clarification_answers), default={"invalid_answers_file": True}) if args.clarification_answers else None
     except (OSError, ValueError):
         clarification_answers = {"invalid_answers_file": True}
-    understanding = checkpoint(workspace, understanding_packet, answers=clarification_answers, retry=args.retry_clarification)
+    understanding = (resume_checkpoint(workspace, understanding_packet) if args.resume_understanding else
+                     checkpoint(workspace, understanding_packet, answers=clarification_answers, retry=args.retry_clarification))
     if understanding["status"] != "READY" or args.preflight_only:
         result = {
             "status": understanding["status"], "request_id": request_id, "capture_mode": capture_mode,

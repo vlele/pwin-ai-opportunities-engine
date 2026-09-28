@@ -269,7 +269,7 @@ class ClarificationContractTests(unittest.TestCase):
                 return supported_audit(payload["targets"])
             if "component_job" in payload:
                 job = payload["component_job"]
-                return {**{k: job[k] for k in ("pair_id", "component_id", "component_text", "component_kind")},
+                return {**{k: job[k] for k in ("pair_id", "component_id", "component_kind")},
                         "status": "missing", "reason": "No records-task history established.", "supported_scope": "", "evidence": []}
             spans = payload["spans"]
             refs = list(spans)
@@ -282,18 +282,21 @@ class ClarificationContractTests(unittest.TestCase):
                                       "record_kind": "requirement", "logic": "all", "supersedes": [],
                                       "focus": [{"ref": "D1:0", "quote": spans["D1:0"]["text"]}],
                                       "components": [{"kind": "work", "text": "Migrate case records", "evidence": [{"ref": "D1:0", "quote": spans["D1:0"]["text"]}]}],
-                                      "evidence": [{"ref": "D1:0", "quote": spans["D1:0"]["text"]}]}],
+                                      "evidence": [{"ref": "D1:0", "quote": spans["D1:0"]["text"]}]}] if 'D1:0' in spans else [],
                     "claims": [{"form": "performed_task", "meaning": "Infrastructure only.", "attribution": "self",
                                 "execution": "affirmative_actual", "unresolved_dimensions": [],
-                                "evidence": [{"ref": "U1:0", "quote": "Infrastructure only."}]}],
-                    "questions": [], "resolved_question_ids": ["Q-test"], "quoted_vendor_context": []}
-        with patch.object(openai_reasoning, "_call_openai_json", side_effect=response) as call:
+                                "evidence": [{"ref": "U1:0", "quote": "Infrastructure only."}]}] if 'U1:0' in spans else [],
+                    "questions": [], "resolved_question_ids": ["Q-test"] if 'U1:0' in spans else [], "quoted_vendor_context": []}
+        from tests.evidence_wire_fixture import selection_provider
+        with patch.object(openai_reasoning, "_call_openai_json", side_effect=selection_provider(response)) as call:
             result = gate.analyze_understanding(value, answers, {"questions": [{"id": "Q-test"}]})
         self.assertNotIn("pipeline_errors", result)
-        self.assertEqual(call.call_count, 10)
-        self.assertEqual(call.call_args_list[2].kwargs["user_payload"]["user_answers"], answers)
-        self.assertIn("immutable", call.call_args_list[5].kwargs["system_prompt"])
-        requirement_audit = call.call_args_list[5].kwargs["user_payload"]
+        self.assertEqual(call.call_args_list[0].kwargs["user_payload"]["user_answers"], answers)
+        vendor = next(c.kwargs['user_payload'] for c in call.call_args_list if c.kwargs['user_payload'].get('inventory_mode') == 'vendor')
+        self.assertIn('Q-test', vendor['previous_question_ids'])
+        self.assertIn('U1:0', vendor['spans'])
+        requirement_audit = next(c.kwargs['user_payload'] for c in call.call_args_list
+            if any(t['kind'] == 'requirement' for t in c.kwargs['user_payload'].get('targets', [])))
         self.assertNotIn("user_answers", requirement_audit)
         self.assertTrue(all(s["kind"] == "package" for s in requirement_audit["spans"].values()))
         self.assertIn("U1:0", call.call_args.kwargs["user_payload"]["spans"])
@@ -383,7 +386,7 @@ class OrchestratorContractTests(unittest.TestCase):
             argv = ["capture", "--workspace", folder, "--file", str(doc), "--title", "Synthetic scope", "--url", "https://example.invalid/notice"]
             if preflight:
                 argv.append("--preflight-only")
-            def model(value, answers, previous):
+            def model(value, answers, previous, **kwargs):
                 return ready(value) if approved else response(case, value)
             with patch.object(sys, "argv", argv), patch.object(capture, "load_local_attachments", return_value=bundle) as parser, \
                  patch.object(gate, "analyze_understanding", side_effect=model), \
@@ -442,7 +445,7 @@ class OrchestratorContractTests(unittest.TestCase):
                  patch.object(capture, "load_notice_context", return_value={"opportunity_record": {}, "explanation_record": {}}), \
                  patch.object(capture, "fetch_notice_attachments", return_value=bundle) as attachments, \
                  patch.object(capture, "fetch_url_excerpt", return_value={"status": "empty"}) as notice, \
-                 patch.object(gate, "analyze_understanding", side_effect=lambda value, answers, previous: response(case, value)), \
+                 patch.object(gate, "analyze_understanding", side_effect=lambda value, answers, previous, **kwargs: response(case, value)), \
                  patch.object(capture, "fetch_public_research") as public, \
                  patch.object(capture, "enrich_from_usaspending") as spending, \
                  patch.object(capture, "enrich_capture_context") as commercial, \

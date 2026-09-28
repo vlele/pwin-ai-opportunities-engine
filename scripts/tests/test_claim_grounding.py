@@ -262,7 +262,7 @@ class NewProtocolPipelineTests(unittest.TestCase):
         model, _, packet = pipeline_model(fail_claim=True)
         def grounded_model(**kwargs):
             value = model(**kwargs)
-            if "source_coverage" in kwargs["user_payload"]:
+            if kwargs['user_payload'].get('inventory_mode') == 'vendor':
                 claim = value["claims"][0]
                 claim.pop("form")
                 claim.pop("execution")

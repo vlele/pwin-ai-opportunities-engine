@@ -529,7 +529,8 @@ def _call_openai_vision_json(
     return None
 
 
-def _pdf_page_records(data: bytes, max_pages: int = 40) -> list[dict[str, Any]]:
+def _pdf_page_records(data: bytes, max_pages: int = 500) -> list[dict[str, Any]]:
+    from common.form_evidence import page_controls, has_flat_choices
     if fitz is None:
         return []
     try:
@@ -551,6 +552,9 @@ def _pdf_page_records(data: bytes, max_pages: int = 40) -> list[dict[str, Any]]:
         char_count = len(_normalize_text(text))
         image_count = len(page.get_images(full=True))
         flags: list[str] = []
+        controls = page_controls(page)
+        if has_flat_choices(page, text):
+            flags.append("choice_controls")
         if _page_is_toc_like(text):
             flags.append("toc_like")
         if image_count and char_count < 220:
@@ -570,8 +574,10 @@ def _pdf_page_records(data: bytes, max_pages: int = 40) -> list[dict[str, Any]]:
                 "table_like_line_count": table_like_line_count,
                 "marker_hits": marker_hits,
                 "flags": flags,
+                "form_controls": controls,
             }
         )
+    document.close()
     return page_records
 
 
@@ -579,9 +585,11 @@ def _select_hard_page_candidates(page_records: list[dict[str, Any]], max_pages: 
     ranked: list[tuple[int, int, dict[str, Any]]] = []
     for record in page_records:
         flags = {str(flag) for flag in (record.get("flags", []) or []) if str(flag).strip()}
-        if "toc_like" in flags:
+        if "toc_like" in flags and "choice_controls" not in flags:
             continue
         score = 0
+        if "choice_controls" in flags:
+            score += 20
         if "image_text_sparse" in flags:
             score += 6
         if "thin_text" in flags:
@@ -660,6 +668,13 @@ def _vision_page_review(
         "For section_blocks, return short requirement-bearing blocks with title, text, and source_text. "
         "For table_rows, preserve visible row meaning with kind, label, text, and cells. "
         "Valid kinds are clin, task, pricing, acceptance, remedy, matrix, or table."
+        " Read visible checkboxes/radio buttons separately from their printed labels. "
+        "Return form_controls with group, exact option label, state selected/unselected/uncertain, "
+        "and bbox [left, top, right, bottom] normalized to 0..1 on the page. "
+        "A nearby label is not a selected option. If a mark is illegible, use uncertain; never guess. "
+        "Preserve unchecked alternatives too. Do not infer a set-aside from unselected form labels. "
+        "Preserve CLIN quantities, units, base/option distinctions and fee rows separately; "
+        "do not add repeated option-year positions to the base staffing count."
     )
     user_payload = {
         "filename": filename,
@@ -670,6 +685,7 @@ def _vision_page_review(
             "section_blocks": [{"title": "string", "text": "string", "source_text": "string"}],
             "table_rows": [{"kind": "string", "label": "string", "text": "string", "cells": ["string"]}],
             "parse_warnings": ["string"],
+            "form_controls": [{"group": "string", "label": "string", "state": "selected|unselected|uncertain", "bbox": [0, 0, 1, 1]}],
         },
     }
     payload = _call_openai_vision_json(
@@ -700,12 +716,14 @@ def _vision_page_review(
     warnings = _dedupe_strings(
         [_normalize_text(item) for item in (payload.get("parse_warnings", []) or []) if _normalize_text(item)]
     )[:6]
+    from common.form_evidence import normalize_vision_controls
     return {
         "page_number": page_number,
         "model_name": str(payload.get("_model_name") or DEFAULT_ATTACHMENT_VISION_MODEL),
         "section_blocks": page_sections[:6],
         "table_rows": page_rows[:12],
         "parse_warnings": warnings,
+        "form_controls": normalize_vision_controls(payload.get("form_controls", []), page_number),
     }
 
 
@@ -803,16 +821,19 @@ def _review_hard_pdf_pages(
 ) -> dict[str, Any]:
     if not filename.lower().endswith(".pdf"):
         return {"status": "skipped_not_pdf", "candidates": [], "pages": []}
-    if category not in ATTACHMENT_VISION_ALLOWED_CATEGORIES:
-        return {"status": "skipped_category", "candidates": [], "pages": []}
     if fitz is None:
         return {"status": "skipped_missing_fitz", "candidates": [], "pages": []}
     page_records = _pdf_page_records(data)
-    candidates = _select_hard_page_candidates(page_records)
+    native_controls = [c for record in page_records for c in record.get("form_controls", [])]
+    choice_pages = [record["page_number"] for record in page_records if "choice_controls" in record.get("flags", [])]
+    eligible_pages = page_records if category in ATTACHMENT_VISION_ALLOWED_CATEGORIES else [
+        record for record in page_records if "choice_controls" in record.get("flags", [])]
+    candidates = _select_hard_page_candidates(eligible_pages)
     if not candidates:
-        return {"status": "no_hard_pages", "candidates": [], "pages": []}
+        return {"status": "no_hard_pages", "candidates": [], "pages": [], "form_controls": native_controls, "unresolved_choice_pages": []}
     if _openai_client() is None:
-        return {"status": "skipped_no_openai_client", "candidates": candidates, "pages": []}
+        return {"status": "skipped_no_openai_client", "candidates": candidates, "pages": [],
+                "form_controls": native_controls, "unresolved_choice_pages": choice_pages}
     reviewed_pages: list[dict[str, Any]] = []
     model_name = ""
     for candidate in candidates:
@@ -830,11 +851,17 @@ def _review_hard_pdf_pages(
             continue
         model_name = str(page_review.get("model_name") or model_name)
         reviewed_pages.append(page_review)
+    from common.form_evidence import merge_controls
+    controls = merge_controls(native_controls, [c for page in reviewed_pages for c in page.get("form_controls", [])])
+    observed_pages = {c["page_number"] for c in controls if c["basis"] == "vision_observation"}
+    uncertain_pages = {c["page_number"] for c in controls if c["state"] == "uncertain"}
     return {
         "status": "ok" if reviewed_pages else "error",
         "model_name": model_name or DEFAULT_ATTACHMENT_VISION_MODEL,
         "candidates": candidates,
         "pages": reviewed_pages,
+        "form_controls": controls,
+        "unresolved_choice_pages": sorted((set(choice_pages) - observed_pages) | uncertain_pages),
     }
 
 
@@ -1411,12 +1438,71 @@ def _download_attachment(
     )
 
 
+def _pdf_text_regions(page) -> list[tuple[str, str]]:
+    """Label native text by geometry, without removing any source text."""
+    regions = []
+    bounds = page.rect
+    for block in page.get_text("blocks"):
+        if block[6] != 0 or not str(block[4]).strip():
+            continue
+        text = re.sub(r"\s+", " ", block[4]).strip()
+        rect = fitz.Rect(block[:4])
+        if not bounds.contains(rect):
+            region = "outside_page"
+        elif rect.y1 <= bounds.y0 + bounds.height * 0.10:
+            region = "header"
+        elif rect.y0 >= bounds.y1 - bounds.height * 0.10:
+            region = "footer"
+        else:
+            region = "body"
+        regions.append((region, text))
+    return regions
+
+
+def _sparse_pdf_page_coverage(page, regions, margin_counts, available_pages=0) -> dict:
+    """Clear only proven empty/header-only pages; uncertain content stays blocked."""
+    result = {"status": "unreadable", "reason": "Sparse native text requires review."}
+    try:
+        # Layout cannot certify images, vector content, forms or annotations as empty.
+        if (page.rotation or page.get_image_info() or page.get_drawings()
+                or page.get_xobjects() or next(page.annots(), None)
+                or next(page.widgets(), None)):
+            result["reason"] = "Sparse page has graphics, annotations, forms or rotated layout."
+            return result
+        links = page.get_links()
+        if any(link.get("kind") != fitz.LINK_GOTO
+               or not isinstance(link.get("page"), int)
+               or not 0 <= link["page"] < available_pages for link in links):
+            result["reason"] = "Sparse page references external or unavailable content."
+            return result
+        navigation = {"internal_navigation_targets": sorted({link["page"] + 1 for link in links})}
+        if not regions:
+            return {"status": "verified_blank", "reason": "No native text or visual objects; internal navigation retained.", **navigation}
+        for region, text in regions:
+            if region not in {"header", "footer"}:
+                result["reason"] = "Sparse page contains body or out-of-bounds text."
+                return result
+            page_number = region == "footer" and re.fullmatch(
+                r"(?:page\s+)?\d+(?:\s*(?:of|/)\s*\d+)?", text, re.IGNORECASE)
+            # Require the same margin text on two OTHER pages, not a guessed ID.
+            if not page_number and margin_counts[(region, text)] < 3:
+                result["reason"] = "Margin text is not a page number or independently repeated header/footer."
+                return result
+        return {"status": "verified_header_footer_only",
+                "reason": "Only page numbering or margin text repeated on at least two other pages; no visual objects; internal navigation retained.",
+                "retained_margin_text": [text for _, text in regions], **navigation}
+    except Exception as error:
+        result["reason"] = f"Sparse-page layout check failed: {type(error).__name__}"
+        return result
+
+
 def _understanding_input(data: bytes, filename: str, extracted: str, vision_pages: list) -> tuple[str, dict]:
     """Keep checkpoint input independent of the renderer's bounded excerpts."""
     limit = 1000000
     metadata = {"complete": True, "basis": "native_text", "pages_total": None, "pages_extracted": None,
-                "unreadable_pages": [], "limitations": []}
+                "unreadable_pages": [], "page_coverage": [], "limitations": []}
     text = extracted
+    native_regions = []
     if filename.lower().endswith(".pdf"):
         page_limit = 500
         try:
@@ -1424,16 +1510,35 @@ def _understanding_input(data: bytes, filename: str, extracted: str, vision_page
                 with fitz.open(stream=data, filetype="pdf") as doc:
                     metadata["pages_total"] = len(doc)
                     pages = [doc.load_page(i).get_text("text") for i in range(min(len(doc), page_limit))]
+                    regions = [_pdf_text_regions(doc.load_page(i)) for i in range(len(pages))]
+                    margin_counts = Counter(item for rows in regions for item in set(rows)
+                                            if item[0] in {"header", "footer"})
+                    for index, page_text in enumerate(pages):
+                        row = {"status": "native_text", "reason": "Native text extracted; not proof of table/image fidelity."}
+                        if len(page_text.strip()) < 40:
+                            row = _sparse_pdf_page_coverage(doc.load_page(index), regions[index], margin_counts, len(pages))
+                        metadata["page_coverage"].append({"page_number": index + 1, **row})
             elif PdfReader is not None:
                 doc = PdfReader(io.BytesIO(data))
                 metadata["pages_total"] = len(doc.pages)
                 pages = [page.extract_text() or "" for page in doc.pages[:page_limit]]
+                metadata["page_coverage"] = [
+                    {"page_number": i, "status": "unreadable" if len(page.strip()) < 40 else "native_text",
+                     "reason": "Native text only; sparse pages need a layout-capable backend."}
+                    for i, page in enumerate(pages, 1)]
             else:
                 raise RuntimeError("No PDF text extractor is available")
             metadata["pages_extracted"] = len(pages)
-            metadata["unreadable_pages"] = [i for i, page in enumerate(pages, 1) if len(page.strip()) < 40]
-            metadata["complete"] = len(pages) == metadata["pages_total"] and not metadata["unreadable_pages"]
+            metadata["unreadable_pages"] = [row["page_number"] for row in metadata["page_coverage"]
+                                             if row["status"] == "unreadable"]
+            metadata["complete"] = bool(pages) and len(pages) == metadata["pages_total"] and not metadata["unreadable_pages"]
             text = "\n\n".join(f"[Page {i}]\n{page}" for i, page in enumerate(pages, 1))
+            cursor = 0
+            for i, page in enumerate(pages, 1):
+                piece = _normalize_preserve_lines(f"[Page {i}]\n{page}", max_chars=len(page) + 40)
+                native_regions.append({"start": cursor, "end": cursor + len(piece) + 1,
+                                       "page_number": i, "basis": "native_text"})
+                cursor += len(piece) + 1
             metadata["limitations"].append("Native text coverage is not proof of image/table fidelity; sparse pages require review.")
         except Exception as error:
             metadata["complete"] = False
@@ -1441,11 +1546,29 @@ def _understanding_input(data: bytes, filename: str, extracted: str, vision_page
     elif filename.lower().endswith(".xlsx"):
         metadata["complete"] = False
         metadata["limitations"].append("Current workbook extractor samples sheets/rows; full workbook understanding is not established.")
+    native_length = len(_normalize_preserve_lines(text, max_chars=max(len(text), 1)))
     vision_text = _render_vision_text_excerpt(vision_pages)
     if vision_text:
         text += "\n\n[Vision extracted hard-page evidence]\n" + vision_text
         # Partial vision recovery is not evidence that every sparse page was read.
     full = _normalize_preserve_lines(text, max_chars=max(len(text), 1))
+    # Offsets describe the exact normalized extraction, not PDF byte/glyph offsets.
+    regions = [dict(r, end=min(r["end"], native_length)) for r in native_regions]
+    if vision_text:
+        marker = "[Vision extracted hard-page evidence]\n"
+        vision_start = native_length + (1 if native_length else 0) + len(marker)
+        cursor = vision_start
+        regions.append({"start": native_length, "end": vision_start, "page_number": None,
+                        "basis": "generated_vision_separator"})
+        for page in vision_pages:
+            piece = _render_vision_text_excerpt([page])
+            if not piece or cursor >= len(full):
+                continue
+            end = min(cursor + len(piece) + 1, len(full))
+            regions.append({"start": cursor, "end": end, "page_number": page.get("page_number"),
+                            "basis": "vision_extraction_unverified"})
+            cursor = end
+    metadata["text_regions"] = regions
     metadata.update(characters_extracted=len(full), characters_retained=min(len(full), limit))
     if len(full) > limit:
         metadata["complete"] = False
@@ -1522,6 +1645,8 @@ def _attachment_record_from_bytes(
         if native_review_required and recovered_structure:
             record["review_required"] = False
     record["hard_page_candidates"] = vision_review.get("candidates", []) if isinstance(vision_review, dict) else []
+    record["form_controls"] = vision_review.get("form_controls", []) if isinstance(vision_review, dict) else []
+    record["unresolved_choice_pages"] = vision_review.get("unresolved_choice_pages", []) if isinstance(vision_review, dict) else []
     record["vision_review_status"] = vision_review.get("status", "skipped") if isinstance(vision_review, dict) else "skipped"
     record["vision_model"] = vision_review.get("model_name", "") if isinstance(vision_review, dict) else ""
     record["vision_pages"] = vision_pages if isinstance(vision_pages, list) else []

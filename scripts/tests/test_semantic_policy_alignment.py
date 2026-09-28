@@ -203,13 +203,19 @@ class PipelinePolicyTests(unittest.TestCase):
             if isinstance(payload.get("requirements"), dict):
                 return {"requirements": {f"R{i}": {"logic": r["logic"], "components": r["components"]}
                                          for i, r in enumerate(inventory["requirements"])}}
+            if "component_job" in payload:
+                job = payload["component_job"]
+                return {**{k: job[k] for k in ("pair_id", "component_id", "component_kind")},
+                        "status": "missing", "supported_scope": "", "evidence": [],
+                        "reason": "Planning a schedule does not prove this performance timing condition."}
             if "pairs" in payload:
                 self.fail("Timing-only records cannot manufacture matched work.")
             return {"complete": True,
                     "facts": [{"area": "timing", "statement": spans["D1:0"]["text"], "refs": ["D1:0"]}],
                     "coverage": [{"source_id": "D1", "finding": "Both conflicting terms retained.", "refs": ["D1:0"]}]}
 
-        raw = u.analyze_packet(packet, [], {}, call=model)
+        from tests.evidence_wire_fixture import selection_provider
+        raw = u.analyze_packet(packet, [], {}, call=selection_provider(model))
         return raw, gate.validate_assessment(raw, packet), calls
 
     def test_approved_fidelity_is_not_permission_to_proceed(self):

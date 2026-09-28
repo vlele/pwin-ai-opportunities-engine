@@ -761,6 +761,39 @@ def _pursuit_block(section: dict[str, Any]) -> str:
     )
 
 
+def _routing_appendices(evidence: dict[str, Any]) -> str:
+    context = evidence.get("understanding_checkpoint", {})
+    blocks = []
+    for key, heading in (
+        ("proposal_formatting_submission_checklist", "Proposal Formatting & Submission Checklist"),
+        ("contract_terms_checklist", "Contract Terms Review Checklist"),
+        ("requirement_applicability_notes", "Requirement Applicability Notes"),
+    ):
+        rows = evidence.get(key, context.get(key, []))
+        if not rows and key != "proposal_formatting_submission_checklist":
+            continue
+        blocks.extend(["", "## " + heading, ""])
+        if not rows:
+            blocks.append("No audited categorized items are available. This does not establish that no submission rules apply.")
+            continue
+        blocks.append("Package rules retained outside vendor-fit scoring. Compliance has not been assessed; no item is marked satisfied.")
+        for row in rows:
+            label = f"{row['requirement_id']}/{row['component_id']}"
+            blocks.append(f"\n- [ ] **{label}**: {_md_cell(row['text'])}")
+            blocks.append(f"  Category: {_md_cell(row['category'])}; applicability: {_md_cell(row['applicability'])}; "
+                          f"source status: {_md_cell(row['status'])}; route: {_md_cell(row['route'])}.")
+            blocks.append("  Routing basis: " + _md_cell(row["routing_reason"]))
+            for cite in row.get("citations", []):
+                locations = "; ".join(
+                    str(loc.get("filename") or loc.get("document_id") or cite["source_id"])
+                    + (f", page {loc['page_number']}" if loc.get("page_number") is not None else "")
+                    + f", text characters {loc.get('document_char_start', '?')}-{loc.get('document_char_end', '?')}"
+                    for loc in cite.get("locations", []))
+                blocks.append(f"  Source [{_md_cell(cite['ref'])}], {_md_cell(cite['source_id'])}: "
+                              f"{_md_cell(cite['quote'])}" + (f" (Location: {_md_cell(locations)})" if locations else ""))
+    return "\n".join(blocks)
+
+
 def render_capture_brief(template_path: Path, evidence: dict[str, Any]) -> str:
     template = read_text(template_path)
     entry = evidence.get("entry", {})
@@ -803,4 +836,4 @@ def render_capture_brief(template_path: Path, evidence: dict[str, Any]) -> str:
     rendered = template
     for key, value in replacements.items():
         rendered = rendered.replace(key, value)
-    return rendered
+    return rendered.rstrip() + "\n" + _routing_appendices(evidence) + "\n"

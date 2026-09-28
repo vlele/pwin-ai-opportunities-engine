@@ -90,6 +90,25 @@ clarification. The absence rule must not suppress those actual ambiguities. Ask 
 the supplied ambiguous statement, not for a missing document or hypothetical experience.
 """
 
+OFFICIAL_CONFLICT_POLICY = """OFFICIAL CONFLICT CATEGORY BOUNDARY:
+Use official_conflict ONLY for contradictory applicable statements within the
+government solicitation/package after applying supplied precedence. Cite the
+incompatible government terms, never a vendor assertion as a government rule.
+DO NOT use official_conflict for missing vendor information, compliance gaps,
+unverified eligibility, or a vendor claim that does not satisfy a clear rule.
+If eligibility details are absent, leave eligibility unknown/missing; do not emit
+an ambiguity signal or ask a clarification question solely to obtain missing proof.
+There is no vendor_ambiguity or compliance_gap dimension in this schema. Genuine
+ambiguity in existing vendor text uses the applicable existing dimension:
+certificate_scope for unclear stated credentials/access, performer_identity for
+unclear attribution, workshare for unclear duties split, or task_meaning for an
+unclear existing work reference. Those labels are not substitutes for absent data.
+An unclear government term without contradictory terms is requirement_meaning,
+not official_conflict. Preserve genuine government contradictions even when the
+vendor profile is empty or its eligibility is unknown. Missing vendor information
+does not resolve a government conflict or establish eligibility/compliance.
+"""
+
 EXECUTION_POLICY = EXECUTION_RULE + """
 Apply this same boundary in extraction, comparison, coverage and claim auditing,
 regardless of model. 'We perform [specific action]' reports the speaker's own work
@@ -128,6 +147,57 @@ Still reject altered numbers, missing qualifiers, fabricated facts or false stat
 An unresolved conflict is NOT a blanket audit bypass or permission to pursue.
 """
 
+CATEGORIZED_MISSING_PROOF_POLICY = """MISSING VERSUS UNRELATED: STRICT NEGATIVE CONSTRAINT:
+If the vendor text is generic and fails to prove the specific requirement, you MUST
+output missing. Do NOT output unrelated. unrelated is strictly reserved for package
+text that does not apply to the prime contractor at all, as established by package
+evidence, not by the absence of vendor proof. Code routes that context separately.
+An applicable component lacking specific vendor proof is missing, including where
+the supplied experience has no demonstrated overlap. Never infer inability from
+missing proof. Actual claim-local positive evidence, exact denials and genuinely
+ambiguous supplied text still require their distinct supported statuses; do not
+make missing a blanket label for every negative or uncertain decision.
+"""
+
+CATEGORIZED_AUDIT_LABEL_POLICY = """INDEPENDENT AUDIT OF THE EXACT DECISION LABEL:
+You must reject any decision that conflates missing and unrelated. If a component
+lacks specific vendor proof, the decision MUST be missing. If the comparator used
+unrelated for lack of proof, you must reject it with verdict=unsupported even when
+the explanation correctly identifies that proof is absent. A correct explanation
+does not excuse an incorrect label. Never approve with 'unrelated/missing is
+justified' or treat the two labels as interchangeable. Do not repair the immutable
+decision; report its error. A faithful missing decision must not be rejected merely
+because vendor proof is absent. Audit its actual source evidence and exact label.
+"""
+
+# Historical unclassified graphs retain their original vocabulary. Current
+# categorized comparisons use the stricter policies above, never both contracts.
+BURDEN_OF_PROOF_POLICY = """STRICT VENDOR BURDEN OF PROOF:
+For a component comparison, answer whether the isolated vendor claim establishes
+THIS component, not whether the solicitation contains it. A government requirement,
+submission instruction, evaluation rule or approval prerequisite is never proof of
+vendor performance, qualification, registration, timing or compliance. Repeating that
+rule in a matched reason does not establish it. This applies to ALL assessable
+component kinds, not just work. Selecting a vendor evidence ID is not sufficient:
+its actual words must entail the positive finding and supported_scope.
+Generic vendor claims (broad solutions, customer focus, unspecified capabilities)
+provide no positive credit for a specific requirement or condition. Where this
+isolated claim supplies no relevant proof, return missing with supported_scope="".
+Do not convert missing proof into unrelated, ambiguous or an official conflict.
+Do not mark approval, submission format or registration matched just because the
+package requires it; vendor-specific evidence is required. Use not_applicable only
+where the existing component contract allows it, not to discard unproven conditions.
+Preserve genuine counterexamples: specific affirmative self-reported work may
+establish its exact action without independent verification or named project dates;
+an explicit qualification claim may establish that reported qualification. Neither
+proves unmentioned qualifiers. Concrete different performed work remains unrelated;
+existing materially ambiguous work remains ambiguous; an explicit denial contradicts
+only what it names. Missing is not a blanket default that erases supplied evidence.
+Auditors of comparison findings must reject positive credit based only on government
+text or generic vendor statements. Requirement source-fidelity audits remain a
+different task: faithful recording does not require any vendor proof.
+"""
+
 FIT_BOUNDARY_POLICY = """CORE WORK VERSUS UNPROVEN CONDITIONS:
 Distinguish between 'Ambiguous Requirements' and 'Missing Vendor Proof'. If a vendor
 provides a vague capability or prospective statement (e.g., 'we will plan a schedule'),
@@ -150,7 +220,7 @@ work with speculative different-task transfer. Read the package's own scope cont
 This rule is conditional on actually evidenced core work. Clearly different supplied
 work with no supported overlap remains Unrelated; undisclosed experience is irrelevant.
 Do not grant core-work credit merely because industries or vocabulary overlap.
-""" + "\n" + NEGATIVE_SCOPE_POLICY + "\n" + MISSING_INFORMATION_POLICY
+""" + "\n" + NEGATIVE_SCOPE_POLICY + "\n" + MISSING_INFORMATION_POLICY + "\n" + BURDEN_OF_PROOF_POLICY
 
 PACKAGE_REFERENCE_POLICY = """PACKAGE-PROVIDED REFERENCE RETENTION:
 If the solicitation package itself quotes or describes a specific vendor reference,

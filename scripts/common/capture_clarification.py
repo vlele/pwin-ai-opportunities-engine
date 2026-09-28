@@ -70,6 +70,16 @@ def _normalized(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def _question_route(row: dict, sources: dict) -> str:
+    if row.get("kind") in OFFICIAL_KINDS:
+        return "formal_qa"
+    citations = row.get("citations", [])
+    if (row.get("kind") == "requirement_meaning" and row.get("owner") == "official"
+            and citations and all(sources.get(c.get("source_id"), {}).get("kind") == "package" for c in citations)):
+        return "formal_qa"
+    return "user"
+
+
 def _profile_leaves(value, path=""):
     if isinstance(value, dict):
         for key in sorted(value):
@@ -83,13 +93,13 @@ def _profile_leaves(value, path=""):
 
 def build_packet(*, profile: dict, resolved: dict, attachment_bundle: dict,
                  notice_text: str, input_fingerprint: str = "") -> dict:
-    sources, technical = {}, []
+    sources, technical, form_issues = {}, [], []
     attachments = attachment_bundle.get("attachments", []) or []
     if attachment_bundle.get("errors"):
         technical.append("Attachment retrieval/extraction reported errors; inspect the attachment audit.")
     if attachment_bundle.get("attachments_expected") and not attachments:
         technical.append("Expected attachments are unavailable or unparsed.")
-    for item in attachments:
+    for attachment_index, item in enumerate(attachments):
         filename = str(item.get("filename") or "attachment")
         text = str(item.get("understanding_text") or item.get("structured_text_excerpt") or item.get("text_excerpt") or "").strip()
         if item.get("understanding_coverage", {}).get("complete") is False:
@@ -102,10 +112,22 @@ def build_packet(*, profile: dict, resolved: dict, attachment_bundle: dict,
                 or "parse_failed_or_unsupported" in flags):
             technical.append(f"Attachment needs technical extraction review: {filename}.")
         # Coarse contiguous chunks, not a keyword-selected subset of requirements.
+        document_id = f"attachment-{attachment_index}-" + hashlib.sha256(text.encode()).hexdigest()[:16]
+        choice_pages = set(item.get("unresolved_choice_pages", [])) | {c["page_number"] for c in item.get("form_controls", [])}
+        if item.get("unresolved_choice_pages"):
+            form_issues.append(f"Unresolved form choices in {filename}, pages {item['unresolved_choice_pages']}; printed alternatives are not selections.")
         for offset in range(0, len(text), 8000):
             sid = f"D{len(sources) + 1}"
+            regions = [r for r in item.get("understanding_coverage", {}).get("text_regions", [])
+                       if r["start"] < offset + 8000 and r["end"] > offset]
             sources[sid] = {"kind": "package", "filename": filename, "offset": offset,
+                            "document_id": document_id,
+                            "text_regions": regions,
+                            "choice_review_required": bool(choice_pages & {r.get("page_number") for r in regions}),
                             "text": text[offset:offset + 8000], "provenance": "current_package_extraction"}
+        from common.form_evidence import packet_sources
+        sources.update(packet_sources(item.get("form_controls", []), document_id=document_id,
+                                      filename=filename, prefix=f"P{attachment_index + 1}", offset=len(text)))
     if notice_text.strip():
         sources["N1"] = {"kind": "package", "filename": "notice/context", "text": notice_text.strip(), "provenance": "notice_or_supplied_summary"}
     if not sources:
@@ -117,7 +139,8 @@ def build_packet(*, profile: dict, resolved: dict, attachment_bundle: dict,
         technical.append("Understanding packet exceeds the supported context budget; no silent truncation is allowed.")
     return {"version": VERSION, "input_fingerprint": input_fingerprint,
             "opportunity": {key: resolved.get(key, "") for key in ("title", "buyer", "canonical_record_id", "solicitation_number", "notice_id", "url")},
-            "sources": sources, "profile_present": bool(profile), "technical_issues": technical}
+            "sources": sources, "profile_present": bool(profile), "technical_issues": technical,
+            "form_issues": form_issues}
 
 
 def _citations_valid(citations, sources) -> bool:
@@ -180,7 +203,7 @@ def _validate_assessment(raw, packet: dict) -> dict:
             continue
         seen.add(qid)
         target = questions if row["blocking"] else gaps
-        target.append({**row, "id": qid, "route": "formal_qa" if kind in OFFICIAL_KINDS else "user"})
+        target.append({**row, "id": qid, "route": _question_route(row, sources)})
     if base["technical_issues"]:
         return base
     if set(resolved) & {q["id"] for q in questions}:
@@ -220,7 +243,7 @@ def validate_assessment(raw, packet: dict) -> dict:
             continue
         seen.add(signature)
         questions.append({**row, "id": "Q-" + _hash({"kind": row["kind"], "question": signature[0], "citations": row["citations"]})[:12],
-                          "route": "formal_qa" if row["kind"] in OFFICIAL_KINDS else "user"})
+                          "route": _question_route(row, packet["sources"])})
     if questions and result["status"] != "TECHNICAL_BLOCKED":
         result["status"] = "NEEDS_FORMAL_QA" if any(q["route"] == "formal_qa" for q in questions) else "NEEDS_CLARIFICATION"
     if result["status"] == "TECHNICAL_BLOCKED":
@@ -230,9 +253,9 @@ def validate_assessment(raw, packet: dict) -> dict:
     return result
 
 
-def analyze_understanding(packet: dict, answers: list[dict], previous: dict) -> dict | None:
+def analyze_understanding(packet: dict, answers: list[dict], previous: dict, *, checkpoint_dir=None) -> dict | None:
     from common.capture_understanding import analyze_packet
-    return analyze_packet(packet, answers, previous)
+    return analyze_packet(packet, answers, previous, checkpoint_dir=checkpoint_dir)
 
 
 def _unknown(answer: str) -> bool:
@@ -330,18 +353,23 @@ def _persist(folder: Path, state: dict, *, save_state=True) -> dict:
     return state
 
 
-def checkpoint(workspace: Path, packet: dict, *, answers: dict | None = None,
-               analyze: Callable | None = None, retry: bool = False) -> dict:
-    analyze = analyze or analyze_understanding
+def checkpoint_fingerprint(packet: dict) -> str:
     from common.capture_understanding import model_settings
+    from common.understanding_checkpoints import runtime_identity
     reasoning_path = Path(__file__).with_name("capture_understanding.py")
-    fingerprint = _hash({"packet": packet, "prompt": SYSTEM_PROMPT, "version": VERSION,
+    return _hash({"packet": packet, "prompt": SYSTEM_PROMPT, "version": VERSION,
                          "model_settings": model_settings(),
+                         "checkpoint_runtime": runtime_identity(),
                          "reasoning_contract": hashlib.sha256(reasoning_path.read_bytes()).hexdigest(),
                          "auditor_contract": hashlib.sha256(Path(__file__).with_name("claim_audit.py").read_bytes()).hexdigest(),
                          "semantic_plan_contract": hashlib.sha256(Path(__file__).with_name("semantic_plan.py").read_bytes()).hexdigest(),
                          "semantic_component_contract": hashlib.sha256(Path(__file__).with_name("semantic_contract.py").read_bytes()).hexdigest(),
                          "implementation": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()})
+
+
+def checkpoint(workspace: Path, packet: dict, *, answers: dict | None = None,
+               analyze: Callable | None = None, retry: bool = False) -> dict:
+    fingerprint = checkpoint_fingerprint(packet)
     folder = workspace / "procurement" / "capture-clarifications" / fingerprint
     folder.mkdir(parents=True, exist_ok=True)
     write_json(folder / "input.json", packet)
@@ -404,9 +432,21 @@ def checkpoint(workspace: Path, packet: dict, *, answers: dict | None = None,
     supplied = list(existing_answers.values())
     changed = supplied != prior_answers
     fresh = not state or retry
+    resume_failed = bool(retry and state.get("status") == "TECHNICAL_BLOCKED" and not changed)
+    previous_for_model = state
+    if resume_failed and (folder / "model-input.json").exists():
+        try:
+            saved_input = load_json(folder / "model-input.json")
+            if saved_input["packet"] != packet or saved_input["user_answers"] != supplied:
+                raise ValueError("Saved model inputs differ from current capture inputs.")
+            previous_for_model = saved_input["previous_assessment"]
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            blocked = {**validate_assessment(None, packet), "fingerprint": fingerprint,
+                       "technical_issues": [f"Cannot resume failed checkpoint: {error}"], "answers": supplied}
+            return _persist(folder, blocked, save_state=False)
     if state and not fresh and not changed:
         return _persist(folder, state)
-    if state and (changed or retry) and original_questions:
+    if state and (changed or retry) and original_questions and not resume_failed:
         state["answers"] = supplied
         pending = [q for q in state["questions"] if q["route"] == "formal_qa" or q["id"] not in existing_answers or _unresolved(existing_answers[q["id"]])]
         if pending:
@@ -417,8 +457,9 @@ def checkpoint(workspace: Path, packet: dict, *, answers: dict | None = None,
         assessed = validate_assessment(None, packet)
     else:
         write_text(folder / "prompt.txt", SYSTEM_PROMPT)
-        write_json(folder / "model-input.json", {"packet": packet, "user_answers": supplied, "previous_assessment": state})
-        raw = analyze(packet, supplied, state)
+        write_json(folder / "model-input.json", {"packet": packet, "user_answers": supplied, "previous_assessment": previous_for_model})
+        raw = (analyze(packet, supplied, previous_for_model) if analyze is not None else
+               analyze_understanding(packet, supplied, previous_for_model, checkpoint_dir=folder / "stage-checkpoints"))
         from common.capture_understanding import packet_with_answers
         assessed = validate_assessment(raw, packet_with_answers(packet, supplied))
         append_jsonl(folder / "events.jsonl", {"at": utc_now_iso(), "event": "model_assessment", "raw": raw, "validation": assessed, "answers": supplied})
@@ -449,11 +490,15 @@ def local_input_fingerprint(paths: list[str]) -> str:
                 digest.update(block)
         files.append({"path": str(Path(path).resolve()), "sha256": digest.hexdigest()})
     parser = Path(__file__).resolve().parents[1] / "capture" / "fetch_notice_attachments.py"
+    forms = Path(__file__).resolve().parent / "form_evidence.py"
     settings = {key: value for key, value in os.environ.items() if key.startswith("PWIN_") and not any(term in key for term in ("KEY", "TOKEN", "SECRET"))}
-    return _hash({"files": files, "parser": hashlib.sha256(parser.read_bytes()).hexdigest(), "settings": settings})
+    return _hash({"files": files, "parser": hashlib.sha256(parser.read_bytes()).hexdigest(),
+                  "form_evidence": hashlib.sha256(forms.read_bytes()).hexdigest(), "settings": settings})
 
 
-def local_attachment_cache(workspace: Path, fingerprint: str, loader: Callable, *, retry=False) -> dict:
+def local_attachment_cache(workspace: Path, fingerprint: str, loader: Callable, *, retry=False, require_cached=False) -> dict:
+    if require_cached and retry:
+        raise ValueError("Warm resume cannot refresh attachments.")
     path = workspace / "procurement" / "capture-clarifications" / "attachment-cache" / (fingerprint + ".json")
     if path.exists() and not retry:
         try:
@@ -462,9 +507,30 @@ def local_attachment_cache(workspace: Path, fingerprint: str, loader: Callable, 
                 return cached
         except (OSError, ValueError):
             pass
+    if require_cached:
+        raise ValueError("Warm resume requires the intact attachment cache for these exact inputs/settings; no extraction was started.")
     bundle = loader()
     write_json(path, bundle)
     return bundle
+
+
+def resume_checkpoint(workspace: Path, packet: dict) -> dict:
+    """Resume only an existing failed checkpoint, never a fresh or changed scope."""
+    fingerprint = checkpoint_fingerprint(packet)
+    folder = workspace / "procurement" / "capture-clarifications" / fingerprint
+    try:
+        state = load_json(folder / "state.json", default={})
+        model_input = load_json(folder / "model-input.json", default={})
+        if (state.get("status") != "TECHNICAL_BLOCKED" or state.get("fingerprint") != fingerprint
+                or model_input.get("packet") != packet
+                or model_input.get("user_answers") != state.get("answers", [])
+                or not (folder / "stage-checkpoints").is_dir()):
+            raise ValueError("Warm resume requires an existing failed checkpoint with identical inputs, settings and semantic runtime.")
+    except (OSError, ValueError, AttributeError) as error:
+        blocked = {**validate_assessment(None, packet), "fingerprint": fingerprint,
+                   "technical_issues": [str(error)], "answers": []}
+        return _persist(folder, blocked, save_state=False)
+    return checkpoint(workspace, packet, retry=True)
 
 
 def confirmed_context(state: dict, packet: dict) -> dict:
@@ -482,6 +548,11 @@ def confirmed_context(state: dict, packet: dict) -> dict:
     plan = audit.get("semantic_plan")
     if checked.get("passed") is True and isinstance(plan, dict):
         result["checked_evidence_graph"] = {key: deepcopy(plan[key]) for key in ("requirements", "claims", "comparisons")}
+        from common.requirement_routing import checklists, ledger
+        from common.capture_understanding import build_spans
+        spans = build_spans(packet, state.get("confirmed_answers", []))
+        result.update(checklists(plan["requirements"], spans))
+        result["component_routing"] = ledger(plan["requirements"])
     return result
 
 
@@ -490,10 +561,15 @@ def reviewed_package_quotes(context: dict) -> str:
     quotes = []
     graph = context.get("checked_evidence_graph")
     if isinstance(graph, dict):
+        from common import requirement_routing as routing
         for record in graph.get("requirements", []):
             if record.get("status") != "current" or record.get("record_kind") != "requirement":
                 continue
-            for anchor in record.get("focus", []):
+            if routing.categorized(record):
+                selected = [a for p in routing.assessed_components(record).values() for a in p["evidence"]]
+            else:
+                selected = record.get("focus", [])
+            for anchor in selected:
                 sid = str(anchor.get("ref", "")).rsplit(":", 1)[0]
                 if context.get("sources", {}).get(sid, {}).get("kind") == "package" and anchor["quote"] not in quotes:
                     quotes.append(anchor["quote"])

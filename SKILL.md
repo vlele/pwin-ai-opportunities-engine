@@ -180,10 +180,10 @@ Use when the user says:
 - `capture deep dive on A1`
 - `run capture on these local files`
 
-Run:
+Prefer Preliminary Capture Assessment for early pursuit decisions:
 
 ```bash
-python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth full_360
+python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth preliminary
 ```
 
 Replace `A1` with the provided entry or identifier.
@@ -198,7 +198,7 @@ python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" \
   --title "Example opportunity" \
   --buyer "Department of Example" \
   --solicitation-number "ABC123" \
-  --depth full_360
+  --depth preliminary
 ```
 
 You can also combine tracked capture with extra local files:
@@ -208,10 +208,23 @@ python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" \
   --workspace "$PWD" \
   --entry "A1" \
   --file "/absolute/path/to/amendment.pdf" \
-  --depth full_360
+  --depth preliminary
 ```
 
-The capture orchestrator is responsible for:
+Preliminary mode reads the supplied package in bounded source ranges, independently
+reviews findings, then assesses workstream-level fit and audits capture judgments.
+The main report carries decision-changing eligibility, access, staffing and pricing
+issues; Proposal Readiness Review is a reference appendix, not a compliance certificate.
+Report `PARTIAL_PRELIMINARY_ASSESSMENT` and its limitations plainly. Unsupported rows
+are excluded; if reliable core scope is unavailable, no assessment is published.
+This mode does not perform public, USAspending or GovTribe enrichment. Do not imply
+that competitors, funding, current procurement status or eligibility were verified.
+Read `SKILL_ROOT/references/semantic-prompts/PRELIMINARY-PROMPT.md` when inspecting
+the new mode's exact model instructions or reviewing its materiality decisions.
+
+Use explicit `--depth full_360` for the existing strict path and market enrichment.
+The CLI retains that legacy default for backward compatibility; always pass depth.
+The legacy capture orchestrator is responsible for:
 
 - entry resolution
 - request logging
@@ -237,8 +250,11 @@ After it runs:
 
 Do not satisfy capture research by reading an old brief directly unless the orchestrator itself points to that file as the current validated artifact for this run.
 
-Capture now performs a source-linked understanding checkpoint before market research. Use
+In `full_360`, capture performs a source-linked understanding checkpoint before market research. Use
 `--preflight-only` to stop after that check.
+Use `--resume-understanding` with the unchanged local-file command to resume a
+failed checkpoint without refreshing attachments. A missing cache or changed
+semantic runtime fails closed; this is not a way to bypass a semantic rejection.
 Read `SKILL_ROOT/references/capture-clarification.md` when answering checkpoint questions,
 resuming capture, retrying technical failures, or reviewing the ten synthetic examples.
 Answers are scoped to the current package/profile and must not silently update the permanent profile.
@@ -424,6 +440,9 @@ Read these only when needed for the chosen mode:
 - Read `SKILL_ROOT/references/onboarding-playbook.md` when bootstrap or onboarding needs website-derived inference, NAICS confirmation handling, starter preference seeding, or first-conversation guidance.
 - Read `SKILL_ROOT/references/scan-playbook.md` when running or troubleshooting scan mode, digest-entry map generation, stable ID behavior, or no-opportunity scan output.
 - Read `SKILL_ROOT/references/capture-research-playbook.md` when running capture research, validating partial-vs-complete capture output, or deciding whether a brief is too shallow to present as final.
+- Read `SKILL_ROOT/references/evidence-selection-contract.md` when diagnosing source citations, cross-fragment evidence, page/character provenance, audit partitions/coverage manifests, or the distinction between evidence retrieval and semantic support.
+- Read `SKILL_ROOT/references/inventory-handoff-contract.md` when checking inline fact ownership, missing ledger facts, code-owned record links, or historical mapping replays.
+- Read `SKILL_ROOT/references/component-routing.md` when checking component categories, vendor-comparison filtering, missing-versus-unrelated decisions, or the proposal formatting and contract-terms checklists.
 - Read `SKILL_ROOT/references/usaspending-payloads.md` when implementing, debugging, or manually checking USAspending JSON POST requests.
 - Read `SKILL_ROOT/references/validation-rules.md` when checking digest or capture artifacts before answering the user.
 - Read `SKILL_ROOT/references/source-catalog.md` when source scope, trust tier, source enablement, or unsupported source questions arise.

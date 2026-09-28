@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any
+from common import requirement_routing as routing
 
 
 def _strings(value: Any) -> list[str]:
@@ -25,7 +26,8 @@ def _component_credit(edge, requirement):
         return 0.0
     if edge["coverage"] == "complete":
         return 1.0
-    applicable = [f"K{i}" for i, part in enumerate(requirement["components"]) if part["kind"] not in {"context", "pricing"}]
+    applicable = [key for key, part in routing.assessed_components(requirement).items()
+                  if routing.categorized(requirement) or part["kind"] not in {"context", "pricing"}]
     values = [{"matched": 1.0, "partial": .5, "transferable": .4}.get(edge["component_findings"][key]["status"], 0.0)
               for key in applicable]
     # Separate claims are not assumed to be the same engagement or combined into
@@ -55,8 +57,10 @@ def _bind_checked_graph(catalog, context):
         if record["record_kind"] == "precedence_rule":
             rules.append({"requirement_id": f"R{i}", **deepcopy(record)})
         elif record["record_kind"] == "requirement" and has_work(record):
-            requirements[f"R{i}"] = {"text": " ".join(a["quote"] for a in record["focus"]),
-                                      "anchors": [a["quote"] for a in record["focus"]],
+            assessed = list(routing.assessed_components(record).values())
+            focused = [a for part in assessed for a in part["evidence"]] if routing.categorized(record) else record["focus"]
+            requirements[f"R{i}"] = {"text": " ".join(p["text"] for p in assessed) if routing.categorized(record) else " ".join(a["quote"] for a in focused),
+                                      "anchors": [a["quote"] for a in focused],
                                       "components": deepcopy(record["components"]), "logic": record["logic"],
                                       "source_requirement_id": f"R{i}"}
     catalog.update(requirements=requirements, active_precedence_rules=rules, assessment_mode="checked_component_graph")
