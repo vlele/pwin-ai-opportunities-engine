@@ -14,6 +14,17 @@ Use this skill when the user wants any of the following:
 
 Host-specific wrappers may expose slash commands or command packs, but the shared bundle is script-driven. If a helper or playbook is not present in the installed bundle, do not assume an alternate onboarding path exists.
 
+## Human-Reviewed Beta
+
+Preliminary capture is a human-reviewed beta, not a semantic-stable release or
+proposal-readiness certification. Preserve the rendered **Audited\*** qualification:
+automated approval does not guarantee complete meaning or attached evidence.
+Require human review of decision-changing interpretations; do not describe the
+asterisk as a correction of known errors. Read
+`SKILL_ROOT/docs/human-reviewed-beta.md` for known limitations and the review
+checklist. The beta acceptance applies to `--depth preliminary`, not validation
+of every discovery, enrichment, or strict `full_360` path.
+
 ## Skill Root
 
 Treat the directory containing this `SKILL.md` as `SKILL_ROOT`.
@@ -213,14 +224,25 @@ python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" \
 
 Preliminary mode reads the supplied package in bounded source ranges, independently
 reviews findings, then assesses workstream-level fit and audits capture judgments.
-The main report carries decision-changing eligibility, access, staffing and pricing
-issues; Proposal Readiness Review is a reference appendix, not a compliance certificate.
-Report `PARTIAL_PRELIMINARY_ASSESSMENT` and its limitations plainly. Unsupported rows
-are excluded; if reliable core scope is unavailable, no assessment is published.
+The main report carries material eligibility, access, staffing and pricing-structure
+considerations. Routine commercial terms such as price-hold periods belong in the
+Proposal Readiness Review appendix, not capability-fit penalties or pursuit gates.
+Report `PARTIAL_PRELIMINARY_ASSESSMENT` and its limitations plainly. Document unsupported
+interpretations as unverified, with the review reason and trustworthy quotations when
+available. They are not accepted facts or evidence for fit credit, eligibility or win
+claims. Isolate relationship failures to the affected entry and actual dependencies,
+not everything sharing a topic. Unknown materiality stays visible in the main report.
+Conditional discovery may continue on audited scope and alignment with visible caveats;
+an unresolved item does not automatically downgrade the recommendation. If reliable
+core scope is unavailable, a review-only report may document what remains unverified,
+but must not invent a vendor-fit or capture-strategy conclusion. A completely unreadable
+package still blocks. The appendix is a reference, not a compliance certificate.
 This mode does not perform public, USAspending or GovTribe enrichment. Do not imply
 that competitors, funding, current procurement status or eligibility were verified.
 Read `SKILL_ROOT/references/semantic-prompts/PRELIMINARY-PROMPT.md` when inspecting
 the new mode's exact model instructions or reviewing its materiality decisions.
+Read `SKILL_ROOT/references/preliminary-release-boundary.md` when changing preliminary
+publication gates or deciding whether a candidate is ready for live validation or main.
 
 Use explicit `--depth full_360` for the existing strict path and market enrichment.
 The CLI retains that legacy default for backward compatibility; always pass depth.

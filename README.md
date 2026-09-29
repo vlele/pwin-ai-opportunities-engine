@@ -1,5 +1,23 @@
 # pWin.ai Opportunities for OpenClaw
 
+## Release Status: Human-Reviewed Beta
+
+The preliminary capture path on `main` is a **human-reviewed beta** for early
+capture research, not an autonomous bid/no-bid decision or proposal-readiness
+certification. Automated approvals are marked **Audited\***: their meaning or
+attached evidence may be incomplete. A capture manager must check decision-changing
+interpretations against the source documents before relying on them.
+
+Known issues include an overbroad conditional eligibility summary, an incomplete
+citation attachment, and occasional false-positive audit warnings. These are
+accepted beta limitations, not resolved defects or a passed semantic-stability
+gate. Read the [beta scope, known limitations, and review checklist](docs/human-reviewed-beta.md)
+before using the reports.
+
+For this beta, explicitly select `--depth preliminary` when invoking
+`scripts/capture/run_capture_research.py`. The CLI's legacy `full_360` default and
+market-research paths are not certified by this preliminary-mode evaluation.
+
 If you can clone a repo and paste one OpenClaw prompt, you can use this skill.
 
 `pwin-ai-opportunities` turns OpenClaw into a lightweight federal opportunity scanner and capture-research assistant. Install the skill, configure either SAM.gov or GovTribe access, point it at a company website, and OpenClaw will create and pre-populate the starter workspace files for you.

@@ -14,9 +14,10 @@ Keep scope, eligibility, access, required experience, major staffing, commercial
 exposure, schedule, pricing structure and evaluation priorities visible. A form or
 post-award deliverable can be material if it affects access, mobilization or cost.
 Do not equate every administrative instruction with noise or a pursuit barrier.
-Retain useful proposal-readiness detail as readiness_reference rows for a reference
-appendix. This is NOT an exhaustive clause inventory; no full-compliance claim is
-permitted. Coalesce related duties into workstreams, but preserve decision-changing
+Retain only readily useful proposal-readiness detail as readiness_reference rows;
+do not enumerate routine administrative clauses to populate an appendix. This is
+NOT an exhaustive clause inventory; no full-compliance claim is permitted.
+Coalesce related duties into workstreams, but preserve decision-changing
 quantities, qualifications, denials, exceptions and conditions in their evidence.
 Keep package-defined acronyms and definitions in context. Never import expansions,
 requirements, buyer motives or companies from another procurement. Distinguish bid
@@ -28,6 +29,11 @@ not new factual claims. Every row needs sufficient current-package evidence. Ret
 fewer strong rows rather than generic hot buttons. Cover primary_refs; neighboring
 spans are context. No vendor comparisons, invented competition or win probabilities.
 Return rows only, at most 36 meaningful grouped rows per range.
+Separate decision-changing assertions with different evidence needs instead of
+bundling them into a long qualification or submission checklist. For example, a
+reference count and its questionnaire-routing instructions need not be one finding.
+This is assertion-level support for a few important decisions, NOT a request to
+decompose every clause. Do not expand scope merely to achieve complete accounting.
 
 Record a small decision object for every finding, not an exhaustive clause inventory.
 Separate document stage (rfi/draft/issued/unknown) from obligation strength
@@ -72,6 +78,30 @@ explicit applicable sentence, selected_control for an observed marked choice,
 uncertain for an unreadable selection, and not_applicable for a non-selection.
 Never use narrative to turn printed alternatives into a selected option. Such a
 claim must be rejected by the source-fidelity auditor, even if the enum is valid.
+Disagreement between flattened form text and a control observation is uncertainty
+in reading one source, NOT two conflicting government instructions. Use uncertain
+selection_basis and request source review. A government conflict needs independently
+supported incompatible assertions, not competing interpretations of a checkbox.
+
+Product boundary: this is preliminary capture research, not a proposal-readiness
+approval or a compliance certification. Preserve, label, prioritize, and continue.
+An unsupported/uncertain interpretation is documented as UNVERIFIED, not deleted
+and not promoted into an accepted fact, eligibility conclusion, score or win theme.
+Mark source/semantic defects honestly; do not relax evidence or provenance checks.
+Keep source fidelity separate from whether a relationship or precedence is verified.
+Uncertainty is a research caveat, not an automatic no-bid or stop-research decision.
+Routine bid mechanics and standard commercial terms, including holding quoted
+prices firm for a stated acceptance period, belong in the proposal-readiness
+appendix. They are not capability-fit penalties or automatic pursuit gates.
+Use offer_validity for price-hold periods, separately from submission deadlines or
+amendment acknowledgment. Do not bundle distinct decision issues under other.
+Keep substantial eligibility/access restrictions, core scope, delivery feasibility,
+major staffing and relevant experience visible for capture diligence. A possible
+eligibility restriction is a question to investigate, not proof this vendor fails it.
+Shared topic labels do not establish that findings conflict or depend on each other.
+Do not confuse organizational conflict of interest with contradictory source terms.
+Review the supplied evidence to determine actual subject, actor, period and scope.
+Never add procurement-specific parsing rules or assume a new governing term.
 ```
 
 ## Independent package/materiality audit
@@ -95,6 +125,10 @@ Omitting routine formatting detail is NOT incomplete strategic coverage. Appendi
 coverage is not exhaustive and is never certified by this check. Definitions matter
 when they change scope. Source locations alone do not establish semantic support.
 Every candidate must receive supported, unsupported or uncertain, with a reason.
+Also assign capture_relevance independently: strategic for core scope or material
+pursuit considerations; readiness for routine proposal/commercial preparation;
+uncertain when materiality cannot be established. A standard price-validity period
+is readiness, not strategic merely because it contains a quantity or deadline.
 Do not repair candidates or change source text. Give a concise coverage_reason.
 Explicitly check material_checks for acquisition_selection, precedence, document_status,
 staffing_quantities and experience_quantities in this PRIMARY range. covered means
@@ -148,6 +182,30 @@ explicit applicable sentence, selected_control for an observed marked choice,
 uncertain for an unreadable selection, and not_applicable for a non-selection.
 Never use narrative to turn printed alternatives into a selected option. Such a
 claim must be rejected by the source-fidelity auditor, even if the enum is valid.
+Disagreement between flattened form text and a control observation is uncertainty
+in reading one source, NOT two conflicting government instructions. Use uncertain
+selection_basis and request source review. A government conflict needs independently
+supported incompatible assertions, not competing interpretations of a checkbox.
+
+Product boundary: this is preliminary capture research, not a proposal-readiness
+approval or a compliance certification. Preserve, label, prioritize, and continue.
+An unsupported/uncertain interpretation is documented as UNVERIFIED, not deleted
+and not promoted into an accepted fact, eligibility conclusion, score or win theme.
+Mark source/semantic defects honestly; do not relax evidence or provenance checks.
+Keep source fidelity separate from whether a relationship or precedence is verified.
+Uncertainty is a research caveat, not an automatic no-bid or stop-research decision.
+Routine bid mechanics and standard commercial terms, including holding quoted
+prices firm for a stated acceptance period, belong in the proposal-readiness
+appendix. They are not capability-fit penalties or automatic pursuit gates.
+Use offer_validity for price-hold periods, separately from submission deadlines or
+amendment acknowledgment. Do not bundle distinct decision issues under other.
+Keep substantial eligibility/access restrictions, core scope, delivery feasibility,
+major staffing and relevant experience visible for capture diligence. A possible
+eligibility restriction is a question to investigate, not proof this vendor fails it.
+Shared topic labels do not establish that findings conflict or depend on each other.
+Do not confuse organizational conflict of interest with contradictory source terms.
+Review the supplied evidence to determine actual subject, actor, period and scope.
+Never add procurement-specific parsing rules or assume a new governing term.
 ```
 
 ## Cross-range decision reconciliation
@@ -192,6 +250,30 @@ explicit applicable sentence, selected_control for an observed marked choice,
 uncertain for an unreadable selection, and not_applicable for a non-selection.
 Never use narrative to turn printed alternatives into a selected option. Such a
 claim must be rejected by the source-fidelity auditor, even if the enum is valid.
+Disagreement between flattened form text and a control observation is uncertainty
+in reading one source, NOT two conflicting government instructions. Use uncertain
+selection_basis and request source review. A government conflict needs independently
+supported incompatible assertions, not competing interpretations of a checkbox.
+
+Product boundary: this is preliminary capture research, not a proposal-readiness
+approval or a compliance certification. Preserve, label, prioritize, and continue.
+An unsupported/uncertain interpretation is documented as UNVERIFIED, not deleted
+and not promoted into an accepted fact, eligibility conclusion, score or win theme.
+Mark source/semantic defects honestly; do not relax evidence or provenance checks.
+Keep source fidelity separate from whether a relationship or precedence is verified.
+Uncertainty is a research caveat, not an automatic no-bid or stop-research decision.
+Routine bid mechanics and standard commercial terms, including holding quoted
+prices firm for a stated acceptance period, belong in the proposal-readiness
+appendix. They are not capability-fit penalties or automatic pursuit gates.
+Use offer_validity for price-hold periods, separately from submission deadlines or
+amendment acknowledgment. Do not bundle distinct decision issues under other.
+Keep substantial eligibility/access restrictions, core scope, delivery feasibility,
+major staffing and relevant experience visible for capture diligence. A possible
+eligibility restriction is a question to investigate, not proof this vendor fails it.
+Shared topic labels do not establish that findings conflict or depend on each other.
+Do not confuse organizational conflict of interest with contradictory source terms.
+Review the supplied evidence to determine actual subject, actor, period and scope.
+Never add procurement-specific parsing rules or assume a new governing term.
 ```
 
 ## Independent reconciliation audit
@@ -210,6 +292,11 @@ independent periods/roles. Unresolved conflicts must retain both sides. Do not a
 a numerically plausible answer without a source-grounded replacement instruction.
 Reject missing conflict links, changed quantities and strengthened obligations.
 Return an independent supported/unsupported/uncertain verdict for every map entry.
+Keep each verdict local to that finding and its actual dependencies. Do not fail
+all staffing or other records because one record has a bad quote or relationship.
+Use the full catalog to detect omitted same-subject conflicts even if no link was
+proposed. structural_errors identify unverified records; they do not discredit an
+unrelated record. A bad incoming link alone does not invalidate its target.
 
 Relationship wire contract: active MUST use governing_ids: []. Never link an active
 finding to itself or another finding. superseded requires at least one DIFFERENT
@@ -237,6 +324,30 @@ explicit applicable sentence, selected_control for an observed marked choice,
 uncertain for an unreadable selection, and not_applicable for a non-selection.
 Never use narrative to turn printed alternatives into a selected option. Such a
 claim must be rejected by the source-fidelity auditor, even if the enum is valid.
+Disagreement between flattened form text and a control observation is uncertainty
+in reading one source, NOT two conflicting government instructions. Use uncertain
+selection_basis and request source review. A government conflict needs independently
+supported incompatible assertions, not competing interpretations of a checkbox.
+
+Product boundary: this is preliminary capture research, not a proposal-readiness
+approval or a compliance certification. Preserve, label, prioritize, and continue.
+An unsupported/uncertain interpretation is documented as UNVERIFIED, not deleted
+and not promoted into an accepted fact, eligibility conclusion, score or win theme.
+Mark source/semantic defects honestly; do not relax evidence or provenance checks.
+Keep source fidelity separate from whether a relationship or precedence is verified.
+Uncertainty is a research caveat, not an automatic no-bid or stop-research decision.
+Routine bid mechanics and standard commercial terms, including holding quoted
+prices firm for a stated acceptance period, belong in the proposal-readiness
+appendix. They are not capability-fit penalties or automatic pursuit gates.
+Use offer_validity for price-hold periods, separately from submission deadlines or
+amendment acknowledgment. Do not bundle distinct decision issues under other.
+Keep substantial eligibility/access restrictions, core scope, delivery feasibility,
+major staffing and relevant experience visible for capture diligence. A possible
+eligibility restriction is a question to investigate, not proof this vendor fails it.
+Shared topic labels do not establish that findings conflict or depend on each other.
+Do not confuse organizational conflict of interest with contradictory source terms.
+Review the supplied evidence to determine actual subject, actor, period and scope.
+Never add procurement-specific parsing rules or assume a new governing term.
 ```
 
 ## Preliminary workstream assessment
@@ -268,8 +379,9 @@ do not rescue a clearly unrelated vendor with a generic teaming recommendation.
 No public market research was performed: do not invent competitors, incumbents,
 funding, customer relationships, current procurement status or win probabilities.
 No bidder is declared compliant. Recommend pursue_discovery, investigate_further
-or decline, not an unconditional bid authorization. Missing evidence generally means
-investigate_further; decline needs a substantive supported mismatch or barrier.
+or decline, not an unconditional bid authorization. Missing evidence is a diligence
+need, not an automatic reason to stop discovery; decline needs a substantive
+supported mismatch or barrier.
 Important eligibility, access, staffing, commercial and schedule conditions remain
 visible in the main report even when detailed clauses also appear in the appendix.
 Formal Q&A addresses an actual conflicting/ambiguous government term; next_action
@@ -285,6 +397,37 @@ terms as an issued commitment. Superseded history is intentionally absent here.
 Do not drop the active counts, optional/base distinctions or reference requirements.
 Use formal_qa for unresolved precedence; do not ask which term controls when an
 explicit replacement has already been independently approved.
+decision_blockers and review_items are unresolved review items, not established package facts and
+not proof of vendor inability. Do not resolve them, quote rejected candidate prose,
+or create formal government Q&A for extraction/validation errors. Assess only the
+admitted workstreams and conditions; propose diligence for the unresolved subjects.
+The separate review_items may inform research caveats only. They are not valid
+finding_ids and cannot supply positive capability/experience credit or an adverse
+vendor conclusion. Conditional pursue_discovery is allowed with visible caveats;
+do not treat every pending review, routine appendix item or missing proof as a veto.
+Keep factual restatements minimal: the renderer displays the approved package
+statements and qualifiers beside your analysis. Do not rephrase anticipated roles
+as required positions in a next_action or hypothetical win strategy.
+
+Product boundary: this is preliminary capture research, not a proposal-readiness
+approval or a compliance certification. Preserve, label, prioritize, and continue.
+An unsupported/uncertain interpretation is documented as UNVERIFIED, not deleted
+and not promoted into an accepted fact, eligibility conclusion, score or win theme.
+Mark source/semantic defects honestly; do not relax evidence or provenance checks.
+Keep source fidelity separate from whether a relationship or precedence is verified.
+Uncertainty is a research caveat, not an automatic no-bid or stop-research decision.
+Routine bid mechanics and standard commercial terms, including holding quoted
+prices firm for a stated acceptance period, belong in the proposal-readiness
+appendix. They are not capability-fit penalties or automatic pursuit gates.
+Use offer_validity for price-hold periods, separately from submission deadlines or
+amendment acknowledgment. Do not bundle distinct decision issues under other.
+Keep substantial eligibility/access restrictions, core scope, delivery feasibility,
+major staffing and relevant experience visible for capture diligence. A possible
+eligibility restriction is a question to investigate, not proof this vendor fails it.
+Shared topic labels do not establish that findings conflict or depend on each other.
+Do not confuse organizational conflict of interest with contradictory source terms.
+Review the supplied evidence to determine actual subject, actor, period and scope.
+Never add procurement-specific parsing rules or assume a new governing term.
 ```
 
 ## Independent judgment audit
@@ -318,6 +461,38 @@ an issued-mandate description of a draft/RFI. Check effective_stages and linked
 document_context_ids even if the obligation's immediate quote omits the draft header.
 Respect only the active reconciled terms. Quantities, options and reference counts
 must not disappear from a statement purporting to summarize those decision needs.
+Explicitly return qualifier_fidelity separately from the general verdict. Inspect
+statement, reason AND follow_up for changed obligation strength, stage, quantities,
+conditions or options. A sensible action does not excuse calling an anticipated
+position required. A suggested internal planning action is not a government mandate;
+do not reject the word 'required' without checking what the sentence attributes it to.
+Use uncertain if fidelity cannot be established. Code publishes a row only when
+both verdict and qualifier_fidelity are supported. Do not demand exhaustive clause
+coverage or resolve decision_blockers as if they were approved requirements.
+Check that material review caveats are acknowledged without turning an unverified
+interpretation into a fact. Routine appendix gaps do not require a downgrade to
+investigate_further. An audited conditional discovery recommendation may coexist
+with incomplete research; it is not bid authorization or a compliance certification.
+
+Product boundary: this is preliminary capture research, not a proposal-readiness
+approval or a compliance certification. Preserve, label, prioritize, and continue.
+An unsupported/uncertain interpretation is documented as UNVERIFIED, not deleted
+and not promoted into an accepted fact, eligibility conclusion, score or win theme.
+Mark source/semantic defects honestly; do not relax evidence or provenance checks.
+Keep source fidelity separate from whether a relationship or precedence is verified.
+Uncertainty is a research caveat, not an automatic no-bid or stop-research decision.
+Routine bid mechanics and standard commercial terms, including holding quoted
+prices firm for a stated acceptance period, belong in the proposal-readiness
+appendix. They are not capability-fit penalties or automatic pursuit gates.
+Use offer_validity for price-hold periods, separately from submission deadlines or
+amendment acknowledgment. Do not bundle distinct decision issues under other.
+Keep substantial eligibility/access restrictions, core scope, delivery feasibility,
+major staffing and relevant experience visible for capture diligence. A possible
+eligibility restriction is a question to investigate, not proof this vendor fails it.
+Shared topic labels do not establish that findings conflict or depend on each other.
+Do not confuse organizational conflict of interest with contradictory source terms.
+Review the supplied evidence to determine actual subject, actor, period and scope.
+Never add procurement-specific parsing rules or assume a new governing term.
 ```
 
 ## Evidence selection transport

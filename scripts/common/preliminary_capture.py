@@ -9,11 +9,12 @@ from pathlib import Path
 
 from common.capture_understanding import build_spans, model_settings
 from common.evidence_selection import EvidenceTransport, SELECTION_PROMPT
-from common.openai_reasoning import _call_openai_json
+from common.openai_reasoning import _call_openai_json, ModelOutputLimit
 from common.understanding_checkpoints import StageCheckpoints, check_request_budget, digest
 from common import preliminary_decisions as decisions
+from common.preliminary_review import RELEVANCE, capture_relevance, review_items
 
-VERSION = '3-preliminary-relationship-contract'
+VERSION = '6-documented-preliminary-uncertainty'
 MAX_CHARS = 640000
 REVIEW_CHARS = 150000
 KINDS = ('workstream', 'decision_condition', 'readiness_reference', 'context', 'conflict')
@@ -22,6 +23,28 @@ ROW_KINDS = ('alignment', 'win_hypothesis', 'capture_priority', 'decision_risk',
 ALIGNMENTS = ('plausible', 'specific_reported_work', 'partial', 'unrelated', 'unknown', 'not_applicable')
 EXPERIENCE = ('reported_delivery', 'not_evidenced', 'unclear', 'not_applicable')
 RECOMMENDATIONS = ('pursue_discovery', 'investigate_further', 'decline', 'not_applicable')
+
+PRELIMINARY_POLICY = """
+Product boundary: this is preliminary capture research, not a proposal-readiness
+approval or a compliance certification. Preserve, label, prioritize, and continue.
+An unsupported/uncertain interpretation is documented as UNVERIFIED, not deleted
+and not promoted into an accepted fact, eligibility conclusion, score or win theme.
+Mark source/semantic defects honestly; do not relax evidence or provenance checks.
+Keep source fidelity separate from whether a relationship or precedence is verified.
+Uncertainty is a research caveat, not an automatic no-bid or stop-research decision.
+Routine bid mechanics and standard commercial terms, including holding quoted
+prices firm for a stated acceptance period, belong in the proposal-readiness
+appendix. They are not capability-fit penalties or automatic pursuit gates.
+Use offer_validity for price-hold periods, separately from submission deadlines or
+amendment acknowledgment. Do not bundle distinct decision issues under other.
+Keep substantial eligibility/access restrictions, core scope, delivery feasibility,
+major staffing and relevant experience visible for capture diligence. A possible
+eligibility restriction is a question to investigate, not proof this vendor fails it.
+Shared topic labels do not establish that findings conflict or depend on each other.
+Do not confuse organizational conflict of interest with contradictory source terms.
+Review the supplied evidence to determine actual subject, actor, period and scope.
+Never add procurement-specific parsing rules or assume a new governing term.
+"""
 
 ACQUISITION_RULES = """
 Acquisition findings must identify one acquisition_dimension: set_aside,
@@ -41,6 +64,10 @@ explicit applicable sentence, selected_control for an observed marked choice,
 uncertain for an unreadable selection, and not_applicable for a non-selection.
 Never use narrative to turn printed alternatives into a selected option. Such a
 claim must be rejected by the source-fidelity auditor, even if the enum is valid.
+Disagreement between flattened form text and a control observation is uncertainty
+in reading one source, NOT two conflicting government instructions. Use uncertain
+selection_basis and request source review. A government conflict needs independently
+supported incompatible assertions, not competing interpretations of a checkbox.
 """
 
 DECISION_RULES = """
@@ -80,9 +107,10 @@ Keep scope, eligibility, access, required experience, major staffing, commercial
 exposure, schedule, pricing structure and evaluation priorities visible. A form or
 post-award deliverable can be material if it affects access, mobilization or cost.
 Do not equate every administrative instruction with noise or a pursuit barrier.
-Retain useful proposal-readiness detail as readiness_reference rows for a reference
-appendix. This is NOT an exhaustive clause inventory; no full-compliance claim is
-permitted. Coalesce related duties into workstreams, but preserve decision-changing
+Retain only readily useful proposal-readiness detail as readiness_reference rows;
+do not enumerate routine administrative clauses to populate an appendix. This is
+NOT an exhaustive clause inventory; no full-compliance claim is permitted.
+Coalesce related duties into workstreams, but preserve decision-changing
 quantities, qualifications, denials, exceptions and conditions in their evidence.
 Keep package-defined acronyms and definitions in context. Never import expansions,
 requirements, buyer motives or companies from another procurement. Distinguish bid
@@ -94,6 +122,11 @@ not new factual claims. Every row needs sufficient current-package evidence. Ret
 fewer strong rows rather than generic hot buttons. Cover primary_refs; neighboring
 spans are context. No vendor comparisons, invented competition or win probabilities.
 Return rows only, at most 36 meaningful grouped rows per range.
+Separate decision-changing assertions with different evidence needs instead of
+bundling them into a long qualification or submission checklist. For example, a
+reference count and its questionnaire-routing instructions need not be one finding.
+This is assertion-level support for a few important decisions, NOT a request to
+decompose every clause. Do not expand scope merely to achieve complete accounting.
 """ + DECISION_RULES
 
 PACKAGE_AUDIT_PROMPT = """Independently review candidate preliminary capture findings.
@@ -114,6 +147,10 @@ Omitting routine formatting detail is NOT incomplete strategic coverage. Appendi
 coverage is not exhaustive and is never certified by this check. Definitions matter
 when they change scope. Source locations alone do not establish semantic support.
 Every candidate must receive supported, unsupported or uncertain, with a reason.
+Also assign capture_relevance independently: strategic for core scope or material
+pursuit considerations; readiness for routine proposal/commercial preparation;
+uncertain when materiality cannot be established. A standard price-validity period
+is readiness, not strategic merely because it contains a quantity or deadline.
 Do not repair candidates or change source text. Give a concise coverage_reason.
 Explicitly check material_checks for acquisition_selection, precedence, document_status,
 staffing_quantities and experience_quantities in this PRIMARY range. covered means
@@ -163,6 +200,11 @@ independent periods/roles. Unresolved conflicts must retain both sides. Do not a
 a numerically plausible answer without a source-grounded replacement instruction.
 Reject missing conflict links, changed quantities and strengthened obligations.
 Return an independent supported/unsupported/uncertain verdict for every map entry.
+Keep each verdict local to that finding and its actual dependencies. Do not fail
+all staffing or other records because one record has a bad quote or relationship.
+Use the full catalog to detect omitted same-subject conflicts even if no link was
+proposed. structural_errors identify unverified records; they do not discredit an
+unrelated record. A bad incoming link alone does not invalidate its target.
 """ + RELATION_RULES + ACQUISITION_RULES
 
 ASSESS_PROMPT = """Write an evidence-grounded Preliminary Capture Assessment.
@@ -191,8 +233,9 @@ do not rescue a clearly unrelated vendor with a generic teaming recommendation.
 No public market research was performed: do not invent competitors, incumbents,
 funding, customer relationships, current procurement status or win probabilities.
 No bidder is declared compliant. Recommend pursue_discovery, investigate_further
-or decline, not an unconditional bid authorization. Missing evidence generally means
-investigate_further; decline needs a substantive supported mismatch or barrier.
+or decline, not an unconditional bid authorization. Missing evidence is a diligence
+need, not an automatic reason to stop discovery; decline needs a substantive
+supported mismatch or barrier.
 Important eligibility, access, staffing, commercial and schedule conditions remain
 visible in the main report even when detailed clauses also appear in the appendix.
 Formal Q&A addresses an actual conflicting/ambiguous government term; next_action
@@ -208,6 +251,17 @@ terms as an issued commitment. Superseded history is intentionally absent here.
 Do not drop the active counts, optional/base distinctions or reference requirements.
 Use formal_qa for unresolved precedence; do not ask which term controls when an
 explicit replacement has already been independently approved.
+decision_blockers and review_items are unresolved review items, not established package facts and
+not proof of vendor inability. Do not resolve them, quote rejected candidate prose,
+or create formal government Q&A for extraction/validation errors. Assess only the
+admitted workstreams and conditions; propose diligence for the unresolved subjects.
+The separate review_items may inform research caveats only. They are not valid
+finding_ids and cannot supply positive capability/experience credit or an adverse
+vendor conclusion. Conditional pursue_discovery is allowed with visible caveats;
+do not treat every pending review, routine appendix item or missing proof as a veto.
+Keep factual restatements minimal: the renderer displays the approved package
+statements and qualifiers beside your analysis. Do not rephrase anticipated roles
+as required positions in a next_action or hypothetical win strategy.
 """
 
 ASSESS_AUDIT_PROMPT = """Independently audit preliminary capture judgment rows.
@@ -238,7 +292,26 @@ an issued-mandate description of a draft/RFI. Check effective_stages and linked
 document_context_ids even if the obligation's immediate quote omits the draft header.
 Respect only the active reconciled terms. Quantities, options and reference counts
 must not disappear from a statement purporting to summarize those decision needs.
+Explicitly return qualifier_fidelity separately from the general verdict. Inspect
+statement, reason AND follow_up for changed obligation strength, stage, quantities,
+conditions or options. A sensible action does not excuse calling an anticipated
+position required. A suggested internal planning action is not a government mandate;
+do not reject the word 'required' without checking what the sentence attributes it to.
+Use uncertain if fidelity cannot be established. Code publishes a row only when
+both verdict and qualifier_fidelity are supported. Do not demand exhaustive clause
+coverage or resolve decision_blockers as if they were approved requirements.
+Check that material review caveats are acknowledged without turning an unverified
+interpretation into a fact. Routine appendix gaps do not require a downgrade to
+investigate_further. An audited conditional discovery recommendation may coexist
+with incomplete research; it is not bid authorization or a compliance certification.
 """
+
+REVIEW_PROMPT += PRELIMINARY_POLICY
+PACKAGE_AUDIT_PROMPT += PRELIMINARY_POLICY
+RECONCILE_PROMPT += PRELIMINARY_POLICY
+RECONCILE_AUDIT_PROMPT += PRELIMINARY_POLICY
+ASSESS_PROMPT += PRELIMINARY_POLICY
+ASSESS_AUDIT_PROMPT += PRELIMINARY_POLICY
 
 
 def obj(properties):
@@ -265,11 +338,16 @@ def anchors(spans, minimum=1):
 
 
 def review_schema(spans):
-    decision = obj({'topic': enum(decisions.TOPICS), 'stage': enum(decisions.STAGES),
-        'acquisition_dimension': enum(decisions.ACQUISITION_DIMENSIONS),
+    common = {'stage': enum(decisions.STAGES),
         'force': enum(decisions.FORCES), 'period': TEXT, 'quantities': arr(TEXT, maximum=24),
         'selection_basis': enum(('not_applicable', 'narrative', 'selected_control', 'uncertain')),
-        'selected_controls': arr(obj({'ref': enum(spans), 'id': TEXT, 'label': TEXT}), maximum=24)})
+        'selected_controls': arr(obj({'ref': enum(spans), 'id': TEXT, 'label': TEXT}), maximum=24)}
+    # Do not let generation choose a combination that the local contract forbids.
+    decision = {'anyOf': [
+        obj({**common, 'topic': enum(('acquisition',)),
+             'acquisition_dimension': enum(d for d in decisions.ACQUISITION_DIMENSIONS if d != 'none')}),
+        obj({**common, 'topic': enum(t for t in decisions.TOPICS if t != 'acquisition'),
+             'acquisition_dimension': enum(('none',))})]}
     return obj({'rows': arr(obj({'kind': enum(KINDS), 'statement': TEXT,
         'implication': TEXT, 'evidence': anchors(spans), 'decision': decision}), maximum=36)})
 
@@ -281,10 +359,13 @@ def assessment_schema(findings, spans):
         'recommendation': enum(RECOMMENDATIONS)}), maximum=24)})
 
 
-def audit_schema(candidates, package=False):
+def audit_schema(candidates, package=False, judgment=False):
     fields = {'verdict': enum(('supported', 'unsupported', 'uncertain')), 'reason': TEXT}
+    if judgment:
+        fields['qualifier_fidelity'] = enum(('supported', 'unsupported', 'uncertain'))
     if package:
         fields['role'] = enum(KINDS)
+        fields['capture_relevance'] = enum(RELEVANCE)
     schema = {'checks': obj({key: obj(fields) for key in candidates})}
     if package:
         schema.update(strategic_coverage=enum(('complete', 'incomplete', 'uncertain')), coverage_reason=TEXT)
@@ -345,6 +426,40 @@ def _size(prompt, payload, schema):
     return check_request_budget(prompt + (SELECTION_PROMPT if wire.active else ''), wire.payload, wire.schema, MAX_CHARS)
 
 
+def checked_audit(raw, schema):
+    """Validate exact verdicts independently; malformed checks never mean approval."""
+    checks = raw.get('checks', {})
+    checks = checks if isinstance(checks, dict) else {}
+    result = {'checks': {}}
+    for key, spec in schema['properties']['checks']['properties'].items():
+        try:
+            shape(checks.get(key), spec)
+            result['checks'][key] = deepcopy(checks[key])
+        except (ValueError, KeyError, TypeError):
+            fallback = {'verdict': 'uncertain', 'reason': 'Independent audit check is missing or malformed.',
+                        'role': 'context', 'capture_relevance': 'uncertain', 'qualifier_fidelity': 'uncertain'}
+            result['checks'][key] = {k: fallback[k] for k in spec['properties']}
+    metadata_uncertain = False
+    for key, spec in schema['properties'].items():
+        if key == 'checks':
+            continue
+        try:
+            shape(raw.get(key), spec)
+            result[key] = deepcopy(raw[key])
+        except (ValueError, KeyError, TypeError):
+            metadata_uncertain = True
+            if key == 'material_checks':
+                result[key] = {k: {'status': 'uncertain', 'reason': 'Material coverage audit is missing or malformed.'}
+                               for k in spec['properties']}
+            elif key == 'strategic_coverage':
+                result[key] = 'uncertain'
+            else:
+                result[key] = 'Coverage reason is missing or malformed.'
+    if metadata_uncertain:
+        result['strategic_coverage'] = 'uncertain'
+    return result
+
+
 def partitions(spans, max_chars=REVIEW_CHARS):
     if not 10000 <= max_chars <= MAX_CHARS:
         raise ValueError('Invalid preliminary request budget.')
@@ -399,8 +514,17 @@ def assess(packet, *, call=None, checkpoint_dir=None, max_chars=REVIEW_CHARS):
               'review_manifest': [], 'stages': [], 'recommendation': 'investigate_further',
               'appendix_status': 'reference_only_not_exhaustive', 'market_research': 'not_performed',
               'profile_present': bool(packet.get('profile_present')), 'model_settings': settings,
-              'strategic_coverage_complete': False, 'source_registry': sources}
+              'strategic_coverage_complete': False, 'source_registry': sources,
+              'decision_blockers': [], 'review_items': [], 'token_limit_omissions': []}
     cache = StageCheckpoints(checkpoint_dir, scope={'version': VERSION, 'packet': packet}) if checkpoint_dir else None
+
+    def block(identity, scope, reason):
+        result['decision_blockers'].append({'id': identity, 'scope': scope, 'reason': reason})
+
+    for i, issue in enumerate(result['limitations']):
+        block(f'input-{i + 1}', 'source availability', issue)
+    if not result['profile_present']:
+        block('profile', 'vendor evidence', 'No vendor profile supplied; fit and eligibility remain unproven.')
 
     def invoke(stage, prompt, payload, schema):
         wire = EvidenceTransport(schema, payload)
@@ -408,9 +532,25 @@ def assess(packet, *, call=None, checkpoint_dir=None, max_chars=REVIEW_CHARS):
         chars = check_request_budget(system, wire.payload, wire.schema, MAX_CHARS)
         key = cache.key(stage, system, wire.payload, wire.schema, settings) if cache else None
         saved = cache.load(key) if cache else None
-        raw = saved['response'] if saved else call(system_prompt=system, user_payload=wire.payload,
-            model=settings['model'], reasoning_effort=settings['reasoning_effort'], timeout_seconds=600,
-            response_schema={'name': 'preliminary_capture', 'schema': wire.schema, 'strict': True})
+        try:
+            raw = saved['response'] if saved else call(system_prompt=system, user_payload=wire.payload,
+                model=settings['model'], reasoning_effort=settings['reasoning_effort'], timeout_seconds=600,
+                response_schema={'name': 'preliminary_capture', 'schema': wire.schema, 'strict': True},
+                raise_on_output_limit=True)
+        except ModelOutputLimit as error:
+            # Only a transport-observed incomplete generation enters this path.
+            # No model text, failed audit, or malformed JSON can declare a token gap.
+            records = payload.get('findings', payload.get('candidates', {}))
+            refs = set(payload.get('primary_refs', [a['ref'] for r in records.values() for a in r.get('evidence', [])]))
+            refs = [ref for ref in package if ref in refs]
+            result['token_limit_omissions'].append({'stage': stage, 'source_refs': refs,
+                'finding_ids': list(records), 'finish_reason': 'length', 'usage': error.usage,
+                'reason': str(error)})
+            result['stages'].append({'stage': stage, 'execution': 'provider', 'request_chars': chars,
+                'response_received': False, 'outcome': 'model_output_limit', 'usage': error.usage})
+            result['limitations'].append(f'{stage}: token-limited processing; affected conclusions remain unverified.')
+            block(stage, 'unprocessed source coverage', 'Token-limited processing left this scope unverified; see the final token-limits section.')
+            raise
         result['stages'].append({'stage': stage, 'execution': 'checkpoint_revalidated' if saved else 'provider',
                                  'request_chars': chars, 'response_received': isinstance(raw, dict)})
         if not isinstance(raw, dict):
@@ -429,6 +569,7 @@ def assess(packet, *, call=None, checkpoint_dir=None, max_chars=REVIEW_CHARS):
         accepted = {}
         for i, row in enumerate(raw['rows']):
             key = f'{prefix}-{i + 1}'
+            decoded = None
             try:
                 decoded = wire.resolve({'rows': [row]})['rows'][0]
                 shape(decoded, schema['properties']['rows']['items'])
@@ -448,30 +589,60 @@ def assess(packet, *, call=None, checkpoint_dir=None, max_chars=REVIEW_CHARS):
                         raise ValueError('Recommendation value must belong to the recommendation row.')
                 accepted[key] = decoded
             except (KeyError, ValueError, TypeError) as error:
-                result['quarantined'].append({'id': key, 'phase': prefix, 'error': str(error), 'raw': deepcopy(row)})
-                result['limitations'].append(f'{key}: an invalid source link or row was excluded; affected conclusions are withheld.')
+                result['quarantined'].append({'id': key, 'phase': prefix, 'error': str(error),
+                                             'raw': deepcopy(row), 'candidate': deepcopy(decoded)})
+                result['limitations'].append(f'{key}: an invalid source link or interpretation is documented for review, not accepted as fact.')
+                if prefix.startswith('F'):
+                    # Unreviewed rows cannot declare themselves harmless appendix detail.
+                    block(key, 'package evidence', 'A candidate failed structural/source validation; materiality is not established.')
         return accepted
 
     try:
         if not package:
             raise ValueError('No readable package scope is available.')
         schedule = partitions(package, max_chars)
+        # Record the full plan, including unattempted ranges, before dispatch.
+        result['review_manifest'] = [
+            {'partition': number, 'source_refs': payload['primary_refs'], 'strategic_coverage': 'uncertain',
+             'reviewed': False, 'coverage_reason': 'Not yet audited.'}
+            for number, (payload, _) in enumerate(schedule, 1)]
         # Profile size is checked before any paid review; it is not silently clipped.
         check_request_budget(ASSESS_PROMPT, {'spans': vendor}, obj({}), MAX_CHARS)
         for number, (payload, schema) in enumerate(schedule, 1):
-            manifest = {'partition': number, 'source_refs': payload['primary_refs'], 'strategic_coverage': 'uncertain',
-                        'reviewed': False, 'coverage_reason': 'Not yet audited.'}
-            result['review_manifest'].append(manifest)
-            raw, wire = invoke(f'preliminary-package-{number}', REVIEW_PROMPT, payload, schema)
+            manifest = result['review_manifest'][number - 1]
+            try:
+                raw, wire = invoke(f'preliminary-package-{number}', REVIEW_PROMPT, payload, schema)
+            except ModelOutputLimit:
+                manifest['coverage_reason'] = 'Reading unfinished because of a model token limit.'
+                manifest['processing_status'] = 'token_limited'
+                continue
             candidates = decode_rows(raw, wire, schema, f'F{number}')
             if not candidates:
                 result['limitations'].append(f'Partition {number} yielded no admissible findings; its material coverage is unknown.')
+                block(f'partition-{number}', 'core scope and pursuit conditions', 'No admissible findings in this source range.')
                 continue
             audit_payload = {'phase': 'package_audit', 'primary_refs': payload['primary_refs'],
                              'spans': payload['spans'], 'candidates': candidates}
             audit_spec = audit_schema(candidates, package=True)
-            audit, _ = invoke(f'preliminary-package-audit-{number}', PACKAGE_AUDIT_PROMPT, audit_payload, audit_spec)
-            shape(audit, audit_spec)
+            try:
+                audit, _ = invoke(f'preliminary-package-audit-{number}', PACKAGE_AUDIT_PROMPT, audit_payload, audit_spec)
+                audit = checked_audit(audit, audit_spec)
+            except ModelOutputLimit:
+                manifest['coverage_reason'] = 'Source audit unfinished because of a model token limit; candidates not admitted.'
+                manifest['processing_status'] = 'token_limited'
+                for key, row in candidates.items():
+                    result['quarantined'].append({'id': key, 'phase': 'package_audit',
+                        'error': 'Source audit was unfinished because of the token limit.', 'raw': row})
+                continue
+            except (ProviderUnavailable, ValueError, KeyError, TypeError) as error:
+                manifest['coverage_reason'] = 'Source audit incomplete: ' + str(error)
+                manifest['processing_status'] = 'audit_incomplete'
+                for key, row in candidates.items():
+                    result['quarantined'].append({'id': key, 'phase': 'package_audit',
+                        'error': manifest['coverage_reason'], 'raw': row})
+                result['limitations'].append(manifest['coverage_reason'])
+                block(f'partition-{number}', 'unverified source findings', manifest['coverage_reason'])
+                continue
             manifest['material_checks'] = audit['material_checks']
             gaps = {key: v for key, v in audit['material_checks'].items() if v['status'] in {'incomplete', 'uncertain'}}
             if gaps:
@@ -481,103 +652,163 @@ def assess(packet, *, call=None, checkpoint_dir=None, max_chars=REVIEW_CHARS):
                 # receipts remain intact; no retries until a preferred answer appears.
                 supplement_payload = {**payload, 'retained_candidates': candidates, 'material_gaps': gaps,
                     'supplement_instruction': 'Return only missing or corrected findings for the listed gaps. Do not repeat sound retained rows.'}
-                extra_raw, extra_wire = invoke(f'preliminary-package-supplement-{number}', REVIEW_PROMPT, supplement_payload, schema)
-                extras = decode_rows(extra_raw, extra_wire, schema, f'F{number}S')
-                if extras:
-                    candidates.update(extras)
-                    audit_spec = audit_schema(candidates, package=True)
-                    audit, _ = invoke(f'preliminary-package-supplement-audit-{number}', PACKAGE_AUDIT_PROMPT,
-                                      {**audit_payload, 'candidates': candidates}, audit_spec)
-                    shape(audit, audit_spec)
-                    manifest['material_checks'] = audit['material_checks']
-                    if any(v['status'] in {'incomplete', 'uncertain'} for v in audit['material_checks'].values()):
-                        audit['strategic_coverage'] = 'incomplete'
+                extras = {}
+                try:
+                    extra_raw, extra_wire = invoke(f'preliminary-package-supplement-{number}', REVIEW_PROMPT, supplement_payload, schema)
+                    extras = decode_rows(extra_raw, extra_wire, schema, f'F{number}S')
+                    if extras:
+                        combined = {**candidates, **extras}
+                        audit_spec = audit_schema(combined, package=True)
+                        updated_audit, _ = invoke(f'preliminary-package-supplement-audit-{number}', PACKAGE_AUDIT_PROMPT,
+                                          {**audit_payload, 'candidates': combined}, audit_spec)
+                        updated_audit = checked_audit(updated_audit, audit_spec)
+                        candidates, audit = combined, updated_audit
+                        manifest['material_checks'] = audit['material_checks']
+                        if any(v['status'] in {'incomplete', 'uncertain'} for v in audit['material_checks'].values()):
+                            audit['strategic_coverage'] = 'incomplete'
+                except ModelOutputLimit:
+                    # Keep the original checked findings, never unaudited extras.
+                    manifest['processing_status'] = 'supplement_token_limited'
+                    for key, row in extras.items():
+                        result['quarantined'].append({'id': key, 'phase': 'package_audit',
+                            'error': 'Supplement audit unfinished because of the token limit.', 'raw': row})
+                except (ProviderUnavailable, ValueError, KeyError, TypeError) as error:
+                    manifest['processing_status'] = 'supplement_incomplete'
+                    result['limitations'].append('Supplement incomplete: ' + str(error))
+                    for key, row in extras.items():
+                        result['quarantined'].append({'id': key, 'phase': 'package_audit',
+                            'error': 'Supplement audit incomplete: ' + str(error), 'raw': row})
             manifest.update(reviewed=True, strategic_coverage=audit['strategic_coverage'], coverage_reason=audit['coverage_reason'])
             if audit['strategic_coverage'] != 'complete':
                 result['limitations'].append(f'Partition {number} material coverage is {audit["strategic_coverage"]}: {audit["coverage_reason"]}')
+                block(f'partition-{number}', 'core scope and pursuit conditions', audit['coverage_reason'])
             for key, row in candidates.items():
                 check = audit['checks'][key]
+                row['capture_relevance'] = check['capture_relevance']
                 if check['verdict'] == 'supported':
                     result['findings'][key] = {**row, 'id': key, 'role': check['role'], 'audit': check}
                 else:
-                    result['quarantined'].append({'id': key, 'phase': 'package_audit', 'error': check['reason'], 'raw': row})
-                    result['limitations'].append(f'{key} excluded by fidelity review: {check["reason"]}')
-                    if check['role'] != 'readiness_reference':
+                    result['quarantined'].append({'id': key, 'phase': 'package_audit', 'error': check['reason'],
+                                                 'audit_role': check['role'], 'capture_relevance': check['capture_relevance'], 'raw': row})
+                    result['limitations'].append(f'{key} interpretation needs review: {check["reason"]}')
+                    if check['capture_relevance'] != 'readiness':
                         manifest['strategic_coverage'] = 'uncertain'
+                        block(key, row['decision']['topic'], 'Package fidelity review did not establish this finding: ' + check['reason'])
         result['strategic_coverage_complete'] = (not packet.get('technical_issues')
             and not packet.get('form_issues')
             and len(result['review_manifest']) == len(schedule)
             and all(r['reviewed'] and r['strategic_coverage'] == 'complete' for r in result['review_manifest'])
             and not any(q['phase'].startswith('F') for q in result['quarantined']))
-        if not any(f['role'] == 'workstream' for f in result['findings'].values()):
+        if not any(f['role'] == 'workstream' and capture_relevance(f) != 'readiness' for f in result['findings'].values()):
             raise ValueError('No independently supported core workstream; a strategic assessment is withheld.')
         result['findings'] = decisions.attach_document_context(result['findings'], package)
-        catalog = {key: row for key, row in result['findings'].items() if row['decision']['topic'] in decisions.RECONCILE_TOPICS}
-        if len(catalog) > 1:
+        catalog = {key: row for key, row in result['findings'].items()
+                   if row['decision']['topic'] in decisions.RECONCILE_TOPICS
+                   or row['role'] in {'decision_condition', 'conflict'}}
+        if catalog:
             result['reconciliation_candidates'] = deepcopy(catalog)
             # Withhold potentially conflicting decision terms until reconciliation
             # succeeds; provider or audit failures must not publish both as active.
             for key in catalog:
                 del result['findings'][key]
-            spec = reconciliation_schema(catalog)
-            # Source coverage was audited in bounded ranges. Reconcile their
-            # original quotations, not a second copy of the entire source packet.
-            reconciliation_payload = {'phase': 'reconciliation', 'findings': catalog}
-            raw, _ = invoke('preliminary-reconciliation', RECONCILE_PROMPT, reconciliation_payload, spec)
-            result['reconciliation_response'] = deepcopy(raw)
-            shape(raw, spec)
-            active, history = decisions.apply_reconciliation(catalog, raw['relations'])
-            audit_spec = audit_schema(catalog)
-            audited, _ = invoke('preliminary-reconciliation-audit', RECONCILE_AUDIT_PROMPT,
-                               {**reconciliation_payload, 'phase': 'reconciliation_audit', 'relations': raw['relations']}, audit_spec)
-            shape(audited, audit_spec)
-            result['reconciliation_audit'] = audited
-            if any(check['verdict'] != 'supported' for check in audited['checks'].values()):
-                result['quarantined'].append({'id': 'reconciliation', 'phase': 'reconciliation_audit',
-                                             'error': 'Global term reconciliation not supported.', 'raw': {'findings': catalog, **raw}})
-                raise ValueError('Decision terms withheld: global precedence/conflict reconciliation failed independent audit.')
+            raw = {'relations': {k: {'state': 'active', 'governing_ids': [],
+                                   'reason': 'Single package-audited decision term; no peer to reconcile.'} for k in catalog}}
+            audited = {'checks': {k: {'verdict': 'supported', 'reason': 'Single package-audited term.'} for k in catalog}}
+            try:
+                if len(catalog) > 1:
+                    spec = reconciliation_schema(catalog)
+                    reconciliation_payload = {'phase': 'reconciliation', 'findings': catalog}
+                    raw, _ = invoke('preliminary-reconciliation', RECONCILE_PROMPT, reconciliation_payload, spec)
+                    result['reconciliation_response'] = deepcopy(raw)
+                    # Keep the global view for the independent semantic audit, but
+                    # validate individual records so one bad link cannot veto it.
+                    relations = raw.get('relations', {})
+                    structural_errors = decisions.relation_errors(catalog, relations)
+                    audit_spec = audit_schema(catalog)
+                    audited, _ = invoke('preliminary-reconciliation-audit', RECONCILE_AUDIT_PROMPT,
+                                       {**reconciliation_payload, 'phase': 'reconciliation_audit',
+                                        'relations': relations, 'structural_errors': structural_errors}, audit_spec)
+                    result['reconciliation_audit'] = deepcopy(audited)
+                    audited = checked_audit(audited, audit_spec)
+                active, history, withheld = decisions.admit_reconciliation(catalog, raw.get('relations', {}), audited['checks'])
+            except (ValueError, KeyError, TypeError, ModelOutputLimit, ProviderUnavailable) as error:
+                # Invalid wire data is not approval. Preserve a limited assessment,
+                # without any of these unvalidated terms, rather than stop all work.
+                active, history, withheld = {}, {}, {k: str(error) for k in catalog}
+            for key, reason in withheld.items():
+                scope = ' / '.join(decisions.reconciliation_key(catalog[key]))
+                if capture_relevance(catalog[key]) != 'readiness':
+                    block(key, scope, reason)
+                result['quarantined'].append({'id': key, 'phase': 'reconciliation_audit',
+                                             'error': reason, 'raw': catalog[key]})
+            if withheld:
+                result['limitations'].append('Interpretations documented as unverified, not accepted governing terms: ' + ', '.join(withheld) + '.')
             result['findings'].update(active)
             result['superseded_findings'] = history
-        result['reconciliation_complete'] = True
+            result['reconciliation_complete'] = not withheld
+            for row in result['findings'].values():
+                if set(row.get('document_context_ids', [])) & set(withheld):
+                    row['document_context_unresolved'] = True
+        else:
+            result['reconciliation_complete'] = True
         result['findings'] = decisions.attach_document_context(result['findings'], package)
         unresolved = [k for k, row in result['findings'].items() if row.get('reconciliation', {}).get('state') == 'unresolved']
         if unresolved:
             result['limitations'].append('Unresolved precedence needs formal Q&A: ' + ', '.join(unresolved) + '.')
-        finding_schema = assessment_schema(result['findings'], vendor)
+            strategic_conflicts = [k for k in unresolved if capture_relevance(result['findings'][k]) != 'readiness']
+            if strategic_conflicts:
+                block('precedence', 'government terms', 'Conflicting approved terms need formal Q&A: ' + ', '.join(strategic_conflicts))
+        if not any(f['role'] == 'workstream' and capture_relevance(f) != 'readiness' for f in result['findings'].values()):
+            raise ValueError('No supported core workstream remains after subject-level review.')
+        result['review_items'] = review_items(result)
+        strategic_findings = {k: r for k, r in result['findings'].items() if capture_relevance(r) != 'readiness'}
+        finding_schema = assessment_schema(strategic_findings, vendor)
         assessment_payload = {'phase': 'assessment', 'opportunity': packet.get('opportunity', {}),
-            'findings': result['findings'], 'spans': vendor, 'limitations': result['limitations'],
+            'findings': strategic_findings, 'spans': vendor,
+            'review_items': [r for r in result['review_items'] if r['capture_relevance'] != 'readiness'],
+            'decision_blockers': result['decision_blockers'],
             'profile_present': result['profile_present'], 'strategic_coverage_complete': result['strategic_coverage_complete']}
         raw, wire = invoke('preliminary-assessment', ASSESS_PROMPT, assessment_payload, finding_schema)
         candidates = decode_rows(raw, wire, finding_schema, 'A')
         if candidates:
-            audit_spec = audit_schema(candidates)
-            audit, _ = invoke('preliminary-assessment-audit', ASSESS_AUDIT_PROMPT,
-                {**assessment_payload, 'phase': 'assessment_audit', 'candidates': candidates}, audit_spec)
-            shape(audit, audit_spec)
+            audit_spec = audit_schema(candidates, judgment=True)
+            try:
+                audit, _ = invoke('preliminary-assessment-audit', ASSESS_AUDIT_PROMPT,
+                    {**assessment_payload, 'phase': 'assessment_audit', 'candidates': candidates}, audit_spec)
+                audit = checked_audit(audit, audit_spec)
+            except (ModelOutputLimit, ProviderUnavailable, ValueError, KeyError, TypeError) as error:
+                for key, row in candidates.items():
+                    result['quarantined'].append({'id': key, 'phase': 'assessment_audit',
+                        'error': 'Judgment audit incomplete: ' + str(error), 'raw': row})
+                raise
             for key, row in candidates.items():
                 check = audit['checks'][key]
-                if check['verdict'] == 'supported':
+                if check['verdict'] == 'supported' and check['qualifier_fidelity'] == 'supported':
                     result['rows'].append({**row, 'id': key, 'audit': check})
                 else:
                     result['quarantined'].append({'id': key, 'phase': 'assessment_audit', 'error': check['reason'], 'raw': row})
-                    result['limitations'].append(f'{key} capture judgment excluded: {check["reason"]}')
+                    result['limitations'].append(f'{key} capture interpretation documented for review: {check["reason"]}')
         else:
             result['limitations'].append('No admissible strategy rows; only supported package findings are available.')
+    except ModelOutputLimit:
+        # Judgment/audit exhaustion still permits a report of audited package
+        # findings. It never permits unreviewed strategy or assumed completeness.
+        pass
     except (ValueError, KeyError, TypeError, ProviderUnavailable) as error:
         result['limitations'].append(str(error))
+        block('stage-incomplete', 'assessment execution', str(error))
 
-    # Publication and recommendation are independent. Unknown appendix detail is
-    # not evidence of vendor inability; failed graph rows never become READY.
-    core = any(f['role'] == 'workstream' for f in result['findings'].values())
-    if core:
+    result['review_items'] = review_items(result)
+    # Unverified interpretations are readable research, not approved evidence.
+    # Only audited judgments can recommend discovery; unresolved research is not
+    # an automatic downgrade or proof of vendor inability.
+    core = any(f['role'] == 'workstream' and capture_relevance(f) != 'readiness' for f in result['findings'].values())
+    if core or result['token_limit_omissions'] or result['review_items']:
         result['status'] = 'PARTIAL_PRELIMINARY_ASSESSMENT' if result['limitations'] else 'PRELIMINARY_ASSESSMENT'
         recommendations = [r for r in result['rows'] if r['kind'] == 'recommendation']
         alignments = [r for r in result['rows'] if r['kind'] == 'alignment']
         proposed = recommendations[0]['recommendation'] if len(recommendations) == 1 else 'investigate_further'
-        if (not result['strategic_coverage_complete'] or result['quarantined'] or not result['profile_present']
-                or not result['reconciliation_complete']
-                or any(f.get('reconciliation', {}).get('state') == 'unresolved' for f in result['findings'].values())
-                or not alignments or len(recommendations) != 1):
+        if not core or not result['profile_present'] or not alignments or len(recommendations) != 1:
             proposed = 'investigate_further'
         if proposed == 'pursue_discovery' and not any(r['alignment'] in {'plausible', 'specific_reported_work', 'partial'} for r in alignments):
             proposed = 'investigate_further'
@@ -585,9 +816,13 @@ def assess(packet, *, call=None, checkpoint_dir=None, max_chars=REVIEW_CHARS):
             proposed = 'investigate_further'
         result['recommendation'] = proposed
         if recommendations and proposed != recommendations[0]['recommendation']:
+            result['quarantined'].append({'id': recommendations[0]['id'], 'phase': 'recommendation_review',
+                'error': 'Recommendation lacks the audited scope/alignment evidence required for this conclusion.',
+                'raw': recommendations[0]})
             result['rows'] = [r for r in result['rows'] if r['kind'] != 'recommendation']
-            result['limitations'].append('The proposed recommendation was withheld because material evidence or coverage is incomplete.')
+            result['limitations'].append('The proposed recommendation is documented as unverified; audited evidence does not establish that conclusion.')
             result['status'] = 'PARTIAL_PRELIMINARY_ASSESSMENT'
+        result['review_items'] = review_items(result)
     return result
 
 

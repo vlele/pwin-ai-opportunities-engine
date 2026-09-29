@@ -154,7 +154,7 @@ class SavedContracts(unittest.TestCase):
             self.assertIn('competition method', prompt)
         self.assertIn('printed alternatives', p.PACKAGE_AUDIT_PROMPT)
 
-    def test_saved_narratives_reach_audit_and_render_only_if_supported(self):
+    def test_saved_narratives_are_accepted_or_explicitly_documented_by_verdict(self):
         for item in self.saved['rejected_findings']:
             for supported in (True, False):
                 with self.subTest(case=item['case'], id=item['id'], supported=supported):
@@ -182,7 +182,12 @@ class SavedContracts(unittest.TestCase):
                         result = p.assess(packet, call=selection_provider(model))
                     self.assertTrue(any(c['phase'] == 'package_audit' for c in calls))
                     self.assertEqual('F1-2' in result['findings'], supported)
-                    self.assertEqual(row['statement'] in render(result, packet), supported)
+                    self.assertIn(row['statement'], render(result, packet))
+                    notes = [r for r in result['review_items'] if r['id'] == 'F1-2']
+                    self.assertEqual(bool(notes), not supported)
+                    if notes:
+                        self.assertEqual(notes[0]['interpretation_status'], 'unverified')
+                        self.assertEqual(notes[0]['source_fidelity'], 'not_established')
                     self.assertTrue(any(c['phase'] == 'assessment' for c in calls), result['limitations'])
 
     def test_printed_alternatives_mislabelled_narrative_are_rejected_by_audit(self):
@@ -202,9 +207,10 @@ class SavedContracts(unittest.TestCase):
             return answer
         result = p.assess(packet, call=rejecting)
         self.assertFalse(any(r['statement'] == 'Open is selected.' for r in result['findings'].values()))
-        self.assertNotIn('Open is selected.', render(result, packet))
+        self.assertIn('Open is selected.', render(result, packet).split('## Package Status')[0])
+        self.assertNotIn('Open is selected.', render(result, packet).split('## Capture Considerations')[1].split('## Vendor Alignment')[0])
         self.assertTrue(result['quarantined'])
-        self.assertEqual(result['recommendation'], 'investigate_further')
+        self.assertEqual(result['recommendation'], 'pursue_discovery')
 
     def test_missing_unknown_or_misplaced_dimension_is_not_silently_defaulted(self):
         row = typed(finding('F1', 'An acquisition condition.', topic='acquisition'))
@@ -244,11 +250,14 @@ class SavedContracts(unittest.TestCase):
         call, _ = harness(rows, relation_fn=replace, fail_reconciliation=True)
         result = p.assess(packet, call=call)
         self.assertFalse(result['reconciliation_complete'])
-        self.assertFalse(result['rows'])
+        self.assertTrue(result['rows'])
+        self.assertEqual(result['recommendation'], 'pursue_discovery')
+        self.assertEqual(len(result['findings']), 1)
+        self.assertFalse(result['superseded_findings'])
         self.assertTrue(result['reconciliation_response'])
         self.assertEqual(result['reconciliation_candidates'].keys(), result['reconciliation_audit']['checks'].keys())
 
-    def test_self_link_failure_remains_visible_and_cannot_reach_assessment(self):
+    def test_self_link_failure_remains_visible_and_only_supported_scope_reaches_assessment(self):
         from scripts.tests.test_preliminary_decision_pipeline import fixture, harness, CORE
         packet, rows = fixture([CORE, ('40 days.', {'topic': 'offer_validity'}), ('90 days.', {'topic': 'offer_validity'})])
         def corrupt(findings, relations):
@@ -257,7 +266,11 @@ class SavedContracts(unittest.TestCase):
         call, seen = harness(rows, relation_fn=corrupt)
         result = p.assess(packet, call=call)
         self.assertFalse(result['reconciliation_complete'])
-        self.assertFalse(any(r['phase'] in {'assessment', 'reconciliation_audit'} for r in seen))
+        self.assertTrue(any(r['phase'] == 'reconciliation_audit' for r in seen))
+        assessment = next(r for r in seen if r['phase'] == 'assessment')
+        self.assertTrue(all(r['role'] == 'workstream' for r in assessment['findings'].values()))
+        self.assertEqual(result['recommendation'], 'pursue_discovery')
+        self.assertEqual(len(result['review_items']), 2)
         self.assertTrue(all(k in r['governing_ids'] for k, r in result['reconciliation_response']['relations'].items()))
 
 

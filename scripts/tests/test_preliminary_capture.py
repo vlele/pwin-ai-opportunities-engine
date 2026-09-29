@@ -55,6 +55,7 @@ def provider(*, reject_reference=False, reject_scope=False, bad_reference=False,
                 role = 'decision_condition' if 'authorization' in row['statement'] else row['kind']
                 reject = reject_scope if role == 'workstream' else reject_reference and role == 'readiness_reference'
                 checks[key] = {'verdict': 'unsupported' if reject else 'supported', 'role': role,
+                               'capture_relevance': 'readiness' if role == 'readiness_reference' else 'strategic',
                                'reason': 'Synthetic audit verdict.'}
             return {'checks': checks, 'strategic_coverage': 'incomplete' if incomplete else 'complete',
                     'coverage_reason': 'Synthetic material-scope review.',
@@ -73,6 +74,7 @@ def provider(*, reject_reference=False, reject_scope=False, bad_reference=False,
                  'reason': 'Eligibility and delivery proof need review.', 'recommendation': proposal}]}
         if v['phase'] == 'assessment_audit':
             return {'checks': {key: {'verdict': 'unsupported' if reject_strategy else 'supported',
+                                     'qualifier_fidelity': 'supported',
                                      'reason': 'Synthetic judgment audit.'} for key in v['candidates']}}
         raise AssertionError(v['phase'])
     return call, calls
@@ -101,14 +103,17 @@ class PreliminaryCaptureTests(unittest.TestCase):
         model, _ = provider(bad_reference=True, proposal='pursue_discovery')
         result = p.assess(packet(), call=model)
         self.assertTrue(result['findings'])
-        self.assertEqual(result['recommendation'], 'investigate_further')
+        self.assertEqual(result['recommendation'], 'pursue_discovery')
         self.assertTrue(result['quarantined'])
+        self.assertNotIn('F1-2', result['findings'])
+        self.assertEqual(result['review_items'][0]['evidence'], [])
 
-    def test_no_supported_core_scope_blocks_without_a_memo(self):
+    def test_no_supported_core_scope_yields_review_notes_without_fit(self):
         model, _ = provider(reject_scope=True)
         result = p.assess(packet(), call=model)
-        self.assertEqual(result['status'], 'TECHNICAL_BLOCKED')
+        self.assertEqual(result['status'], 'PARTIAL_PRELIMINARY_ASSESSMENT')
         self.assertEqual(result['rows'], [])
+        self.assertIn('Unverified interpretation', render(result, packet()))
 
     def test_missing_profile_is_unknown_not_automatic_decline(self):
         model, _ = provider(proposal='decline')
@@ -116,9 +121,12 @@ class PreliminaryCaptureTests(unittest.TestCase):
         self.assertEqual(result['recommendation'], 'investigate_further')
         self.assertTrue(result['findings'])
 
-    def test_incomplete_material_coverage_prevents_positive_recommendation(self):
+    def test_incomplete_material_coverage_is_visible_without_automatic_veto(self):
         model, _ = provider(incomplete=True, proposal='pursue_discovery')
-        self.assertEqual(p.assess(packet(), call=model)['recommendation'], 'investigate_further')
+        result = p.assess(packet(), call=model)
+        self.assertEqual(result['recommendation'], 'pursue_discovery')
+        self.assertFalse(result['strategic_coverage_complete'])
+        self.assertIn('Unresolved Review Items', render(result, packet()))
 
     def test_auditor_promotes_decision_changing_appendix_item(self):
         model, _ = provider()
@@ -135,15 +143,19 @@ class PreliminaryCaptureTests(unittest.TestCase):
         self.assertTrue(result['findings'])
         self.assertEqual(result['rows'], [])
         self.assertEqual(result['recommendation'], 'investigate_further')
-        self.assertNotIn('plausible capability overlap', render(result, packet()))
+        text = render(result, packet())
+        self.assertIn('plausible capability overlap', text.split('## Package Status')[0])
+        self.assertNotIn('plausible capability overlap', text.split('## Vendor Alignment and Experience')[1].split('## Capture Priorities')[0])
 
     def test_provider_failure_after_review_does_not_publish_unaudited_findings(self):
         model, _ = provider()
         def stop(**request):
             return None if request['user_payload']['phase'] == 'package_audit' else model(**request)
         result = p.assess(packet(), call=stop)
-        self.assertEqual(result['status'], 'TECHNICAL_BLOCKED')
+        self.assertEqual(result['status'], 'PARTIAL_PRELIMINARY_ASSESSMENT')
         self.assertEqual(result['findings'], {})
+        self.assertFalse(result['rows'])
+        self.assertEqual(len(result['review_items']), 3)
 
     def test_report_never_claims_external_research_or_complete_readiness(self):
         model, _ = provider()
@@ -152,12 +164,13 @@ class PreliminaryCaptureTests(unittest.TestCase):
         self.assertIn('No live market, incumbent, USAspending or GovTribe research', text)
         self.assertIn('self-reported', text)
 
-    def test_recommendation_labels_cannot_override_limited_coverage(self):
+    def test_conditional_discovery_cannot_hide_limited_coverage(self):
         model, _ = provider(proposal='pursue_discovery')
         value = packet()
         value['technical_issues'] = ['A scope-bearing page could not be read.']
         result = p.assess(value, call=model)
-        self.assertEqual(result['recommendation'], 'investigate_further')
+        self.assertEqual(result['recommendation'], 'pursue_discovery')
+        self.assertFalse(result['strategic_coverage_complete'])
         self.assertIn('A scope-bearing page could not be read.', render(result, value))
 
     def test_preserves_inputs_and_revalidates_own_stage_receipts(self):
@@ -179,8 +192,11 @@ class PreliminaryCaptureTests(unittest.TestCase):
                 raw['rows'][0]['evidence'] = [selection('V1:0')]
             return raw
         result = p.assess(packet(), call=private)
-        self.assertEqual(result['status'], 'TECHNICAL_BLOCKED')
+        self.assertEqual(result['status'], 'PARTIAL_PRELIMINARY_ASSESSMENT')
         self.assertTrue(result['quarantined'])
+        self.assertNotIn('F1-1', result['findings'])
+        self.assertEqual(result['review_items'][0]['evidence'], [])
+        self.assertFalse(result['rows'])
 
     def test_invalid_finding_identity_cannot_support_strategy(self):
         model, _ = provider()

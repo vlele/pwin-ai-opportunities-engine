@@ -1287,6 +1287,18 @@ def _create_with_transport_retries(create, **request):
     return create_with_retries(create, request=request, max_retries=TRANSPORT_MAX_RETRIES)
 
 
+class ModelOutputLimit(RuntimeError):
+    """A completed HTTP request did not produce a complete model answer."""
+
+    def __init__(self, *, usage=None):
+        super().__init__('Model generation reached a token limit (finish_reason=length); no complete answer was returned.')
+        usage = usage if isinstance(usage, dict) else {}
+        details = usage.get('completion_tokens_details') or {}
+        values = {**{k: usage.get(k) for k in ('prompt_tokens', 'completion_tokens', 'total_tokens')},
+                  'reasoning_tokens': details.get('reasoning_tokens') if isinstance(details, dict) else None}
+        self.usage = {k: v for k, v in values.items() if type(v) is int and v >= 0}
+
+
 def _call_openai_json(
     *,
     system_prompt: str,
@@ -1295,6 +1307,7 @@ def _call_openai_json(
     timeout_seconds: int,
     response_schema: dict[str, Any] | None = None,
     reasoning_effort: str | None = None,
+    raise_on_output_limit: bool = False,
 ) -> dict[str, Any] | None:
     client = _openai_client()
     if client is None:
@@ -1316,7 +1329,22 @@ def _call_openai_json(
     except Exception:
         return None
     try:
-        content = completion.choices[0].message.content or "{}"
+        choice = completion.choices[0]
+    except (AttributeError, IndexError, TypeError):
+        return None
+    if getattr(choice.message, 'refusal', None):
+        return None
+    if getattr(choice, 'finish_reason', None) == 'length':
+        if raise_on_output_limit:
+            usage = completion.usage.model_dump() if getattr(completion, 'usage', None) else {}
+            raise ModelOutputLimit(usage=usage)
+        return None
+    if getattr(choice, 'finish_reason', None) in {'content_filter', 'tool_calls', 'function_call'}:
+        return None
+    try:
+        content = choice.message.content
+        if not content:
+            return None
         if isinstance(content, list):
             content = "".join(str(part.get("text", "")) if isinstance(part, dict) else str(part) for part in content)
         return json.loads(str(content))

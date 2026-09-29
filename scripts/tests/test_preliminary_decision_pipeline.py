@@ -49,6 +49,7 @@ def harness(rows, *, relation_fn=None, fail_reconciliation=False, omit_topic=Non
             value = baseline(**request)
             for key, candidate in payload['candidates'].items():
                 value['checks'][key]['role'] = candidate['kind']
+                value['checks'][key]['capture_relevance'] = 'readiness' if candidate['decision']['topic'] == 'offer_validity' else 'strategic'
             for dimension in p.decisions.COVERAGE:
                 value['material_checks'][dimension] = {'status': 'covered', 'reason': 'Controlled source comparison.'}
             if omit_topic and not any(r['decision']['topic'] == omit_topic for r in payload['candidates'].values()):
@@ -74,7 +75,8 @@ def harness(rows, *, relation_fn=None, fail_reconciliation=False, omit_topic=Non
             if reject_strengthening:
                 for key, r in payload['candidates'].items():
                     if r['kind'] == 'decision_risk':
-                        answer['checks'][key] = {'verdict': 'unsupported', 'reason': 'Anticipated staffing was strengthened into a mandate.'}
+                        answer['checks'][key] = {'verdict': 'unsupported', 'qualifier_fidelity': 'unsupported',
+                                                 'reason': 'Anticipated staffing was strengthened into a mandate.'}
             return answer
         raise AssertionError(phase)
     return call, observed
@@ -104,19 +106,24 @@ class PipelineDecisions(unittest.TestCase):
         self.assertNotIn('Hold prices for 45 days.', [r['statement'] for r in synthesis['findings'].values()])
         self.assertEqual(len(result['superseded_findings']), 1)
         text = render(result, packet)
-        self.assertIn('120 days', text.split('## Appendix:')[0])
+        self.assertNotIn('120 days', text.split('## Appendix:')[0])
+        self.assertIn('120 days', text.split('## Appendix:')[1])
+        self.assertFalse(any(r['decision']['topic'] == 'offer_validity' for r in synthesis['findings'].values()))
         self.assertNotIn('Hold prices for 45 days.', text.split('## Appendix:')[0])
         self.assertIn('Hold prices for 45 days.', text.split('### Superseded Terms')[1])
 
-    def test_independent_reconciliation_failure_never_leaks_unreconciled_terms(self):
+    def test_independent_reconciliation_failure_documents_unreconciled_terms(self):
         packet, rows = fixture([CORE, ('Term A: 45 days.', {'topic': 'offer_validity'}), ('Term B: 120 days.', {'topic': 'offer_validity'})])
         call, observed = harness(rows, fail_reconciliation=True)
         result = p.assess(packet, call=call)
         self.assertFalse(result['reconciliation_complete'])
-        self.assertEqual(result['recommendation'], 'investigate_further')
-        self.assertFalse(any(v['phase'] == 'assessment' for v in observed))
-        self.assertNotIn('Term A:', render(result, packet))
-        self.assertNotIn('Term B:', render(result, packet))
+        self.assertEqual(result['recommendation'], 'pursue_discovery')
+        self.assertTrue(any(v['phase'] == 'assessment' for v in observed))
+        text = render(result, packet)
+        self.assertNotIn('Term A:', text.split('## Appendix:')[0])
+        self.assertIn('Term A:', text.split('### Readiness Interpretations to Verify')[1])
+        self.assertIn('Term B:', text.split('### Readiness Interpretations to Verify')[1])
+        self.assertEqual(len(result['findings']), 1)
         self.assertTrue(result['quarantined'])
 
     def test_provider_failure_at_reconciliation_preserves_candidates_but_not_active_terms(self):
@@ -127,18 +134,19 @@ class PipelineDecisions(unittest.TestCase):
         result = p.assess(packet, call=call)
         self.assertEqual(len(result['reconciliation_candidates']), 2)
         self.assertEqual(len(result['findings']), 1)
-        self.assertEqual(result['recommendation'], 'investigate_further')
+        self.assertEqual(result['recommendation'], 'pursue_discovery')
         self.assertFalse(result['reconciliation_complete'])
+        self.assertEqual(len(result['review_items']), 2)
 
-    def test_conflicting_terms_without_precedence_produce_one_fallback_formal_question(self):
-        packet, rows = fixture([CORE, ('Hold prices for 45 days.', {'topic': 'offer_validity', 'filename': 'z-latest.txt'}),
-                                ('Hold prices for 120 days.', {'topic': 'offer_validity', 'filename': 'a-old.txt'})])
+    def test_material_conflicting_terms_produce_one_fallback_formal_question(self):
+        packet, rows = fixture([CORE, ('Mobilize within 45 days.', {'topic': 'staffing', 'filename': 'z-latest.txt'}),
+                                ('Mobilize within 120 days.', {'topic': 'staffing', 'filename': 'a-old.txt'})])
         def unresolved(findings, output):
             for key in findings:
                 output[key] = {'state': 'unresolved', 'governing_ids': [k for k in findings if k != key], 'reason': 'No order of precedence.'}
         call, _ = harness(rows, relation_fn=unresolved)
         result = p.assess(packet, call=call)
-        self.assertEqual(result['recommendation'], 'investigate_further')
+        self.assertEqual(result['recommendation'], 'pursue_discovery')
         text = render(result, packet)
         qa = text.split('## Formal Q&A Candidates')[1].split('## Next Capture Actions')[0]
         self.assertEqual(qa.count('Which term governs'), 1)
@@ -153,7 +161,9 @@ class PipelineDecisions(unittest.TestCase):
         text = render(result, packet).split('## Appendix:')[0]
         self.assertIn('Draft scope', text)
         self.assertIn('Obligation: anticipated', text)
-        self.assertNotIn('government requires eight', text)
+        self.assertIn('government requires eight', text.split('## Package Status')[0])
+        self.assertNotIn('government requires eight', text.split('## Package Status')[1])
+        self.assertFalse(any(r['kind'] == 'decision_risk' for r in result['rows']))
         audit = next(v for v in observed if v['phase'] == 'assessment_audit')
         staff = next(r for r in audit['findings'].values() if r['decision']['topic'] == 'staffing')
         self.assertIn('draft', staff['effective_stages'])
@@ -186,7 +196,8 @@ class PipelineDecisions(unittest.TestCase):
         result = p.assess(packet, call=call)
         self.assertEqual(len([v for v in observed if v['phase'] == 'package_review']), 2)
         self.assertFalse(result['strategic_coverage_complete'])
-        self.assertEqual(result['recommendation'], 'investigate_further')
+        self.assertEqual(result['recommendation'], 'pursue_discovery')
+        self.assertTrue(result['decision_blockers'])
 
     def test_package_native_market_fact_is_not_denied_by_stock_disclaimer(self):
         packet, rows = fixture([CORE, ('The package identifies Example Supplier as incumbent.', {'topic': 'market', 'role': 'context', 'force': 'informational'})])
