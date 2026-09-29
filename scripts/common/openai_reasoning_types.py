@@ -39,6 +39,18 @@ class ReasoningEvidenceSpan(TypedDict):
     why_it_matters: str
 
 
+class CaptureEvidenceReferences(TypedDict, total=False):
+    requirement_ids: list[str]
+    vendor_evidence_ids: list[str]
+
+
+class CaptureReasoningRow(CaptureEvidenceReferences):
+    category: str
+    text: str
+    evidence_anchor: str
+    confidence: ConfidenceLevel
+
+
 class SemanticFacets(TypedDict):
     mission_domains: list[str]
     delivery_models: list[str]
@@ -152,3 +164,28 @@ class OpenAIReasoningResultEnvelope(TypedDict):
     latency_ms: int
     payload: dict[str, Any]
     error: str | None
+
+
+class CaptureFitExtension(TypedDict, total=False):
+    vendor_fit_assessment: dict[str, Any]
+
+
+class CaptureStrategyReasoningPayload(CaptureFitExtension):
+    schema_version: str
+    reasoning_source: str
+    model_name: str
+    central_pain_point: str
+    reasoning_summary: str
+    reasoned_pain_points: list[str]
+    reasoned_hot_buttons: list[str]
+    reasoned_win_themes: list[str]
+    reasoned_differentiators: list[str]
+    proof_requirements: list[str]
+    pricing_posture: list[str]
+    risk_implications: list[str]
+    evaluator_anxiety_rows: list[CaptureReasoningRow]
+    reasoned_pain_point_rows: list[CaptureReasoningRow]
+    reasoned_hot_button_rows: list[CaptureReasoningRow]
+    reasoned_win_theme_rows: list[CaptureReasoningRow]
+    reasoned_differentiator_rows: list[CaptureReasoningRow]
+    proof_requirement_rows: list[CaptureReasoningRow]

@@ -14,6 +14,17 @@ Use this skill when the user wants any of the following:
 
 Host-specific wrappers may expose slash commands or command packs, but the shared bundle is script-driven. If a helper or playbook is not present in the installed bundle, do not assume an alternate onboarding path exists.
 
+## Human-Reviewed Beta
+
+Preliminary capture is a human-reviewed beta, not a semantic-stable release or
+proposal-readiness certification. Preserve the rendered **Audited\*** qualification:
+automated approval does not guarantee complete meaning or attached evidence.
+Require human review of decision-changing interpretations; do not describe the
+asterisk as a correction of known errors. Read
+`SKILL_ROOT/docs/human-reviewed-beta.md` for known limitations and the review
+checklist. The beta acceptance applies to `--depth preliminary`, not validation
+of every discovery, enrichment, or strict `full_360` path.
+
 ## Skill Root
 
 Treat the directory containing this `SKILL.md` as `SKILL_ROOT`.
@@ -180,10 +191,10 @@ Use when the user says:
 - `capture deep dive on A1`
 - `run capture on these local files`
 
-Run:
+Prefer Preliminary Capture Assessment for early pursuit decisions:
 
 ```bash
-python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth full_360
+python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" --workspace "$PWD" --entry "A1" --depth preliminary
 ```
 
 Replace `A1` with the provided entry or identifier.
@@ -198,7 +209,7 @@ python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" \
   --title "Example opportunity" \
   --buyer "Department of Example" \
   --solicitation-number "ABC123" \
-  --depth full_360
+  --depth preliminary
 ```
 
 You can also combine tracked capture with extra local files:
@@ -208,10 +219,34 @@ python3 "<SKILL_ROOT>/scripts/capture/run_capture_research.py" \
   --workspace "$PWD" \
   --entry "A1" \
   --file "/absolute/path/to/amendment.pdf" \
-  --depth full_360
+  --depth preliminary
 ```
 
-The capture orchestrator is responsible for:
+Preliminary mode reads the supplied package in bounded source ranges, independently
+reviews findings, then assesses workstream-level fit and audits capture judgments.
+The main report carries material eligibility, access, staffing and pricing-structure
+considerations. Routine commercial terms such as price-hold periods belong in the
+Proposal Readiness Review appendix, not capability-fit penalties or pursuit gates.
+Report `PARTIAL_PRELIMINARY_ASSESSMENT` and its limitations plainly. Document unsupported
+interpretations as unverified, with the review reason and trustworthy quotations when
+available. They are not accepted facts or evidence for fit credit, eligibility or win
+claims. Isolate relationship failures to the affected entry and actual dependencies,
+not everything sharing a topic. Unknown materiality stays visible in the main report.
+Conditional discovery may continue on audited scope and alignment with visible caveats;
+an unresolved item does not automatically downgrade the recommendation. If reliable
+core scope is unavailable, a review-only report may document what remains unverified,
+but must not invent a vendor-fit or capture-strategy conclusion. A completely unreadable
+package still blocks. The appendix is a reference, not a compliance certificate.
+This mode does not perform public, USAspending or GovTribe enrichment. Do not imply
+that competitors, funding, current procurement status or eligibility were verified.
+Read `SKILL_ROOT/references/semantic-prompts/PRELIMINARY-PROMPT.md` when inspecting
+the new mode's exact model instructions or reviewing its materiality decisions.
+Read `SKILL_ROOT/references/preliminary-release-boundary.md` when changing preliminary
+publication gates or deciding whether a candidate is ready for live validation or main.
+
+Use explicit `--depth full_360` for the existing strict path and market enrichment.
+The CLI retains that legacy default for backward compatibility; always pass depth.
+The legacy capture orchestrator is responsible for:
 
 - entry resolution
 - request logging
@@ -225,12 +260,26 @@ The capture orchestrator is responsible for:
 After it runs:
 
 - inspect its JSON stdout
+- for `NEEDS_CLARIFICATION`, read `clarification_path` and ask the returned questions with their excerpts and decision impact (at most three per batch); do not guess answers
+- record the user's actual answers in the returned JSON template, using `answer_status: "unknown"` for unresolved answers, and rerun the same capture command with `--clarification-answers /path/to/answers.json`
+- for `NEEDS_FORMAL_QA`, request the controlling amendment/document or recommend formal Q&A; a user's preference cannot override official requirements
+- for `TECHNICAL_BLOCKED`, report the technical issue without turning it into a business questionnaire or continuing research
+- these checkpoint statuses have no current capture brief; never substitute an old memo
 - read the fresh `brief_path` it returns
 - answer from that brief
 - if it returns `PARTIAL_CAPTURE_RESEARCH`, say so plainly
 - if it returns `FAILED`, say so plainly and include the failure reason
 
 Do not satisfy capture research by reading an old brief directly unless the orchestrator itself points to that file as the current validated artifact for this run.
+
+In `full_360`, capture performs a source-linked understanding checkpoint before market research. Use
+`--preflight-only` to stop after that check.
+Use `--resume-understanding` with the unchanged local-file command to resume a
+failed checkpoint without refreshing attachments. A missing cache or changed
+semantic runtime fails closed; this is not a way to bypass a semantic rejection.
+Read `SKILL_ROOT/references/capture-clarification.md` when answering checkpoint questions,
+resuming capture, retrying technical failures, or reviewing the ten synthetic examples.
+Answers are scoped to the current package/profile and must not silently update the permanent profile.
 
 ## Script Stdout Contract
 
@@ -274,7 +323,7 @@ Critical source rules:
 - For `USAspending`, use documented JSON `POST` requests.
 - For `GovTribe MCP`, use `GOVTRIBE_MCP_API_KEY` directly through the shipped MCP client; do not require `OPENAI_API_KEY` for GovTribe.
 - For `GovTribe MCP` tool selection, query construction, and default returned fields, use `references/govtribe-mcp-tool-guide.md`.
-- Use `OPENAI_API_KEY` only for optional semantic reasoning in the shipped reasoning helpers.
+- Scan semantic reasoning remains optional. Capture requires a working `OPENAI_API_KEY` for its understanding checkpoint; an unavailable model stops capture as `TECHNICAL_BLOCKED`, not as an approved heuristic fallback.
 
 Not in the shipped source contract:
 
@@ -304,6 +353,7 @@ The workspace should maintain these shipped runtime artifacts:
 - `procurement/STARTER_PROFILE.md`
 - `procurement/feedback-events.jsonl`
 - `procurement/capture-requests.jsonl`
+- `procurement/capture-clarifications/<input-fingerprint>/`
 - `procurement/digest-entry-map/YYYY-MM-DD.json`
 - `procurement/opportunities/YYYY-MM-DD.json`
 - `procurement/explanations/YYYY-MM-DD.json`
@@ -412,6 +462,9 @@ Read these only when needed for the chosen mode:
 - Read `SKILL_ROOT/references/onboarding-playbook.md` when bootstrap or onboarding needs website-derived inference, NAICS confirmation handling, starter preference seeding, or first-conversation guidance.
 - Read `SKILL_ROOT/references/scan-playbook.md` when running or troubleshooting scan mode, digest-entry map generation, stable ID behavior, or no-opportunity scan output.
 - Read `SKILL_ROOT/references/capture-research-playbook.md` when running capture research, validating partial-vs-complete capture output, or deciding whether a brief is too shallow to present as final.
+- Read `SKILL_ROOT/references/evidence-selection-contract.md` when diagnosing source citations, cross-fragment evidence, page/character provenance, audit partitions/coverage manifests, or the distinction between evidence retrieval and semantic support.
+- Read `SKILL_ROOT/references/inventory-handoff-contract.md` when checking inline fact ownership, missing ledger facts, code-owned record links, or historical mapping replays.
+- Read `SKILL_ROOT/references/component-routing.md` when checking component categories, vendor-comparison filtering, missing-versus-unrelated decisions, or the proposal formatting and contract-terms checklists.
 - Read `SKILL_ROOT/references/usaspending-payloads.md` when implementing, debugging, or manually checking USAspending JSON POST requests.
 - Read `SKILL_ROOT/references/validation-rules.md` when checking digest or capture artifacts before answering the user.
 - Read `SKILL_ROOT/references/source-catalog.md` when source scope, trust tier, source enablement, or unsupported source questions arise.

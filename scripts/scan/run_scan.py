@@ -1027,13 +1027,43 @@ def _is_actionable_notice_type(record: dict[str, Any]) -> bool:
 
 def _has_strong_action_now_signal(fit_context: dict[str, Any]) -> bool:
     return bool(
-        fit_context.get("multiword_keyword_hits")
-        or int(fit_context.get("keyword_hit_count", 0) or 0) >= 2
-        or fit_context.get("naics_quality") == "confirmed"
-        or int(fit_context.get("buyer_match_points", 0) or 0) >= 10
-        or fit_context.get("fit_narrative_positive_hits")
-        or fit_context.get("learned_feedback_positive")
+        _has_explicit_positive_alignment(fit_context)
+        and (
+            fit_context.get("multiword_keyword_hits")
+            or int(fit_context.get("keyword_hit_count", 0) or 0) >= 2
+            or fit_context.get("naics_quality") == "confirmed"
+            or int(fit_context.get("buyer_match_points", 0) or 0) >= 10
+            or fit_context.get("learned_feedback_positive")
+        )
     )
+
+
+def _semantic_positive_alignment(semantic_fit: dict[str, Any] | None) -> bool:
+    if not isinstance(semantic_fit, dict):
+        return False
+    fit_assessment = str(semantic_fit.get("fit_assessment", "") or "").strip().lower()
+    reasons_for = semantic_fit.get("why_it_fits", [])
+    if not isinstance(reasons_for, list):
+        reasons_for = []
+    nonempty_reasons = [str(item).strip() for item in reasons_for if str(item).strip()]
+    mission_alignment = str(semantic_fit.get("mission_alignment", "") or "").strip().lower()
+    delivery_alignment = str(semantic_fit.get("delivery_alignment", "") or "").strip().lower()
+    if fit_assessment == "strong_fit" and nonempty_reasons:
+        return True
+    if fit_assessment != "adjacent_fit":
+        return False
+    if len(nonempty_reasons) < 2:
+        return False
+    return mission_alignment in {"high", "medium"} or delivery_alignment in {"high", "medium"}
+
+
+def _has_explicit_positive_alignment(fit_context: dict[str, Any]) -> bool:
+    if fit_context.get("fit_narrative_positive_hits"):
+        return True
+    semantic_fit = fit_context.get("semantic_fit")
+    if isinstance(semantic_fit, dict) and _semantic_positive_alignment(semantic_fit):
+        return True
+    return False
 
 
 def _notice_categories(record: dict[str, Any], hydrated_text: str | None) -> set[str]:
@@ -1136,7 +1166,10 @@ def _bucket_for_record(
     action_now_min = int(thresholds.get("action_now_min", 75) or 75)
     worth_a_look_min = int(thresholds.get("worth_a_look_min", 60) or 60)
     watchlist_min = int(thresholds.get("watchlist_min", thresholds.get("near_miss_min", 45)) or 45)
+    explicit_positive_alignment = _has_explicit_positive_alignment(fit_context)
     if bucket_override == "suppressed" or match_score < watchlist_min:
+        return "suppressed"
+    if not explicit_positive_alignment:
         return "suppressed"
     if bucket_override == "watchlist":
         return "watchlist"
@@ -1168,6 +1201,8 @@ def _urgent_bucket_hold_reason(
         return ""
     thresholds = preferences.get("confidence_thresholds", {}) if isinstance(preferences.get("confidence_thresholds"), dict) else {}
     action_now_min = int(thresholds.get("action_now_min", 75) or 75)
+    if not _has_explicit_positive_alignment(fit_context):
+        return "Urgent timing, but the fit narrative and semantic review did not produce explicit positive alignment."
     if fit_context.get("hard_eligibility_gate"):
         return "Urgent timing, but gating language keeps this out of Action Now."
     if not fit_context.get("is_actionable_notice_type"):

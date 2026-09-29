@@ -88,7 +88,7 @@
     },
     {
       "id": "watchlist_generic_support_only",
-      "expected_bucket": "watchlist",
+      "expected_bucket": "suppressed",
       "expected_timing_band": "active",
       "expected_guidance_bucket": null,
       "expected_low_signal_only": true,

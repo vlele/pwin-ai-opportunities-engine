@@ -107,11 +107,30 @@
       "strategic_reasoning": {
         "central_pain_point": "The buyer needs outage response and field coordination to work on day one.",
         "reasoning_summary": "Operational continuity depends on rapid site response, status reporting, and low-friction mobilization.",
+        "reasoned_hot_buttons": [
+          "Daily status reporting cadence during outages is a visible evaluator concern."
+        ],
         "reasoned_pain_points": [
           "Day-one site execution is a likely evaluator anxiety because runway outages cannot wait for a slow ramp."
         ],
         "reasoned_win_themes": [
           "Ready on day one where the work happens: make outage response, field communications, and daily status reporting the proof point."
+        ],
+        "reasoned_hot_button_rows": [
+          {
+            "category": "reporting_governance",
+            "text": "Daily status reporting cadence during outages is a visible evaluator concern.",
+            "evidence_anchor": "PWS 1.5 General Requirements: The contractor shall maintain field communications and provide daily status reports during outages and weather events.",
+            "confidence": "high"
+          }
+        ],
+        "reasoned_win_theme_rows": [
+          {
+            "category": "technical_execution",
+            "text": "Lead with an outage response plan for four-hour runway-lighting restoration and daily reporting cadence.",
+            "evidence_anchor": "PWS 1.3 Scope: The contractor shall inspect runway lighting circuits, isolate faults, and restore outages within four hours of notification.",
+            "confidence": "high"
+          }
         ],
         "reasoned_differentiators": [
           "A requirement-specific mobilization and outage-response plan tied to site access and reporting cadence."
@@ -203,11 +222,30 @@
       "strategic_reasoning": {
         "central_pain_point": "The buyer needs traceable cold-chain execution, not just warehouse labor.",
         "reasoning_summary": "Lot traceability, discrepancy response, and recurring inventory evidence appear to be evaluator concerns.",
+        "reasoned_hot_buttons": [
+          "One-business-day discrepancy resolution and lot-traceability evidence will drive evaluator confidence."
+        ],
         "reasoned_pain_points": [
           "Shipment discrepancy response and cold-chain evidence will matter because both are visible in the package."
         ],
         "reasoned_win_themes": [
           "Requirement throughput with documented discipline: show how the team will preserve lot traceability and move discrepancy reports without rework."
+        ],
+        "reasoned_hot_button_rows": [
+          {
+            "category": "quality_acceptance",
+            "text": "One-business-day discrepancy resolution and lot-traceability evidence will drive evaluator confidence.",
+            "evidence_anchor": "PWS 2.1 Scope: The contractor shall maintain temperature-controlled inventory, document lot traceability, and resolve shipment discrepancies within one business day.",
+            "confidence": "high"
+          }
+        ],
+        "reasoned_win_theme_rows": [
+          {
+            "category": "technical_execution",
+            "text": "Lead with a cold-chain control loop that preserves lot traceability and clears shipment discrepancies within one business day.",
+            "evidence_anchor": "PWS 2.1 Scope: The contractor shall maintain temperature-controlled inventory, document lot traceability, and resolve shipment discrepancies within one business day.",
+            "confidence": "high"
+          }
         ],
         "reasoned_differentiators": [
           "A discrepancy-resolution loop tied directly to inventory accuracy metrics and weekly reporting."
@@ -301,11 +339,30 @@
       "strategic_reasoning": {
         "central_pain_point": "The buyer needs reliable case-file throughput and fewer returned packages.",
         "reasoning_summary": "Appeal-ready documentation, turnaround time, and corrective-action logs look central to execution credibility.",
+        "reasoned_hot_buttons": [
+          "Returned-package pressure and turnaround discipline are visible evaluator concerns."
+        ],
         "reasoned_pain_points": [
           "Returned or incomplete appeal packages will create visible customer pain if quality control is weak."
         ],
         "reasoned_win_themes": [
           "QA/QC that protects mission outcomes and rework budgets: show how the team will reduce returned packages and protect turnaround times."
+        ],
+        "reasoned_hot_button_rows": [
+          {
+            "category": "quality_acceptance",
+            "text": "Returned packages and turnaround discipline are visible evaluator concerns.",
+            "evidence_anchor": "PWS 3.6 Quality Control: The contractor shall maintain corrective-action logs for incomplete appeal packages and report weekly turnaround metrics.",
+            "confidence": "high"
+          }
+        ],
+        "reasoned_win_theme_rows": [
+          {
+            "category": "quality_acceptance",
+            "text": "Lead with a corrective-action and turnaround-control loop that reduces returned packages.",
+            "evidence_anchor": "PWS 3.6 Quality Control: The contractor shall maintain corrective-action logs for incomplete appeal packages and report weekly turnaround metrics.",
+            "confidence": "high"
+          }
         ],
         "reasoned_differentiators": [
           "A weekly turnaround and corrective-action control loop tied directly to appeal-package quality."

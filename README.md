@@ -1,5 +1,23 @@
 # pWin.ai Opportunities for OpenClaw
 
+## Release Status: Human-Reviewed Beta
+
+The preliminary capture path on `main` is a **human-reviewed beta** for early
+capture research, not an autonomous bid/no-bid decision or proposal-readiness
+certification. Automated approvals are marked **Audited\***: their meaning or
+attached evidence may be incomplete. A capture manager must check decision-changing
+interpretations against the source documents before relying on them.
+
+Known issues include an overbroad conditional eligibility summary, an incomplete
+citation attachment, and occasional false-positive audit warnings. These are
+accepted beta limitations, not resolved defects or a passed semantic-stability
+gate. Read the [beta scope, known limitations, and review checklist](docs/human-reviewed-beta.md)
+before using the reports.
+
+For this beta, explicitly select `--depth preliminary` when invoking
+`scripts/capture/run_capture_research.py`. The CLI's legacy `full_360` default and
+market-research paths are not certified by this preliminary-mode evaluation.
+
 If you can clone a repo and paste one OpenClaw prompt, you can use this skill.
 
 `pwin-ai-opportunities` turns OpenClaw into a lightweight federal opportunity scanner and capture-research assistant. Install the skill, configure either SAM.gov or GovTribe access, point it at a company website, and OpenClaw will create and pre-populate the starter workspace files for you.
@@ -36,9 +54,22 @@ export GOVTRIBE_MCP_API_KEY="your-govtribe-mcp-key"
 
 SAM.gov remains the default official-source retrieval path. When the workspace enables `govtribe_mcp_commercial_intel`, GovTribe MCP can also participate in scan retrieval alongside SAM.gov and downstream enrichment. Set `provider_options.scan_retrieval_enabled` to `false` in `procurement/source-registry.json` only when you want GovTribe enrichment without GovTribe-sourced scan candidates.
 
-3. Keep your normal OpenClaw model credential in place.
+3. Configure the script-side model credential for capture.
 
-If OpenClaw already works on your machine, you usually do not need any new LLM setup for this skill.
+Capture now needs `OPENAI_API_KEY` in the shell that runs the Python scripts. Your
+OpenClaw chat credential is not automatically available to those scripts. Scan can
+still use its heuristic path without OpenAI reasoning.
+
+```bash
+export OPENAI_API_KEY="your-openai-key"
+```
+
+The capture understanding checkpoint defaults to `high` reasoning effort. This
+uses more tokens and may take longer than the model's default. Override it explicitly
+with `PWIN_UNDERSTANDING_REASONING_EFFORT`; select a checkpoint model with
+`PWIN_UNDERSTANDING_MODEL`. Other scan/capture model calls are unchanged. See the
+[semantic acceptance protocol](plans/semantic-classification-acceptance.md) for
+repeatable quality checks; higher effort alone is not a reliability guarantee.
 
 4. Open any workspace folder.
 
@@ -111,6 +142,7 @@ like A1
 
 ## Good to know
 
+- Capture checks package/profile understanding before market research. Material ambiguities pause for source-linked questions; model or parsing failures return `TECHNICAL_BLOCKED`. See [clarification and resume instructions](references/capture-clarification.md).
 - The current shipped scope is federal-only.
 - `SAM_API_KEY` enables official SAM.gov opportunity retrieval.
 - `GOVTRIBE_MCP_API_KEY` enables direct GovTribe enrichment and GovTribe-sourced scan retrieval when the workspace enables the GovTribe MCP source.

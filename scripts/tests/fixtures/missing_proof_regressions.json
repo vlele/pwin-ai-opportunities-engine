@@ -1,0 +1,41 @@
+{
+  "provenance": "20260926T235530Z-component-wire/audit/outcome-summary.json; component_decisions_for_review. Reasons and statuses copied verbatim; component descriptions below are synthetic test labels, not original solicitation quotations.",
+  "auditor_false_accept": "No travel work is reported by the vendor; the travel and pricing terms are not established by the generic IT capability statement, so unrelated/missing is justified.",
+  "cases": [
+    {
+      "stage": "component-C1.R6-K0",
+      "component": "Perform travel required for service delivery.",
+      "status": "unrelated",
+      "expected": "missing",
+      "reason": "The supplied claim is a general IT capabilities statement and does not affirmatively report any travel work, so it does not establish the Travel component."
+    },
+    {
+      "stage": "component-C1.R9-K3",
+      "component": "Provide relevant past performance for the prime and major subcontractors.",
+      "status": "unrelated",
+      "expected": "missing",
+      "reason": "The supplied claim is a general IT capability statement, not evidence about how prime contractors and major subcontractors are individually assessed or combined for a Past Performance rating."
+    },
+    {
+      "stage": "component-C1.R12-K0",
+      "component": "Submit Small Business Participation Commitment information.",
+      "status": "unrelated",
+      "expected": "missing",
+      "reason": "The supplied vendor evidence is only a generic IT capability statement and does not show any act of submitting Small Business Participation Commitment information."
+    },
+    {
+      "stage": "component-C1.R17-K1",
+      "component": "Submit full Social Security Numbers to the COR.",
+      "status": "unrelated",
+      "expected": "missing",
+      "reason": "The supplied vendor evidence is only a generic IT-capability statement about providing \u201cinnovative and effective Information Technology solutions,\u201d and it does not describe or support the specific operational task of submitting full Social Security Numbers to the COR."
+    },
+    {
+      "stage": "component-C1.R17-K3",
+      "component": "Indicate employees no longer supporting this contract in the Comment field.",
+      "status": "unrelated",
+      "expected": "missing",
+      "reason": "The supplied claim is only a generic IT-solutions capability statement; it does not describe the specific administrative action of indicating employees no longer supporting this contract in the Comment field."
+    }
+  ]
+}

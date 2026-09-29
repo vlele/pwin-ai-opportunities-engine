@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "note": "Synthetic exact-claim entailment controls. Expected outcomes never enter model requests. Package support does not authenticate documents.",
+  "cases": [
+    {
+      "id": "E01", "expected_pass": false, "purpose": "A repeated reference does not establish specific performed work.",
+      "documents": ["The work requires hands-on rotor blade inspection. A listed vendor reference says only 'rotor support'; actual tasks are not identified."],
+      "profile": "Our reference says rotor support. Our actual tasks are not described.",
+      "target": {"claim": {"subject": "performed_work", "statement": "The vendor performed hands-on rotor blade inspection.", "basis": "package_fact", "refs": ["D1:0"]},
+                 "comparison": {"required_statement": "Perform hands-on rotor blade inspection.", "refs": ["D1:0"], "rationale": "The vendor performed the same required task."},
+                 "relevance": "direct", "ambiguity": "clear", "verification_status": "source_supported", "verification_refs": ["D1:0"],
+                 "refs": ["D1:0", "V1:0"], "current_interpretation": "The package establishes the vendor's hands-on rotor inspection experience."}
+    },
+    {
+      "id": "E02", "expected_pass": false, "purpose": "A future contractual duty is not a past-performance statement.",
+      "documents": ["The contractor shall operate the industrial kilns and retain firing-temperature records throughout the contract."],
+      "profile": "No completed-project information has been supplied.",
+      "target": {"claim": {"subject": "performed_work", "statement": "The vendor has operated industrial kilns and retained firing-temperature records.", "basis": "package_fact", "refs": ["D1:0"]},
+                 "comparison": {"required_statement": "Operate industrial kilns and retain firing-temperature records.", "refs": ["D1:0"], "rationale": "The cited contractor duties establish previous delivery."},
+                 "relevance": "direct", "ambiguity": "clear", "verification_status": "source_supported", "verification_refs": ["D1:0"],
+                 "refs": ["D1:0", "V1:0"], "current_interpretation": "Prior performance of these tasks is established by the cited clause."}
+    },
+    {
+      "id": "E03", "expected_pass": false, "purpose": "An example is not an exclusive mandatory qualification.",
+      "documents": ["Relevant experience includes calibration of pressure instruments. Equivalent instrument maintenance experience may also be considered."],
+      "profile": "We maintain instruments.",
+      "target": {"text": "Only vendors with pressure-instrument calibration experience are eligible to compete.", "refs": ["D1:0"]}
+    },
+    {
+      "id": "E04", "expected_pass": true, "purpose": "A clear partial match remains an unverified claim, not a verification questionnaire.",
+      "documents": ["Install passenger displays, repair display software, and furnish spare parts."],
+      "profile": "Our own staff installed passenger displays and repaired their software. We have not supplied information about spare-parts delivery.",
+      "target": {"claim": {"subject": "performed_work", "statement": "The vendor's own staff installed passenger displays and repaired their software.", "basis": "reported", "refs": ["V1:0"]},
+                 "comparison": {"required_statement": "Install passenger displays and repair display software.", "refs": ["D1:0"], "rationale": "These two claimed tasks directly match; spare-parts experience is not established."},
+                 "relevance": "direct", "ambiguity": "clear", "verification_status": "unverified", "verification_refs": [],
+                 "refs": ["D1:0", "V1:0"], "current_interpretation": "There is a qualified direct match for installation and repair only, based on the vendor's unverified claim."}
+    },
+    {
+      "id": "E05", "expected_pass": true, "purpose": "Actual package evidence of performance can support a claim without authenticating it externally.",
+      "documents": ["Perform calibration of pressure instruments.", "Government completion memorandum, 2025-02-11, fictional contract SYNTH-005: Sample Metrology LLC performed the pressure-instrument calibration work under this contract. This records the performed work; it does not state a performance rating."],
+      "profile": "The offeror is Sample Metrology LLC.",
+      "target": {"claim": {"subject": "performed_work", "statement": "Sample Metrology LLC performed pressure-instrument calibration under SYNTH-005.", "basis": "package_fact", "refs": ["D2:0"]},
+                 "comparison": {"required_statement": "Perform calibration of pressure instruments.", "refs": ["D1:0"], "rationale": "The recorded task is the same required work; quality or a performance rating is not inferred."},
+                 "relevance": "direct", "ambiguity": "clear", "verification_status": "source_supported", "verification_refs": ["D2:0"],
+                 "refs": ["D1:0", "D2:0", "V1:0"], "current_interpretation": "The supplied completion memorandum supports performed calibration, but no performance rating or external authentication is claimed."}
+    },
+    {
+      "id": "E06", "expected_pass": true, "purpose": "Clear unrelated experience is a finding, not missing information to rescue.",
+      "documents": ["Operate a drinking-water analytical laboratory and perform chemical assays."],
+      "profile": "We deliver consumer wedding photography only. We do not operate laboratories or perform chemical assays.",
+      "target": {"claim": {"subject": "performed_work", "statement": "The vendor delivers consumer wedding photography only and does not perform laboratory work.", "basis": "reported", "refs": ["V1:0"]},
+                 "comparison": {"required_statement": "Operate a drinking-water analytical laboratory and perform chemical assays.", "refs": ["D1:0"], "rationale": "The explicitly reported tasks are unrelated to the required analytical laboratory delivery."},
+                 "relevance": "unrelated", "ambiguity": "clear", "verification_status": "unverified", "verification_refs": [],
+                 "refs": ["D1:0", "V1:0"], "current_interpretation": "The supplied profile is a clear mismatch. No clarification or replacement-project question is needed."}
+    },
+    {
+      "id": "E07", "expected_pass": false, "purpose": "Partial support cannot substantiate additional tasks inside a composite claim.",
+      "documents": ["Deliver billing software and migrate the associated database."],
+      "profile": "Our employees delivered billing application software. The client performed the database migration; we did not perform it.",
+      "target": {"claim": {"subject": "performed_work", "statement": "The vendor delivered billing software and migrated the associated database.", "basis": "reported", "refs": ["V1:0"]},
+                 "comparison": {"required_statement": "Deliver billing software and migrate the associated database.", "refs": ["D1:0"], "rationale": "Both required tasks are covered by the vendor's own performed work."},
+                 "relevance": "direct", "ambiguity": "clear", "verification_status": "unverified", "verification_refs": [],
+                 "refs": ["D1:0", "V1:0"], "current_interpretation": "Both delivery and migration are directly relevant vendor-performed tasks."}
+    },
+    {
+      "id": "E08", "expected_pass": true, "purpose": "An absent performance claim is an honest unknown, not unrelated experience.",
+      "documents": ["Provide live sign-language interpretation at public meetings."],
+      "profile": "No vendor profile or prior-work description has been supplied.",
+      "target": {"claim": {"subject": "performed_work", "statement": "", "basis": "not_supplied", "refs": []},
+                 "comparison": {"required_statement": "Provide live sign-language interpretation at public meetings.", "refs": ["D1:0"], "rationale": "There is no supplied performed-work claim to compare."},
+                 "relevance": "unknown", "ambiguity": "missing", "verification_status": "unknown", "verification_refs": [],
+                 "refs": ["D1:0", "V1:0"], "current_interpretation": "Vendor experience is not supplied; fit is unknown, not a demonstrated mismatch."}
+    }
+  ]
+}

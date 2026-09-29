@@ -9,6 +9,7 @@ This note records the cross-walk for `pwin-ai-opportunities` against the Agent S
 - `name` is `pwin-ai-opportunities`, uses lowercase letters and hyphens, and is under the 64-character local validator limit.
 - `description` is under the 1024-character spec limit, avoids angle brackets, and names the intended trigger surface: bootstrap/onboarding, federal scans, stable-ID digest lookup, feedback logging, and capture research.
 - The install directory expectation remains `pwin-ai-opportunities`, matching the skill name. The GitHub repository checkout is named `pwin-ai-opportunities-engine`; that mismatch is acceptable for source development, but installed skill folders should use `pwin-ai-opportunities`.
+- The local development worktree `pwin-blank-page-coverage` is another source checkout, not the install directory. Its different folder name does not change the required installed skill name.
 - Optional frontmatter fields are intentionally not added:
   - `license`: repository licensing can stay outside `SKILL.md` unless a client requires inline license metadata.
   - `compatibility`: compatibility details differ across OpenClaw, Codex, and Claude Code and are documented in host install docs instead.

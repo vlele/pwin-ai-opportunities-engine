@@ -1,0 +1,681 @@
+{
+  "version": 1,
+  "note": "Synthetic paired audit controls. Expected outcomes never enter requests. These are audit targets, not positive training examples.",
+  "cases": [
+    {
+      "id": "F01",
+      "expected_pass": true,
+      "purpose": "An unanswered attribution question is justified without proving its hypothetical answers.",
+      "documents": [
+        "Operate isotope measurement instruments. Offerors may reference work performed by themselves or an identified teammate; identify the actual performer and proposed workshare."
+      ],
+      "profile": "The profile heading names Example North LLC. A project reference names Example Holdings LLC as performer. No relationship between them or actual project tasks are described.",
+      "target": {
+        "claim": {
+          "subject": "identity",
+          "statement": "The profile names Example North LLC and the reference names Example Holdings LLC as performer.",
+          "basis": "reported",
+          "refs": [
+            "V1:0"
+          ]
+        },
+        "comparison": {
+          "required_statement": "Operate isotope measurement instruments. Offerors may reference work performed by themselves or an identified teammate; identify the actual performer and proposed workshare.",
+          "refs": [
+            "D1:0"
+          ],
+          "rationale": "The performer is named, but the relationship and actual tasks are not established."
+        },
+        "task_alignment": {
+          "relationship": "not_applicable",
+          "coverage": "not_applicable",
+          "shared_work": "",
+          "transfer_basis": ""
+        },
+        "clarification": {
+          "basis": "attribution",
+          "unresolved": "Which entity performed the reference and what role, if any, did the offeror have?",
+          "refs": [
+            "V1:0",
+            "D1:0"
+          ],
+          "alternatives": [
+            {
+              "answer": "The offeror itself performed the reference",
+              "decision_effect": "Assess its actual reported tasks once described, without inferring instrument work."
+            },
+            {
+              "answer": "Only the separately named entity performed it",
+              "decision_effect": "Do not attribute its work to the offeror without an identified permitted teammate and role."
+            }
+          ]
+        },
+        "relevance": "not_applicable",
+        "ambiguity": "ambiguous",
+        "verification_status": "unverified",
+        "verification_refs": [],
+        "refs": [
+          "D1:0",
+          "V1:0"
+        ],
+        "current_interpretation": "The performer is named, but the relationship and actual tasks are not established.",
+        "kind": "company_identity",
+        "owner": "user",
+        "action": "ask",
+        "question": "Which named entity performed the reference and what was the offeror's role?"
+      }
+    },
+    {
+      "id": "F02",
+      "expected_pass": false,
+      "purpose": "A justified question cannot rescue invented entity equivalence or tasks.",
+      "documents": [
+        "Operate isotope measurement instruments. Offerors may reference work performed by themselves or an identified teammate; identify the actual performer and proposed workshare."
+      ],
+      "profile": "The profile heading names Example North LLC. A project reference names Example Holdings LLC as performer. No relationship between them or actual project tasks are described.",
+      "target": {
+        "claim": {
+          "subject": "identity",
+          "statement": "Example North LLC and Example Holdings LLC are the same legal entity and performed instrument operations.",
+          "basis": "reported",
+          "refs": [
+            "V1:0"
+          ]
+        },
+        "comparison": {
+          "required_statement": "Operate isotope measurement instruments. Offerors may reference work performed by themselves or an identified teammate; identify the actual performer and proposed workshare.",
+          "refs": [
+            "D1:0"
+          ],
+          "rationale": "The performer is named, but the relationship and actual tasks are not established."
+        },
+        "task_alignment": {
+          "relationship": "not_applicable",
+          "coverage": "not_applicable",
+          "shared_work": "",
+          "transfer_basis": ""
+        },
+        "clarification": {
+          "basis": "attribution",
+          "unresolved": "Which entity performed the reference and what role, if any, did the offeror have?",
+          "refs": [
+            "V1:0",
+            "D1:0"
+          ],
+          "alternatives": [
+            {
+              "answer": "The offeror itself performed the reference",
+              "decision_effect": "Assess its actual reported tasks once described, without inferring instrument work."
+            },
+            {
+              "answer": "Only the separately named entity performed it",
+              "decision_effect": "Do not attribute its work to the offeror without an identified permitted teammate and role."
+            }
+          ]
+        },
+        "relevance": "not_applicable",
+        "ambiguity": "ambiguous",
+        "verification_status": "unverified",
+        "verification_refs": [],
+        "refs": [
+          "D1:0",
+          "V1:0"
+        ],
+        "current_interpretation": "The performer is named, but the relationship and actual tasks are not established.",
+        "kind": "company_identity",
+        "owner": "user",
+        "action": "ask",
+        "question": "Which named entity performed the reference and what was the offeror's role?"
+      }
+    },
+    {
+      "id": "F03",
+      "expected_pass": true,
+      "purpose": "Negated uncertainty is not a positive assertion of workshare.",
+      "documents": [
+        "Operate isotope measurement instruments. Offerors may reference work performed by themselves or an identified teammate; identify the actual performer and proposed workshare."
+      ],
+      "profile": "The profile heading names Example North LLC. A project reference names Example Holdings LLC as performer. No relationship between them or actual project tasks are described.",
+      "target": {
+        "text": "The supplied text names two different entities but does not establish whether they are related or have an authorized workshare arrangement. Actual project tasks are not described.",
+        "refs": [
+          "V1:0"
+        ]
+      }
+    },
+    {
+      "id": "F04",
+      "expected_pass": true,
+      "purpose": "Direct task similarity with partial scope coverage.",
+      "documents": [
+        "Install passenger displays, repair their software and furnish spare parts."
+      ],
+      "profile": "Our own staff installed passenger displays and repaired their software. Spare-parts experience is not supplied.",
+      "target": {
+        "claim": {
+          "subject": "performed_work",
+          "statement": "Our own staff installed passenger displays and repaired their software.",
+          "basis": "reported",
+          "refs": [
+            "V1:0"
+          ]
+        },
+        "comparison": {
+          "required_statement": "Install passenger displays and repair their software.",
+          "refs": [
+            "D1:0"
+          ],
+          "rationale": "The two described tasks directly match; spare-parts coverage remains unknown."
+        },
+        "task_alignment": {
+          "relationship": "same_task",
+          "coverage": "partial",
+          "shared_work": "Installation of passenger displays and repair of their software.",
+          "transfer_basis": ""
+        },
+        "clarification": {
+          "basis": "settled",
+          "unresolved": "",
+          "refs": [],
+          "alternatives": []
+        },
+        "relevance": "direct",
+        "ambiguity": "clear",
+        "verification_status": "unverified",
+        "verification_refs": [],
+        "refs": [
+          "D1:0",
+          "V1:0"
+        ],
+        "current_interpretation": "The two described tasks directly match; spare-parts coverage remains unknown."
+      }
+    },
+    {
+      "id": "F05",
+      "expected_pass": false,
+      "purpose": "An uncovered task is not a different-task transfer mechanism.",
+      "documents": [
+        "Install passenger displays, repair their software and furnish spare parts."
+      ],
+      "profile": "Our own staff installed passenger displays and repaired their software. Spare-parts experience is not supplied.",
+      "target": {
+        "claim": {
+          "subject": "performed_work",
+          "statement": "Our own staff installed passenger displays and repaired their software.",
+          "basis": "reported",
+          "refs": [
+            "V1:0"
+          ]
+        },
+        "comparison": {
+          "required_statement": "Install passenger displays and repair their software.",
+          "refs": [
+            "D1:0"
+          ],
+          "rationale": "The missing spare-parts history makes installation and repair merely transferable rather than direct."
+        },
+        "task_alignment": {
+          "relationship": "applicable_different_task",
+          "coverage": "partial",
+          "shared_work": "Installation of passenger displays and repair of their software.",
+          "transfer_basis": "Spare-parts experience is missing."
+        },
+        "clarification": {
+          "basis": "settled",
+          "unresolved": "",
+          "refs": [],
+          "alternatives": []
+        },
+        "relevance": "transferable",
+        "ambiguity": "clear",
+        "verification_status": "unverified",
+        "verification_refs": [],
+        "refs": [
+          "D1:0",
+          "V1:0"
+        ],
+        "current_interpretation": "The missing spare-parts history makes installation and repair merely transferable rather than direct."
+      }
+    },
+    {
+      "id": "F06",
+      "expected_pass": true,
+      "purpose": "Generic existing reference needs a task question, not transferable credit.",
+      "documents": [
+        "Calibrate analytical instruments against reference standards and document measurement uncertainty."
+      ],
+      "profile": "We provided technical equipment support. No tasks or workshare are described.",
+      "target": {
+        "claim": {
+          "subject": "performed_work",
+          "statement": "We provided technical equipment support.",
+          "basis": "reported",
+          "refs": [
+            "V1:0"
+          ]
+        },
+        "comparison": {
+          "required_statement": "Calibrate analytical instruments against reference standards and document measurement uncertainty.",
+          "refs": [
+            "D1:0"
+          ],
+          "rationale": "Actual tasks are unspecified, so calibration experience cannot be inferred."
+        },
+        "task_alignment": {
+          "relationship": "unknown",
+          "coverage": "unknown",
+          "shared_work": "",
+          "transfer_basis": ""
+        },
+        "clarification": {
+          "basis": "meaning",
+          "unresolved": "Whether this reference involved actual calibration or only assisting another performer.",
+          "refs": [
+            "V1:0",
+            "D1:0"
+          ],
+          "alternatives": [
+            {
+              "answer": "Our staff performed calibration against standards",
+              "decision_effect": "Assess that specifically reported calibration for task relevance."
+            },
+            {
+              "answer": "Our staff only scheduled visits and moved equipment",
+              "decision_effect": "Do not count that reference as performed calibration."
+            }
+          ]
+        },
+        "relevance": "unknown",
+        "ambiguity": "missing",
+        "verification_status": "unverified",
+        "verification_refs": [],
+        "refs": [
+          "D1:0",
+          "V1:0"
+        ],
+        "current_interpretation": "Actual tasks are unspecified, so calibration experience cannot be inferred.",
+        "owner": "user",
+        "action": "ask",
+        "question": "What did your staff actually do under the technical equipment support reference?"
+      }
+    },
+    {
+      "id": "F07",
+      "expected_pass": false,
+      "purpose": "Shared broad vocabulary cannot earn positive transfer credit.",
+      "documents": [
+        "Calibrate analytical instruments against reference standards and document measurement uncertainty."
+      ],
+      "profile": "We provided technical equipment support. No tasks or workshare are described.",
+      "target": {
+        "claim": {
+          "subject": "performed_work",
+          "statement": "We provided technical equipment support.",
+          "basis": "reported",
+          "refs": [
+            "V1:0"
+          ]
+        },
+        "comparison": {
+          "required_statement": "Calibrate analytical instruments against reference standards and document measurement uncertainty.",
+          "refs": [
+            "D1:0"
+          ],
+          "rationale": "Actual tasks are unspecified, so calibration experience cannot be inferred."
+        },
+        "task_alignment": {
+          "relationship": "applicable_different_task",
+          "coverage": "partial",
+          "shared_work": "Technical equipment work.",
+          "transfer_basis": "Both involve technical equipment."
+        },
+        "clarification": {
+          "basis": "meaning",
+          "unresolved": "Whether this reference involved actual calibration or only assisting another performer.",
+          "refs": [
+            "V1:0",
+            "D1:0"
+          ],
+          "alternatives": [
+            {
+              "answer": "Our staff performed calibration against standards",
+              "decision_effect": "Assess that specifically reported calibration for task relevance."
+            },
+            {
+              "answer": "Our staff only scheduled visits and moved equipment",
+              "decision_effect": "Do not count that reference as performed calibration."
+            }
+          ]
+        },
+        "relevance": "transferable",
+        "ambiguity": "missing",
+        "verification_status": "unverified",
+        "verification_refs": [],
+        "refs": [
+          "D1:0",
+          "V1:0"
+        ],
+        "current_interpretation": "The broad equipment-support claim provides transferable calibration experience.",
+        "owner": "user",
+        "action": "ask",
+        "question": "What did your staff actually do under the technical equipment support reference?"
+      }
+    },
+    {
+      "id": "F08",
+      "expected_pass": true,
+      "purpose": "Concrete applicable different work can be transferable without claiming direct target delivery.",
+      "documents": [
+        "Migrate water-meter readings from fixed-width records into a new database, preserving record counts and reconciling totals. Water-meter domain experience is not a mandatory condition."
+      ],
+      "profile": "Our staff reconciled physical warehouse inventory counts against shipping manifests using item identifiers and exception reports. We have not performed database migrations.",
+      "target": {
+        "claim": {
+          "subject": "performed_work",
+          "statement": "Our staff reconciled physical warehouse inventory counts against shipping manifests using item identifiers and exception reports.",
+          "basis": "reported",
+          "refs": [
+            "V1:0"
+          ]
+        },
+        "comparison": {
+          "required_statement": "Migrate water-meter records with count and total reconciliation.",
+          "refs": [
+            "D1:0"
+          ],
+          "rationale": "Inventory reconciliation is different work from database migration, but matching identifiers, comparing counts and reporting discrepancies is an applicable control procedure. Migration delivery remains unproven."
+        },
+        "task_alignment": {
+          "relationship": "applicable_different_task",
+          "coverage": "partial",
+          "shared_work": "Identifier matching, count comparison and exception reporting as a control procedure.",
+          "transfer_basis": "Reconciliation procedures used on physical inventories can inform discrepancy controls in data migration; this does not establish migration engineering experience."
+        },
+        "clarification": {
+          "basis": "settled",
+          "unresolved": "",
+          "refs": [],
+          "alternatives": []
+        },
+        "relevance": "transferable",
+        "ambiguity": "clear",
+        "verification_status": "unverified",
+        "verification_refs": [],
+        "refs": [
+          "D1:0",
+          "V1:0"
+        ],
+        "current_interpretation": "Inventory reconciliation is different work from database migration, but matching identifiers, comparing counts and reporting discrepancies is an applicable control procedure. Migration delivery remains unproven."
+      }
+    },
+    {
+      "id": "F09",
+      "expected_pass": false,
+      "purpose": "A true eligibility criterion is not vendor-performed work.",
+      "documents": [
+        "Perform instrument calibration. Relevant experience includes documented temperature and pressure calibration by the performing entity."
+      ],
+      "profile": "We service mechanical equipment. Project descriptions and calibration history are not supplied.",
+      "target": {
+        "claim": {
+          "subject": "performed_work",
+          "statement": "Relevant experience includes documented temperature and pressure calibration by the performing entity.",
+          "basis": "package_fact",
+          "refs": [
+            "D1:0"
+          ]
+        },
+        "comparison": {
+          "required_statement": "Perform instrument calibration.",
+          "refs": [
+            "D1:0"
+          ],
+          "rationale": "The stated prior calibration criterion demonstrates direct task fit."
+        },
+        "task_alignment": {
+          "relationship": "same_task",
+          "coverage": "partial",
+          "shared_work": "Temperature and pressure calibration.",
+          "transfer_basis": ""
+        },
+        "clarification": {
+          "basis": "settled",
+          "unresolved": "",
+          "refs": [],
+          "alternatives": []
+        },
+        "relevance": "direct",
+        "ambiguity": "clear",
+        "verification_status": "source_supported",
+        "verification_refs": [
+          "D1:0"
+        ],
+        "refs": [
+          "D1:0",
+          "V1:0"
+        ],
+        "current_interpretation": "The package supports the vendor's direct calibration experience."
+      }
+    },
+    {
+      "id": "F10",
+      "expected_pass": false,
+      "purpose": "An identity answer cannot establish unprovided project tasks.",
+      "documents": [
+        "Operate isotope measurement instruments. Offerors may reference work performed by themselves or an identified teammate; identify the actual performer and proposed workshare."
+      ],
+      "profile": "The profile heading names Example North LLC. A project reference names Example Holdings LLC as performer. No relationship between them or actual project tasks are described.",
+      "target": {
+        "claim": {
+          "subject": "identity",
+          "statement": "The profile names Example North LLC and the reference names Example Holdings LLC as performer.",
+          "basis": "reported",
+          "refs": [
+            "V1:0"
+          ]
+        },
+        "comparison": {
+          "required_statement": "Operate isotope measurement instruments. Offerors may reference work performed by themselves or an identified teammate; identify the actual performer and proposed workshare.",
+          "refs": [
+            "D1:0"
+          ],
+          "rationale": "The performer is named, but the relationship and actual tasks are not established."
+        },
+        "task_alignment": {
+          "relationship": "not_applicable",
+          "coverage": "not_applicable",
+          "shared_work": "",
+          "transfer_basis": ""
+        },
+        "clarification": {
+          "basis": "attribution",
+          "unresolved": "Which entity performed the reference and what role, if any, did the offeror have?",
+          "refs": [
+            "V1:0",
+            "D1:0"
+          ],
+          "alternatives": [
+            {
+              "answer": "The offeror itself performed the reference",
+              "decision_effect": "Count the project as the offeror's own isotope-instrument operations experience."
+            },
+            {
+              "answer": "Only the separately named entity performed it",
+              "decision_effect": "Do not attribute its work to the offeror without an identified permitted teammate and role."
+            }
+          ]
+        },
+        "relevance": "not_applicable",
+        "ambiguity": "ambiguous",
+        "verification_status": "unverified",
+        "verification_refs": [],
+        "refs": [
+          "D1:0",
+          "V1:0"
+        ],
+        "current_interpretation": "The performer is named, but the relationship and actual tasks are not established.",
+        "kind": "company_identity",
+        "owner": "user",
+        "action": "ask",
+        "question": "Which entity performed the referenced isotope-instrument operations?"
+      }
+    },
+    {
+      "id": "F11",
+      "expected_pass": true,
+      "purpose": "A generic capability with no project history can remain unknown without a questionnaire.",
+      "documents": [
+        "Calibrate analytical instruments against reference standards and document measurement uncertainty."
+      ],
+      "profile": "We service technical equipment. No project descriptions or calibration history have been supplied.",
+      "target": {
+        "claim": {
+          "subject": "performed_work",
+          "statement": "We service technical equipment.",
+          "basis": "reported",
+          "refs": [
+            "V1:0"
+          ]
+        },
+        "comparison": {
+          "required_statement": "Calibrate analytical instruments against reference standards and document measurement uncertainty.",
+          "refs": [
+            "D1:0"
+          ],
+          "rationale": "Actual tasks are unspecified, so calibration experience cannot be inferred."
+        },
+        "task_alignment": {
+          "relationship": "unknown",
+          "coverage": "unknown",
+          "shared_work": "",
+          "transfer_basis": ""
+        },
+        "clarification": {
+          "basis": "additional_detail",
+          "unresolved": "No prior project tasks or calibration history have been supplied.",
+          "refs": [
+            "V1:0"
+          ],
+          "alternatives": []
+        },
+        "relevance": "unknown",
+        "ambiguity": "clear",
+        "verification_status": "unverified",
+        "verification_refs": [],
+        "refs": [
+          "D1:0",
+          "V1:0"
+        ],
+        "current_interpretation": "Actual tasks are unspecified, so calibration experience cannot be inferred.",
+        "owner": "user",
+        "action": "record_gap",
+        "question": ""
+      }
+    },
+    {
+      "id": "F12",
+      "expected_pass": true,
+      "purpose": "A separately represented missing-work finding must not demand a duplicate attribution question.",
+      "documents": [
+        "Operate isotope measurement instruments. Offerors may reference work performed by themselves or an identified teammate; identify the actual performer and proposed workshare."
+      ],
+      "profile": "The profile heading names Example North LLC. A project reference names Example Holdings LLC as performer. No relationship between them or actual project tasks are described.",
+      "target": {
+        "claim": {
+          "subject": "performed_work",
+          "statement": "",
+          "basis": "not_supplied",
+          "refs": []
+        },
+        "comparison": {
+          "required_statement": "Operate isotope measurement instruments. Offerors may reference work performed by themselves or an identified teammate; identify the actual performer and proposed workshare.",
+          "refs": [
+            "D1:0"
+          ],
+          "rationale": "The performer is named, but the relationship and actual tasks are not established."
+        },
+        "task_alignment": {
+          "relationship": "unknown",
+          "coverage": "unknown",
+          "shared_work": "",
+          "transfer_basis": ""
+        },
+        "clarification": {
+          "basis": "no_claim",
+          "unresolved": "",
+          "refs": [],
+          "alternatives": []
+        },
+        "relevance": "unknown",
+        "ambiguity": "missing",
+        "verification_status": "unknown",
+        "verification_refs": [],
+        "refs": [
+          "D1:0",
+          "V1:0"
+        ],
+        "current_interpretation": "No actual project tasks are supplied. Performer attribution is addressed by the separate identity question; no task fit is credited.",
+        "kind": "vendor_experience",
+        "owner": "user",
+        "action": "record_gap",
+        "question": ""
+      },
+      "additional_targets": [
+        {
+          "claim": {
+            "subject": "identity",
+            "statement": "The profile names Example North LLC and the reference names Example Holdings LLC as performer.",
+            "basis": "reported",
+            "refs": [
+              "V1:0"
+            ]
+          },
+          "comparison": {
+            "required_statement": "Operate isotope measurement instruments. Offerors may reference work performed by themselves or an identified teammate; identify the actual performer and proposed workshare.",
+            "refs": [
+              "D1:0"
+            ],
+            "rationale": "The performer is named, but the relationship and actual tasks are not established."
+          },
+          "task_alignment": {
+            "relationship": "not_applicable",
+            "coverage": "not_applicable",
+            "shared_work": "",
+            "transfer_basis": ""
+          },
+          "clarification": {
+            "basis": "attribution",
+            "unresolved": "Which entity performed the reference and what role, if any, did the offeror have?",
+            "refs": [
+              "V1:0",
+              "D1:0"
+            ],
+            "alternatives": [
+              {
+                "answer": "The offeror itself performed the reference",
+                "decision_effect": "Assess its actual reported tasks once described, without inferring instrument work."
+              },
+              {
+                "answer": "Only the separately named entity performed it",
+                "decision_effect": "Do not attribute its work to the offeror without an identified permitted teammate and role."
+              }
+            ]
+          },
+          "relevance": "not_applicable",
+          "ambiguity": "ambiguous",
+          "verification_status": "unverified",
+          "verification_refs": [],
+          "refs": [
+            "D1:0",
+            "V1:0"
+          ],
+          "current_interpretation": "The performer is named, but the relationship and actual tasks are not established.",
+          "kind": "company_identity",
+          "owner": "user",
+          "action": "ask",
+          "question": "Which named entity performed the reference and what was the offeror's role?"
+        }
+      ]
+    }
+  ]
+}

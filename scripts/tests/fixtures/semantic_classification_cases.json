@@ -1,0 +1,146 @@
+{
+  "version": 2,
+  "note": "Synthetic test data only. Expectations and rubric must never enter model input. v26 tightens H02/S08 to forbid questions about absent history/profiles; original v25 snapshots and grades are unchanged. The sealed label identifies the original split, not fresh blind data after prior tuning.",
+  "cases": [
+    {
+      "id": "H01", "split": "known", "family": "analytical_laboratory",
+      "documents": ["Operate a drinking-water chemistry laboratory. Perform validated lead and arsenic assays, maintain chain of custody, and report detection limits. Relevant experience must include the offeror's own analytical laboratory delivery."],
+      "profile": "We provide consumer wedding photography only. We do not operate laboratories or perform chemical assays.",
+      "statuses": ["READY"], "relevance": ["unrelated"], "ambiguity": ["clear"], "verification": ["unverified"], "question_kinds": [], "facts": [],
+      "rubric": "Explicit unrelated experience, no rescue questions, no claimed laboratory performance."
+    },
+    {
+      "id": "H02", "split": "known", "family": "sterilizer_calibration",
+      "documents": ["Perform maintenance and calibration of surgical sterilizers. Relevant experience includes documented temperature and pressure calibration by the performing entity."],
+      "profile": "We service mechanical equipment. Our project descriptions and calibration history have not been supplied.",
+      "statuses": ["READY"], "relevance": ["unknown"], "ambiguity": ["missing", "clear"], "verification": ["unverified", "unknown"], "question_kinds": [], "facts": [],
+      "rubric": "Missing history is unknown, not positive experience or demonstrated inability. No clarification question about the explicitly absent history or a non-existent reference; retain missing proof as a gap. READY is understanding status, not established fit."
+    },
+    {
+      "id": "H03", "split": "known", "family": "cold_chain",
+      "documents": ["Deliver refrigerated specimens in validated cold-chain containers. In this package QA means quality assurance. Retain continuous temperature logs and documented excursion handling. Prior delivery of this exact service is relevant. No contract vehicle is required."],
+      "profile": "Our own employees delivered refrigerated specimens for two years with continuous temperature logs and excursion handling. Dates: January 2023 through December 2024. This is a supplied claim, not independently verified. We prefer either prime or subcontract roles, but no current partner is proposed.",
+      "statuses": ["READY"], "relevance": ["direct"], "ambiguity": ["clear"], "verification": ["unverified"], "question_kinds": [], "facts": [],
+      "rubric": "Qualified directly relevant delivery, no demand for independent verification, invented partner, vehicle or role question."
+    },
+    {
+      "id": "H04", "split": "known", "family": "runway_timing",
+      "documents": ["Issued paving scope: reopen the runway 12 hours after concrete placement. Issued acceptance schedule: keep the same runway closed until 72 hours after concrete placement. Both apply to the same work; no order of precedence is supplied."],
+      "profile": "We perform runway paving using concrete. We can plan either schedule once the official conflict is resolved.",
+      "statuses": ["NEEDS_FORMAL_QA"], "relevance": [], "ambiguity": [], "verification": [], "question_kinds": ["document_conflict"], "facts": ["12|twelve", "72|seventy.two"],
+      "rubric": "Both reopening times retained, official conflict explicitly unresolved. No user preference may settle it."
+    },
+    {
+      "id": "H05", "split": "known", "family": "legal_entity_attribution",
+      "documents": ["Provide veterinary diagnostic laboratory services. Evaluate the actual offeror's prior diagnostic work, not an affiliate's work unless the proposal establishes an authorized performance role."],
+      "profile": "The profile heading names Sample Diagnostics East LLC. The listed project names Sample Diagnostics Holdings LLC as performer. It does not explain whether these are the same legal entity or what the offeror performed.",
+      "statuses": ["NEEDS_CLARIFICATION"], "relevance": ["unknown", "direct"], "ambiguity": ["ambiguous", "conflicting", "missing"], "verification": ["unverified", "unknown"], "question_kinds": ["company_identity", "vendor_role", "vendor_experience"], "facts": [],
+      "rubric": "Ask who performed the referenced work and whether it is attributable to the offeror. Domain overlap is not experience credit until attribution is resolved. Not a government conflict."
+    },
+    {
+      "id": "H06", "split": "known", "family": "survey_amendment",
+      "documents": ["Provide hydrographic surveys. Issued amendment 02 supersedes the original 60-day delivery term: deliver 90 calendar days after notice to proceed. All other terms remain unchanged."],
+      "profile": "We perform hydrographic surveys using multibeam sonar and own the vessels and equipment. Project descriptions show our crew delivered the surveys.",
+      "statuses": ["READY"], "relevance": ["direct"], "ambiguity": ["clear"], "verification": ["unverified"], "question_kinds": [], "facts": ["90|ninety", "calendar", "notice to proceed"],
+      "rubric": "90 calendar days after notice to proceed controls. No invented conflict with superseded 60-day term."
+    },
+    {
+      "id": "H07", "split": "known", "family": "mixed_clin_pricing",
+      "documents": ["Maintain airport passenger information displays. CLIN 1 hardware installation is firm-fixed-price; CLIN 2 on-call software repairs is labor-hour with a ceiling; CLIN 3 replacement parts is time-and-materials. Do not combine these into one pricing basis."],
+      "profile": "Our employees install passenger information displays and provide on-call software repairs. No partners are proposed.",
+      "statuses": ["READY"], "relevance": ["direct", "unknown"], "ambiguity": ["clear", "missing"], "verification": ["unverified", "unknown"], "question_kinds": [], "facts": ["firm.fixed.price|FFP", "labor.hour|\\bLH\\b", "time.and.materials|T&M"],
+      "rubric": "Keep CLIN 1 FFP, CLIN 2 LH with ceiling, CLIN 3 T&M. Do not credit parts experience that was not supplied."
+    },
+    {
+      "id": "H08", "split": "known", "family": "inspection_workshare",
+      "documents": ["Underwater inspection requires diver visual inspection of bridge piers; sonar imaging alone is not equivalent. A listed offeror reference says only 'bridge inspection support' and names no tasks."],
+      "profile": "Our bridge inspection reference says 'bridge inspection support'. The reference does not identify whether our staff dived, supplied boats, or performed sonar work.",
+      "statuses": ["NEEDS_CLARIFICATION"], "relevance": ["unknown"], "ambiguity": ["ambiguous", "missing"], "verification": ["unverified", "unknown"], "question_kinds": ["vendor_role", "vendor_experience"], "facts": [],
+      "rubric": "Ask actual performed tasks. No automatic diving credit, no automatic mismatch, no verification-only question."
+    },
+    {
+      "id": "S01", "split": "sealed", "family": "water_control_acronym", "pair": "water_control",
+      "documents": ["Maintain pump telemetry and alarms at water pumping stations. SCADA means supervisory control and data acquisition. Relevant experience is delivery of pump telemetry integration and control-room alarms, not use of the same acronym."],
+      "profile": "Our SCADA product means social content analysis and digital advertising. Our employees deliver social-media advertising reports only. We have never integrated pump telemetry or control-room alarms.",
+      "statuses": ["READY"], "relevance": ["unrelated"], "ambiguity": ["clear"], "verification": ["unverified"], "question_kinds": [], "facts": [],
+      "rubric": "Use the explicit package definition; advertising is clear poor fit despite SCADA. No acronym question or rescue project request."
+    },
+    {
+      "id": "S02", "split": "sealed", "family": "water_control_acronym", "pair": "water_control",
+      "documents": ["Maintain pump telemetry and alarms at water pumping stations. SCADA means supervisory control and data acquisition. Relevant experience is delivery of pump telemetry integration and control-room alarms, not use of the same acronym."],
+      "profile": "Our employees integrated pump telemetry at water pumping stations and delivered the control-room alarms. Our project statement identifies supervisory control and data acquisition as SCADA. The work is our own delivery, not an affiliate's claim.",
+      "statuses": ["READY"], "relevance": ["direct"], "ambiguity": ["clear"], "verification": ["unverified"], "question_kinds": [], "facts": [],
+      "rubric": "Same requirement as S01 but actual matching work. Qualified direct fit, not independent verification."
+    },
+    {
+      "id": "S03", "split": "sealed", "family": "conveyor_monitoring", "pair": "conveyor",
+      "documents": ["Install conveyor vibration sensors and stream fault alarms to the warehouse console. RTM in this package means real-time monitoring of conveyor machinery. Credit the performing entity's sensor installation and alarm integration."],
+      "profile": "Our RTM experience is authoring requirements traceability matrices for software acceptance. We only write software test documentation. We have not installed machinery sensors or integrated conveyor alarms.",
+      "statuses": ["READY"], "relevance": ["unrelated"], "ambiguity": ["clear"], "verification": ["unverified"], "question_kinds": [], "facts": [],
+      "rubric": "No shared-acronym fit credit and no question about an acronym already defined in both sources."
+    },
+    {
+      "id": "S04", "split": "sealed", "family": "conveyor_monitoring", "pair": "conveyor",
+      "documents": ["Install conveyor vibration sensors and stream fault alarms to the warehouse console. RTM in this package means real-time monitoring of conveyor machinery. Credit the performing entity's sensor installation and alarm integration."],
+      "profile": "We supported a prime on a warehouse RTM project. The reference does not distinguish whether our employees installed sensors and alarms, authored software test documentation, or only arranged site access.",
+      "statuses": ["NEEDS_CLARIFICATION"], "relevance": ["unknown"], "ambiguity": ["ambiguous", "missing"], "verification": ["unverified", "unknown"], "question_kinds": ["vendor_role", "vendor_experience"], "facts": [],
+      "rubric": "Ask actual workshare on this reference, not the expansion of RTM and not for replacement qualifications."
+    },
+    {
+      "id": "S05", "split": "sealed", "family": "paper_conservation", "pair": "restoration",
+      "documents": ["Conserve flood-damaged paper maps: freeze-dry wet sheets, deacidify paper fibers, mend tears using conservation tissue, and document condition. Relevant delivery must involve physical paper conservation."],
+      "profile": "We restore cloud database backups after outages. Our restoration work is exclusively digital data recovery. We have no physical paper-conservation delivery.",
+      "statuses": ["READY"], "relevance": ["unrelated"], "ambiguity": ["clear"], "verification": ["unverified"], "question_kinds": [], "facts": [],
+      "rubric": "Restoration wording does not make data backup recovery relevant to conservation of physical sheets."
+    },
+    {
+      "id": "S06", "split": "sealed", "family": "paper_conservation", "pair": "restoration",
+      "documents": ["Conserve flood-damaged paper maps: freeze-dry wet sheets, deacidify paper fibers, mend tears using conservation tissue, and document condition. Relevant delivery must involve physical paper conservation."],
+      "profile": "Our conservators freeze-dried flood-damaged paper maps, deacidified paper fibers, mended tears with conservation tissue, and recorded sheet condition. Our own employees performed all four tasks.",
+      "statuses": ["READY"], "relevance": ["direct"], "ambiguity": ["clear"], "verification": ["unverified"], "question_kinds": [], "facts": [],
+      "rubric": "Matching physical conservation delivery; keep it reported rather than independently verified."
+    },
+    {
+      "id": "S07", "split": "sealed", "family": "sign_interpretation", "pair": "interpretation",
+      "documents": ["Provide live American Sign Language interpretation at scheduled public meetings. ASL means American Sign Language. Relevant past performance is the offeror's own delivery of live sign-language interpretation."],
+      "profile": "Our ASL project means automated supply logistics. We build inventory software only and have never delivered sign-language interpretation.",
+      "statuses": ["READY"], "relevance": ["unrelated"], "ambiguity": ["clear"], "verification": ["unverified"], "question_kinds": [], "facts": [],
+      "rubric": "Unrelated industry and different explicit acronym meaning; no unnecessary clarification."
+    },
+    {
+      "id": "S08", "split": "sealed", "family": "sign_interpretation", "pair": "interpretation",
+      "documents": ["Provide live American Sign Language interpretation at scheduled public meetings. ASL means American Sign Language. Relevant past performance is the offeror's own delivery of live sign-language interpretation."],
+      "profile": "",
+      "statuses": ["READY"], "relevance": ["unknown"], "ambiguity": ["missing"], "verification": ["unknown"], "question_kinds": [], "facts": [],
+      "rubric": "No profile supplied. Unknown fit, not an unrelated vendor. No clarification question about the absent profile or the clearly defined requirement; no invented company or credentials. READY does not establish vendor fit."
+    },
+    {
+      "id": "S09", "split": "sealed", "family": "certificate_scope", "pair": "certification",
+      "documents": ["Provide pressure-vessel inspection. The legal entity performing inspections must hold the current inspection authorization for pressure vessels. A parent's authorization does not cover a subsidiary automatically."],
+      "profile": "Our employees have delivered pressure-vessel inspections. The group brochure says the parent is authorized; it does not identify whether our performing subsidiary is covered. The certificate holder and covered legal entities are not supplied.",
+      "statuses": ["NEEDS_CLARIFICATION"], "relevance": ["direct", "unknown"], "ambiguity": ["clear", "ambiguous", "missing"], "verification": ["unverified", "unknown"], "question_kinds": ["vendor_eligibility", "company_identity"], "facts": [],
+      "rubric": "Separate relevant claimed work from unresolved performing-entity authorization. Ask holder/scope, not whether the user prefers eligibility."
+    },
+    {
+      "id": "S10", "split": "sealed", "family": "certificate_scope", "pair": "certification",
+      "documents": ["Provide pressure-vessel inspection. The legal entity performing inspections must hold the current inspection authorization for pressure vessels. A parent's authorization does not cover a subsidiary automatically."],
+      "profile": "Our employees have delivered pressure-vessel inspections. We state explicitly that the same legal entity submitting this profile performs the inspections and holds the current pressure-vessel inspection authorization in its own name. This is our assertion, not an independently checked certificate.",
+      "statuses": ["READY"], "relevance": ["direct"], "ambiguity": ["clear"], "verification": ["unverified"], "question_kinds": [], "facts": [],
+      "rubric": "Clear claimed entity coverage remains unverified; do not turn certificate verification into a meaning question."
+    },
+    {
+      "id": "S11", "split": "sealed", "family": "priced_hours_conflict", "pair": "hours",
+      "documents": ["Provide on-call elevator repair. The issued pricing schedule caps reimbursable on-call repair work at 500 labor hours in the base year. Issued Q&A states that the cap for that same base-year work is 800 labor hours. Neither document supersedes the other and no precedence rule is supplied."],
+      "profile": "Our own mechanics delivered on-call elevator repair. We can price either cap once the government confirms the controlling requirement.",
+      "statuses": ["NEEDS_FORMAL_QA"], "relevance": [], "ambiguity": [], "verification": [], "question_kinds": ["document_conflict"], "facts": ["500|five hundred", "800|eight hundred", "base.year"],
+      "rubric": "Preserve both hourly caps and common period. Official resolution required; do not let vendor price preference resolve the conflict."
+    },
+    {
+      "id": "S12", "split": "sealed", "family": "priced_hours_conflict", "pair": "hours",
+      "documents": ["Provide on-call elevator repair. Original Q&A stated a base-year on-call repair cap of 800 labor hours. Issued amendment 03 explicitly supersedes that Q&A cap and sets the base-year reimbursable limit to 500 labor hours. All other terms remain unchanged."],
+      "profile": "Our own mechanics delivered on-call elevator repair. We understand the amendment controls the original hourly limit.",
+      "statuses": ["READY"], "relevance": ["direct"], "ambiguity": ["clear"], "verification": ["unverified"], "question_kinds": [], "facts": ["500|five hundred", "base.year"],
+      "rubric": "Apply amendment precedence: 500 labor hours is controlling. No false unresolved conflict with 800 hours."
+    }
+  ]
+}
